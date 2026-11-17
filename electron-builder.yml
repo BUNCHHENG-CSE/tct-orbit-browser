@@ -139,6 +139,8 @@ deb:
 
 rpm:
   artifactName: tct-orbit-${version}.${ext}
+  fpm:
+    - --iteration=1
 
 pacman:
   artifactName: tct-orbit-${version}.${ext}

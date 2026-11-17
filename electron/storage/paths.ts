@@ -11,7 +11,6 @@ export interface AppPaths {
   userDataDir: string
   userProfileDir: string
   stateFilePath: string
-  orbitDbPath: string
   logsDir: string
 }
 
@@ -51,7 +50,6 @@ export function initAppPaths(): AppPaths {
   const userDataDir = app.getPath('userData')
   const userProfileDir = path.join(userDataDir, 'User Data', 'Default')
   const stateFilePath = path.join(userProfileDir, 'state.json')
-  const orbitDbPath = path.join(userProfileDir, 'orbit.db')
   const logsDir = path.join(userDataDir, 'Logs')
 
   // 3. Configure Logs directory
@@ -64,19 +62,11 @@ export function initAppPaths(): AppPaths {
     console.warn('[Paths] Failed to set app logs path:', err)
   }
 
-  // 4. Set process.env.DATABASE_URL dynamically for file-based Prisma SQLite database
-  // If not explicitly defined or points to a SQLite file, point directly to this channel's orbit.db
-  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.startsWith('file:')) {
-    const normalizedDbPath = orbitDbPath.replace(/\\/g, '/')
-    process.env.DATABASE_URL = `file:${normalizedDbPath}`
-  }
-
   cachedPaths = {
     channelMeta,
     userDataDir,
     userProfileDir,
     stateFilePath,
-    orbitDbPath,
     logsDir
   }
 
@@ -100,7 +90,7 @@ export function getAppPaths(): AppPaths {
  */
 export function runStartupMigration(): void {
   const paths = getAppPaths()
-  const { userProfileDir, stateFilePath, orbitDbPath, userDataDir } = paths
+  const { userProfileDir, stateFilePath, userDataDir } = paths
 
   try {
     // Ensure User Data/Default directory exists
@@ -130,33 +120,6 @@ export function runStartupMigration(): void {
           console.log(`[Migration] Migrating legacy data from "${legacyPath}" -> "${stateFilePath}"...`)
           fs.copyFileSync(legacyPath, stateFilePath)
           console.log(`[Migration] State file migration complete. Preserved backup at "${legacyPath}".`)
-          break
-        }
-      }
-    }
-
-    // 2. Prisma SQLite DB migration (if orbit.db doesn't exist yet)
-    if (!fs.existsSync(orbitDbPath)) {
-      let appDataDir = ''
-      try {
-        appDataDir = app.getPath('appData')
-      } catch {
-        appDataDir = path.dirname(userDataDir)
-      }
-
-      const legacyDir = path.join(appDataDir, 'TCT Orbit Browser')
-      const legacyDbCandidates = [
-        path.join(legacyDir, 'orbit.db'),
-        path.join(legacyDir, 'dev.db'),
-        path.join(userDataDir, 'orbit.db'),
-        path.join(userDataDir, 'dev.db')
-      ]
-
-      for (const legacyDb of legacyDbCandidates) {
-        if (fs.existsSync(legacyDb)) {
-          console.log(`[Migration] Migrating legacy SQLite database from "${legacyDb}" -> "${orbitDbPath}"...`)
-          fs.copyFileSync(legacyDb, orbitDbPath)
-          console.log(`[Migration] Database migration complete. Preserved backup at "${legacyDb}".`)
           break
         }
       }
