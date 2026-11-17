@@ -365,12 +365,24 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const [canGoForward, setCanGoForward] = useState(false)
 
   // Whenever the theme changes (e.g. user toggles dark/light in Settings), synchronize all open webviews live
+  // For sites like YouTube that use cookies and need a reload, we also trigger a reload after a short delay
+  const prevIsDarkRef = useRef(isDark)
   useEffect(() => {
     const script = getThemeSyncScript(isDark)
+    const themeChanged = prevIsDarkRef.current !== isDark
+    prevIsDarkRef.current = isDark
+
     webviewsRef.current.forEach((el) => {
       try {
         if (el && typeof el.executeJavaScript === 'function') {
           el.executeJavaScript(script).catch(() => {})
+        }
+        // Reload webviews when theme actually changes so cookie-based sites (YouTube, Google, etc.)
+        // pick up the new theme correctly on the next full page render
+        if (themeChanged && typeof el.reload === 'function') {
+          setTimeout(() => {
+            try { el.reload() } catch {}
+          }, 400)
         }
       } catch {
         // ignore

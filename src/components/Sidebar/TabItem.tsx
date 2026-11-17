@@ -65,7 +65,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       onAuxClick={handleAuxClick}
       className={`group relative w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer transition-colors duration-150 select-none ${
         isActive
-          ? 'bg-tab-active text-foreground shadow-xs'
+          ? 'bg-tab-active text-foreground shadow-sm'
           : 'text-muted-foreground hover:bg-tab-hover hover:text-foreground border border-transparent hover:border-border/50'
       }`}
       style={
@@ -110,7 +110,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       onAuxClick={handleAuxClick}
       className={`group relative flex items-center gap-2 pl-3.5 pr-2 py-1.5 h-9 rounded-xl text-xs font-medium cursor-pointer transition-colors duration-150 select-none w-full max-w-full min-w-0 ${
         isActive
-          ? 'bg-tab-active text-foreground shadow-xs'
+          ? 'bg-tab-active text-foreground shadow-sm'
           : 'text-muted-foreground hover:bg-tab-hover hover:text-foreground border border-transparent'
       }`}
       style={
