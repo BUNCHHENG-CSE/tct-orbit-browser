@@ -10,6 +10,10 @@
   },
   "main": "./out/main/index.js",
   "author": "TCT Orbit Team <support@tctorbit.com>",
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
