@@ -14,6 +14,10 @@ interface BrowserState {
   recentlyClosedTabs: { tab: Tab; spaceId: string }[]
   canGoBack: boolean
   canGoForward: boolean
+  devtoolsOpen: boolean
+  devtoolsDetached: boolean
+  devtoolsWidth: number
+  qrModal: { isOpen: boolean; url: string; title: string }
 
   // Store actions
   setAppInfo: (appInfo: AppInfo) => void
@@ -26,9 +30,14 @@ interface BrowserState {
   pushRecentlyClosedTab: (tab: Tab, spaceId: string) => void
   popRecentlyClosedTab: () => { tab: Tab; spaceId: string } | undefined
   setNavState: (canGoBack: boolean, canGoForward: boolean) => void
+  setDevToolsOpen: (open: boolean) => void
+  setDevToolsDetached: (detached: boolean) => void
+  setDevToolsWidth: (width: number) => void
+  setQrModal: (modal: { isOpen: boolean; url: string; title: string }) => void
 
   // Tab mutations in store
-  addTabToStore: (spaceId: string, tab: Tab) => void
+  addTabToStore: (spaceId: string, tab: Tab, referenceTabId?: string | null, makeActive?: boolean) => void
+  insertTabNextTo: (spaceId: string, tab: Tab, referenceTabId?: string | null, makeActive?: boolean) => void
   updateTabInStore: (id: string, updates: Partial<Tab>) => void
   removeTabFromStore: (id: string) => void
 
@@ -54,8 +63,16 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   recentlyClosedTabs: [],
   canGoBack: false,
   canGoForward: false,
+  devtoolsOpen: false,
+  devtoolsDetached: false,
+  devtoolsWidth: 440,
+  qrModal: { isOpen: false, url: '', title: '' },
 
   setNavState: (canGoBack, canGoForward) => set({ canGoBack, canGoForward }),
+  setDevToolsOpen: (open) => set({ devtoolsOpen: open }),
+  setDevToolsDetached: (detached) => set({ devtoolsDetached: detached }),
+  setDevToolsWidth: (width) => set({ devtoolsWidth: width }),
+  setQrModal: (qrModal) => set({ qrModal }),
 
   setSpaces: (spaces) => {
     // If no activeSpaceId yet or not in list, find active one or first one
@@ -141,15 +158,50 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     return first
   },
 
-  addTabToStore: (spaceId, tab) => {
+  addTabToStore: (spaceId, tab, referenceTabId = null, makeActive = true) => {
     set((state) => {
-      const currentTabs = state.tabsBySpace[spaceId] || []
+      const currentTabs = [...(state.tabsBySpace[spaceId] || [])]
+      const refId = referenceTabId || state.activeTabId
+      const refIndex = refId ? currentTabs.findIndex((t) => t.id === refId) : -1
+
+      if (refIndex !== -1) {
+        currentTabs.splice(refIndex + 1, 0, tab)
+      } else {
+        currentTabs.push(tab)
+      }
+
+      const reordered = currentTabs.map((t, idx) => ({ ...t, order: idx }))
+
       return {
         tabsBySpace: {
           ...state.tabsBySpace,
-          [spaceId]: [...currentTabs, tab]
+          [spaceId]: reordered
         },
-        activeTabId: tab.id
+        activeTabId: makeActive ? tab.id : state.activeTabId
+      }
+    })
+  },
+
+  insertTabNextTo: (spaceId, tab, referenceTabId = null, makeActive = true) => {
+    set((state) => {
+      const currentTabs = [...(state.tabsBySpace[spaceId] || [])]
+      const refId = referenceTabId || state.activeTabId
+      const refIndex = refId ? currentTabs.findIndex((t) => t.id === refId) : -1
+
+      if (refIndex !== -1) {
+        currentTabs.splice(refIndex + 1, 0, tab)
+      } else {
+        currentTabs.push(tab)
+      }
+
+      const reordered = currentTabs.map((t, idx) => ({ ...t, order: idx }))
+
+      return {
+        tabsBySpace: {
+          ...state.tabsBySpace,
+          [spaceId]: reordered
+        },
+        activeTabId: makeActive ? tab.id : state.activeTabId
       }
     })
   },

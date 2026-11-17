@@ -3,6 +3,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
+import { getBrowserLogoPath } from '../resources'
 
 export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -13,18 +14,14 @@ export function createMainWindow(): BrowserWindow {
     ? join(__dirname, '../preload/index.js')
     : join(__dirname, '../preload/preload.js')
 
-  const baseDir = app.isPackaged ? process.resourcesPath : process.cwd()
-  const iconPath = process.platform === 'win32'
-    ? join(baseDir, 'build/icon.ico')
-    : join(baseDir, 'resources/icon.png')
-
-  const resolvedIcon = existsSync(iconPath)
-    ? iconPath
-    : (existsSync(join(process.cwd(), 'build/icon.ico')) ? join(process.cwd(), 'build/icon.ico') : undefined)
+  const browserLogoPath = getBrowserLogoPath()
+  const winIcon = process.platform === 'win32' && existsSync(join(process.cwd(), 'build/icon.ico'))
+    ? join(process.cwd(), 'build/icon.ico')
+    : browserLogoPath
 
   const mainWindow = new BrowserWindow({
     title: paths.channelMeta.displayName,
-    icon: resolvedIcon,
+    icon: winIcon || browserLogoPath,
     width: 1280,
     height: 850,
     minWidth: 480,
@@ -74,6 +71,21 @@ export function createMainWindow(): BrowserWindow {
     }
     return { action: 'deny' }
   })
+
+  // In development mode, provide Inspect UI Element context menu for browser chrome
+  if (!app.isPackaged) {
+    mainWindow.webContents.on('context-menu', (_event, params) => {
+      const { Menu, MenuItem } = require('electron')
+      const menu = new Menu()
+      menu.append(
+        new MenuItem({
+          label: 'Inspect UI Element',
+          click: () => mainWindow.webContents.inspectElement(params.x, params.y)
+        })
+      )
+      menu.popup()
+    })
+  }
 
   // Load renderer via dev server URL (with HMR) or production HTML
   if (process.env['ELECTRON_RENDERER_URL']) {

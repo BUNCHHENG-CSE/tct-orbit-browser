@@ -33,6 +33,24 @@ export const api = {
   get navigation() {
     return getApi().navigation
   },
+  get devtools() {
+    return getApi().devtools
+  },
+  get webview() {
+    return getApi().webview
+  },
+  get contextMenu() {
+    return getApi().contextMenu
+  },
+  get privacy() {
+    return getApi().privacy
+  },
+  onOpenUrl(callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) {
+    if (typeof window !== 'undefined' && window.api?.onOpenUrl) {
+      return window.api.onOpenUrl(callback)
+    }
+    return () => {}
+  },
   onExternalUrl(callback: (url: string) => void) {
     if (typeof window !== 'undefined' && window.api?.onExternalUrl) {
       return window.api.onExternalUrl(callback)

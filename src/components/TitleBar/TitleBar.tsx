@@ -28,6 +28,7 @@ import {
 } from '@/lib/searchEngines'
 import { resolveIsDark } from '@/lib/theme'
 import browserLogo from '@/assets/logo-sm.png'
+import { SiteShieldPopover } from './SiteShieldPopover'
 
 interface TitleBarProps {
   spaceName?: string
@@ -328,6 +329,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               <X className="w-3 h-3" />
             </button>
           )}
+
+          {/* Per-site Privacy & Adblock Shield Control */}
+          {!isFocused && <SiteShieldPopover url={activeTab?.url} />}
 
           {/* Search Engine Badge when showing search query */}
           {!isFocused && urlInfo.isSearch && urlInfo.searchEngineName && (

@@ -14,7 +14,17 @@ import type { Tab } from '@/types/api'
 
 export const Sidebar: React.FC = () => {
   const { spaces, activeSpace, activeSpaceId } = useSpaces()
-  const { tabs, activeTabId, setActiveTab, removeTab, updateTab, createTab } = useTabs(activeSpaceId)
+  const {
+    tabs,
+    activeTabId,
+    setActiveTab,
+    removeTab,
+    updateTab,
+    createTab,
+    closeOtherTabs,
+    closeTabsToRight,
+    createTabNextTo
+  } = useTabs(activeSpaceId)
   const { settings, setSidebarCollapsed } = useSettings()
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
 
@@ -88,6 +98,10 @@ export const Sidebar: React.FC = () => {
           onCloseTab={removeTab}
           onTogglePin={handleTogglePin}
           onDuplicateTab={handleDuplicateTab}
+          onNewTabToRight={(id) => createTabNextTo(id)}
+          onReloadTab={() => window.dispatchEvent(new CustomEvent('tct:webview-reload'))}
+          onCloseOthers={closeOtherTabs}
+          onCloseToRight={closeTabsToRight}
         />
 
         {/* Bottom Actions: New Tab + Settings Gear */}

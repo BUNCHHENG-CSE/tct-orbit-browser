@@ -8,7 +8,8 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve('src'),
-        '@shared': resolve('shared')
+        '@shared': resolve('shared'),
+        '@resources': resolve('resources')
       }
     },
     build: {
@@ -24,7 +25,8 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve('src'),
-        '@shared': resolve('shared')
+        '@shared': resolve('shared'),
+        '@resources': resolve('resources')
       }
     },
     build: {
@@ -47,7 +49,8 @@ export default defineConfig({
     resolve: {
       alias: {
         '@': resolve('src'),
-        '@shared': resolve('shared')
+        '@shared': resolve('shared'),
+        '@resources': resolve('resources')
       }
     },
     plugins: [react()]

@@ -1,14 +1,17 @@
 # TCT Orbit (`v0.1.0`)
 
-A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, Tailwind CSS, Prisma, and 100% private local machine storage.
+A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, Prisma, and 100% private local machine storage.
 
 ---
 
 ## Key Features
 
-- **Vertical Spaces & Sidebar**: Collapsible vertical sidebar dock with custom workspaces (Spaces) including Personal, Work, and Research with custom icons and colors.
+- **Edge-Style Context-Aware Menu**: Theme-aware right-click menu with context detection for Blank Pages, Hyperlinks, Media, Editable Fields, and Selected Text, featuring QR code generation, screenshot capture, and Developer Tools integration.
+- **Docked Right-Side DevTools (`Inspect`)**: Docked DevTools powered by Chromium's `WebContentsView` with real-time DOM element inspection, interactive splitter handle, tab-switch sync, and detach-to-window capability.
+- **Unified Theme Engine**: Zero-flash startup with pre-rendered blocking script, system sync, light/dark modes, 6 accent color presets (`Orbit Blue`, `Nebula Violet`, `Emerald`, `Amber`, `Rose`, `Monochrome`), and native website color scheme pass-through without CSS inversion filters.
+- **Smart Link Navigation & Automatic Tab Opening**: Intercepts `target="_blank"` and `window.open()` to immediately open and activate new tabs next to the active tab, while middle-click or `Ctrl/Cmd+Click` opens background tabs smoothly without losing focus.
 - **Spotlight Command Bar**: Instant omnibox (`Cmd/Ctrl+T` or `Cmd/Ctrl+L`) with real-time address detection, search engine switching (DuckDuckGo, Google, Bing), and tab switching.
-- **Persistent WebViews**: Independent Chromium webviews for each tab preserving DOM state, form data, scroll positions, and audio playback across spaces.
+- **Vertical Spaces & Sidebar**: Collapsible vertical sidebar dock with custom workspaces (Spaces) including Personal, Work, and Research with custom icons and colors.
 - **100% Private Local Storage**: All browsing history, tabs, spaces, and preferences are stored exclusively on your machine with zero cloud telemetry.
 - **Chromium Native User-Agent**: Sanitized User-Agent string removing Electron signatures for seamless Google Auth and Cloudflare verification.
 - **Multi-Channel Release Isolation**: Run Stable, Nova, Deep, and Canary releases side-by-side with separate `userData` folders and isolated database instances.
@@ -64,55 +67,39 @@ tct-orbit/
 To ensure seamless compatibility with Google Authentication, Cloudflare Turnstile, and modern web applications, TCT Orbit configures `app.userAgentFallback` and all `BrowserWindow` / `<webview>` instances to strip out `Electron/<version>` and raw application tokens:
 
 ```
-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.137 Safari/537.36 TCTOrbit/0.1.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 TCTOrbit/0.1.0
 ```
 
 ---
 
-## Project Structure
+## Edge-Style Context Menu & Inspect DevTools
 
-```
-electron-app/
-├── electron/
-│   ├── main.ts                    # Main process entry, switches, protocols & User-Agent
-│   ├── preload.ts                 # Preload bridge exposing window.api and app metadata
-│   ├── storage/
-│   │   ├── paths.ts               # Centralized path helper, migration & DB URL configuration
-│   │   └── localStorage.ts        # Atomic JSON storage service for spaces, tabs & settings
-│   ├── windows/
-│   │   └── mainWindow.ts          # BrowserWindow setup with dynamic channel titles
-│   └── ipc/
-│       ├── index.ts               # IPC handler aggregation & app metadata
-│       ├── tabs.ts                # Tab management handlers
-│       ├── spaces.ts              # Space management handlers
-│       └── settings.ts            # Settings & webview theme synchronizer
-├── shared/
-│   └── brand.ts                   # Centralized brand constants, domains & channel definitions
-├── src/
-│   ├── main.tsx                   # React root entry point
-│   ├── App.tsx                    # Main browser layout, title sync & global shortcuts
-│   ├── constants/
-│   │   └── brand.ts               # Re-exported brand constants for renderer
-│   ├── components/
-│   │   ├── TitleBar/              # Frameless title bar with Omnibox & channel badge
-│   │   ├── Sidebar/               # Collapsible sidebar with Spaces dock
-│   │   ├── CommandBar/            # Spotlight search & engine switcher
-│   │   ├── WebView/               # Multi-tab webview manager
-│   │   └── SettingsModal/         # Dynamic settings & About modal with version info
-│   ├── hooks/                     # Custom React hooks (useTabs, useSpaces, useSettings)
-│   ├── store/                     # Zustand global client store (useBrowserStore)
-│   └── types/
-│       └── api.d.ts               # ElectronAPI, AppInfo, and domain type declarations
-├── prisma/
-│   ├── schema.prisma              # Database schema
-│   ├── migrations/                # Database migrations
-│   └── seed.ts                    # Default seeding script
-├── electron-builder.yml           # electron-builder packaging configuration
-├── dev-app-update.yml             # Electron auto-updater development configuration
-├── electron.vite.config.ts        # electron-vite configuration with @ and @shared aliases
-├── package.json                   # Scripts, dependencies, and v0.1.0 metadata
-└── README.md                      # Project documentation
-```
+Right-clicking inside any webpage or tab triggers a context-aware menu:
+- **Blank Page**: Back, Forward, Refresh, Save as..., Print..., Create QR Code, Screenshot, More tools (DevTools, Hard reload, Copy URL, External browser, Bookmark), View page source, Inspect.
+- **Link**: Open in new tab (next to current tab), Open in new window, Copy link address, Save link as..., Create QR Code for link, Inspect.
+- **Image**: Open image in new tab, Save image as..., Copy image, Copy image address, Inspect.
+- **Selection**: Copy, Search web for query in new tab, Print..., Inspect.
+- **Editable Input**: Spellcheck replacements, Undo, Redo, Cut, Copy, Paste, Paste as plain text, Select all, Inspect.
+- **Inspect Element**: Directly opens the docked right-side DevTools `WebContentsView` (or detached window) and highlights the exact clicked DOM node via `inspectElement(x, y)`.
+
+---
+
+## Keyboard Shortcuts
+
+| Shortcut | Description |
+|---|---|
+| `Cmd/Ctrl + T` | Open new tab & spotlight command bar |
+| `Cmd/Ctrl + W` | Close active tab |
+| `Cmd/Ctrl + Shift + T` | Reopen last closed tab |
+| `Cmd/Ctrl + L` | Focus address bar / Omnibox |
+| `Cmd/Ctrl + S` | Toggle sidebar rail |
+| `Cmd/Ctrl + R` | Reload active tab |
+| `Cmd/Ctrl + Shift + R` | Hard reload & clear cache |
+| `Cmd/Ctrl + Shift + S` | Capture page screenshot to clipboard |
+| `F12` or `Cmd/Ctrl + Shift + I` | Toggle docked Developer Tools |
+| `Cmd/Ctrl + U` | View page source |
+| `Cmd/Ctrl + ,` | Open browser settings |
+| `Cmd/Ctrl + 1..9` | Switch directly to tab N |
 
 ---
 

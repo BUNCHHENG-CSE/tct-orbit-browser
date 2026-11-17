@@ -19,11 +19,17 @@ import type { ThemeMode, AccentPreset, WebColorScheme } from '@/types/api'
 import { SEARCH_ENGINES, type SearchEngineId } from '@/lib/searchEngines'
 import { modKey, getPlatformDescription } from '@/lib/platform'
 import browserLogo from '@/assets/logo.png'
+import { usePrivacyShield } from '@/hooks/usePrivacyShield'
 import {
   Palette,
   Search,
   Layers,
   Shield,
+  ShieldCheck,
+  ShieldAlert,
+  ShieldX,
+  EyeOff,
+  Lock,
   Zap,
   Keyboard,
   Info,
@@ -153,6 +159,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
   const [tabSleeping, setTabSleeping] = useState(() => getLocalPref('tab_sleeping', true))
   const [gpuAcceleration, setGpuAcceleration] = useState(() => getLocalPref('gpu_accel', true))
   const [videoOptimization, setVideoOptimization] = useState(() => getLocalPref('video_opt', true))
+  const [smoothScrolling, setSmoothScrolling] = useState(() => getLocalPref('smooth_scrolling', true))
 
   // Interaction feedback states
   const [isClearingCache, setIsClearingCache] = useState(false)
@@ -191,12 +198,23 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     toast.success(`Default search engine set to ${SEARCH_ENGINES[engineId]?.name}`)
   }
 
+  const {
+    prefs: privacyPrefs,
+    masterStatus: privacyMasterStatus,
+    stats: privacyStats,
+    isClearing: isClearingPrivacyData,
+    togglePref: togglePrivacyPref,
+    setDohProvider,
+    clearBrowsingData: clearPrivacyBrowsingData
+  } = usePrivacyShield()
+
   const handleClearCache = async () => {
-    setIsClearingCache(true)
-    setTimeout(() => {
-      setIsClearingCache(false)
-      toast.success('Browsing cache and temporary data cleared!')
-    }, 700)
+    const success = await clearPrivacyBrowsingData()
+    if (success) {
+      toast.success('Browsing cache and temporary site data cleared!')
+    } else {
+      toast.error('Failed to clear browsing data')
+    }
   }
 
   const handleCheckUpdates = async () => {
@@ -223,6 +241,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setLocalPref('adblock_enabled', true)
     setTabSleeping(true)
     setLocalPref('tab_sleeping', true)
+    setSmoothScrolling(true)
+    setLocalPref('smooth_scrolling', true)
     toast.success('All settings reset to defaults')
   }
 
@@ -263,7 +283,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
         {/* Modal Body: Left Navigation + Right Content */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Left Navigation Rail */}
-          <nav className="w-36 sm:w-48 border-r border-border p-2 space-y-0.5 bg-muted/20 shrink-0 overflow-y-auto">
+          <nav className="w-36 sm:w-48 border-r border-border p-2 space-y-0.5 bg-muted/20 shrink-0 overflow-y-auto" data-lenis-prevent>
             {navItems.map((item) => {
               const IconComp = item.icon
               const isSelected = activeTab === item.id
@@ -285,7 +305,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
           </nav>
 
           {/* Right Scrollable Content Panel */}
-          <div className="flex-1 p-5 overflow-y-auto space-y-6">
+          <div className="flex-1 p-5 overflow-y-auto space-y-6" data-lenis-prevent>
             {/* 1. APPEARANCE TAB */}
             {activeTab === 'appearance' && (
               <div className="space-y-6">
@@ -737,103 +757,286 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
               </div>
             )}
 
-            {/* 4. PRIVACY & SHIELD TAB */}
+            {/* 4. PRIVACY & SHIELD TAB (Mullvad Standard) */}
             {activeTab === 'privacy' && (
-              <div className="space-y-5">
-                <div className="p-3.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between">
+              <div className="space-y-4">
+                {/* Master Status Banner */}
+                <div
+                  className={`p-3.5 rounded-xl border flex items-center justify-between transition-colors ${
+                    privacyMasterStatus === 'ACTIVE'
+                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-600 dark:text-emerald-400'
+                      : privacyMasterStatus === 'PARTIALLY_ACTIVE'
+                      ? 'bg-amber-500/10 border-amber-500/25 text-amber-600 dark:text-amber-400'
+                      : 'bg-destructive/10 border-destructive/25 text-destructive'
+                  }`}
+                >
                   <div className="flex items-center gap-3">
-                    <Shield className="w-5 h-5 text-primary shrink-0" />
+                    {privacyMasterStatus === 'ACTIVE' ? (
+                      <ShieldCheck className="w-5 h-5 text-emerald-500 shrink-0" />
+                    ) : privacyMasterStatus === 'PARTIALLY_ACTIVE' ? (
+                      <ShieldAlert className="w-5 h-5 text-amber-500 shrink-0" />
+                    ) : (
+                      <ShieldX className="w-5 h-5 text-destructive shrink-0" />
+                    )}
                     <div>
                       <p className="text-xs font-bold text-foreground">
                         TCT Orbit Shield Protection
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        Blocks trackers, fingerprinting scripts, and third-party advertising
+                        {privacyMasterStatus === 'ACTIVE'
+                          ? 'Mullvad-hardened ad blocking, tracker interception, fingerprint resistance & DoH'
+                          : privacyMasterStatus === 'PARTIALLY_ACTIVE'
+                          ? 'Shield is partially active; enable all layers for maximum privacy'
+                          : 'Shield is turned off. Visited sites can track and display ads'}
                       </p>
                     </div>
                   </div>
-                  <Badge variant="default" className="text-[11.5px] px-2 py-0.5 font-bold">
-                    ACTIVE
+                  <Badge
+                    variant={privacyMasterStatus === 'ACTIVE' ? 'default' : 'secondary'}
+                    className={`text-[11px] px-2 py-0.5 font-bold uppercase tracking-wide shrink-0 ${
+                      privacyMasterStatus === 'ACTIVE'
+                        ? 'bg-emerald-600 text-white'
+                        : privacyMasterStatus === 'PARTIALLY_ACTIVE'
+                        ? 'bg-amber-500 text-black font-extrabold'
+                        : 'bg-destructive text-destructive-foreground'
+                    }`}
+                  >
+                    {privacyMasterStatus === 'ACTIVE'
+                      ? 'ACTIVE'
+                      : privacyMasterStatus === 'PARTIALLY_ACTIVE'
+                      ? 'PARTIALLY ACTIVE'
+                      : 'OFF'}
                   </Badge>
                 </div>
 
-                <div className="space-y-3.5">
+                {/* Real-time Blocked Metrics */}
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                    <span className="block text-base font-bold text-foreground font-mono">
+                      {privacyStats.adsBlockedTotal}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground uppercase font-medium">Ads Blocked</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                    <span className="block text-base font-bold text-foreground font-mono">
+                      {privacyStats.trackersBlockedTotal}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground uppercase font-medium">Trackers Stopped</span>
+                  </div>
+                  <div className="p-2 rounded-lg bg-muted/40 border border-border">
+                    <span className="block text-base font-bold text-foreground font-mono">
+                      {privacyStats.httpsUpgradesTotal}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground uppercase font-medium">HTTPS Upgrades</span>
+                  </div>
+                </div>
+
+                {/* Privacy & Shield Feature Toggles */}
+                <div className="space-y-3 pt-1">
+                  {/* 1. Ad & Tracker Blocker */}
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="pr-2">
                       <p className="text-xs font-semibold text-foreground">
-                        Ad & Tracker Blocking
+                        Ad & Content Blocker (EasyList, EasyPrivacy, AdGuard)
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        Block cross-site tracking cookies and intrusive banners
+                        Blocks YouTube video ads, sponsored banners, popups, and intrusive ad slots
                       </p>
                     </div>
                     <Switch
-                      checked={adBlockEnabled}
-                      onCheckedChange={(val) => {
-                        setAdBlockEnabled(val)
-                        setLocalPref('adblock_enabled', val)
-                        toast.success(`Tracker blocking ${val ? 'enabled' : 'disabled'}`)
-                      }}
+                      checked={privacyPrefs.adBlockerEnabled}
+                      onCheckedChange={() => togglePrivacyPref('adBlockerEnabled')}
                     />
                   </div>
 
+                  {/* 2. Strict Tracking & Bounce Interception */}
                   <div className="flex items-center justify-between">
-                    <div>
+                    <div className="pr-2">
                       <p className="text-xs font-semibold text-foreground">
-                        Send &quot;Do Not Track&quot; (DNT) Header
+                        Strict Tracker & Bounce Protection
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        Instruct visited websites not to track browsing activity
+                        Intercepts tracking beacons, analytics telemetry, and intermediate redirect hops
                       </p>
                     </div>
                     <Switch
-                      checked={dntEnabled}
-                      onCheckedChange={(val) => {
-                        setDntEnabled(val)
-                        setLocalPref('dnt_enabled', val)
-                      }}
+                      checked={privacyPrefs.trackerProtection}
+                      onCheckedChange={() => togglePrivacyPref('trackerProtection')}
                     />
                   </div>
 
+                  {/* 3. Fingerprinting Resistance */}
                   <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-semibold text-foreground">
-                        HTTPS-First Mode
-                      </p>
+                    <div className="pr-2">
+                      <div className="flex items-center gap-1.5">
+                        <p className="text-xs font-semibold text-foreground">
+                          Browser Fingerprinting Resistance (Mullvad Standard)
+                        </p>
+                        <Badge variant="subtle" className="text-[9px] px-1 py-0 font-medium">Hardened</Badge>
+                      </div>
                       <p className="text-[11px] text-muted-foreground">
-                        Automatically upgrade unencrypted HTTP connections to secure HTTPS
+                        Injects canvas/audio noise and normalizes hardware concurrency, memory & sensor APIs
                       </p>
                     </div>
                     <Switch
-                      checked={httpsFirst}
-                      onCheckedChange={(val) => {
-                        setHttpsFirst(val)
-                        setLocalPref('https_first', val)
-                      }}
+                      checked={privacyPrefs.fingerprintResistance}
+                      onCheckedChange={() => togglePrivacyPref('fingerprintResistance')}
+                    />
+                  </div>
+
+                  {/* 4. HTTPS-Only Mode */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        HTTPS-Only Mode
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Automatically upgrades all unencrypted HTTP connections to encrypted HTTPS
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.httpsOnlyMode}
+                      onCheckedChange={() => togglePrivacyPref('httpsOnlyMode')}
+                    />
+                  </div>
+
+                  {/* 5. DNS over HTTPS (DoH) */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <div className="pr-2">
+                        <p className="text-xs font-semibold text-foreground">
+                          Encrypted DNS (DNS over HTTPS)
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">
+                          Encrypts domain name queries with zero unencrypted fallback (prevents ISP snooping)
+                        </p>
+                      </div>
+                      <Switch
+                        checked={privacyPrefs.dnsOverHttps}
+                        onCheckedChange={() => togglePrivacyPref('dnsOverHttps')}
+                      />
+                    </div>
+                    {privacyPrefs.dnsOverHttps && (
+                      <div className="flex items-center gap-1.5 pl-0.5">
+                        <span className="text-[10px] text-muted-foreground shrink-0 font-medium">Resolver:</span>
+                        {(['mullvad', 'cloudflare', 'quad9', 'adguard'] as const).map((prov) => (
+                          <button
+                            key={prov}
+                            onClick={() => setDohProvider(prov)}
+                            className={`px-2 py-0.5 rounded text-[10.5px] font-medium transition-colors cursor-pointer capitalize ${
+                              privacyPrefs.dohProvider === prov
+                                ? 'bg-primary text-primary-foreground font-semibold shadow-xs'
+                                : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground'
+                            }`}
+                          >
+                            {prov === 'mullvad' ? 'Mullvad (DoH)' : prov}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 6. Strip Tracking Query Parameters */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        Strip Tracking Query Parameters
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Removes tracking identifiers (utm_*, fbclid, gclid, mc_eid) from all navigation links
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.stripTrackingParams}
+                      onCheckedChange={() => togglePrivacyPref('stripTrackingParams')}
+                    />
+                  </div>
+
+                  {/* 7. Block Third-Party Cookies */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        Block Third-Party Cookies & State Isolation
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Isolates storage and prevents cross-site tracking cookies across different websites
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.blockThirdPartyCookies}
+                      onCheckedChange={() => togglePrivacyPref('blockThirdPartyCookies')}
+                    />
+                  </div>
+
+                  {/* 8. WebRTC Protection */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        WebRTC IP Leak Protection
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Disables non-proxied UDP to prevent websites from discovering your real public/local IP
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.webrtcProtection}
+                      onCheckedChange={() => togglePrivacyPref('webrtcProtection')}
+                    />
+                  </div>
+
+                  {/* 9. Global Privacy Control & DNT */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        Global Privacy Control (GPC) & DNT
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Sends Sec-GPC: 1 and DNT: 1 headers signaling visited sites not to track or sell your data
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.globalPrivacyControl}
+                      onCheckedChange={() => togglePrivacyPref('globalPrivacyControl')}
+                    />
+                  </div>
+
+                  {/* 10. Clear Cache on Exit */}
+                  <div className="flex items-center justify-between">
+                    <div className="pr-2">
+                      <p className="text-xs font-semibold text-foreground">
+                        Clear Browsing Data on Exit
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Automatically clears cookies, cache, and visited site storage when closing the browser
+                      </p>
+                    </div>
+                    <Switch
+                      checked={privacyPrefs.clearCacheOnExit}
+                      onCheckedChange={() => togglePrivacyPref('clearCacheOnExit')}
                     />
                   </div>
                 </div>
 
-                {/* Clear Cache Card */}
-                <div className="pt-3 border-t border-border">
-                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border flex items-center justify-between">
+                {/* Clear Browsing Data Card */}
+                <div className="pt-2 border-t border-border">
+                  <div className="p-3 rounded-xl bg-muted/40 border border-border flex items-center justify-between">
                     <div>
                       <p className="text-xs font-bold text-foreground">
                         Clear Browsing Cache & Temp Data
                       </p>
                       <p className="text-[11px] text-muted-foreground">
-                        Free disk space and clear temporary cookies and session data
+                        Safely cleans cache and visited site storage without resetting your settings or spaces
                       </p>
                     </div>
                     <Button
                       variant="outline"
                       size="sm"
                       onClick={handleClearCache}
-                      disabled={isClearingCache}
-                      className="text-xs flex items-center gap-1.5 h-8 shrink-0"
+                      disabled={isClearingPrivacyData}
+                      className="text-xs flex items-center gap-1.5 h-8 shrink-0 cursor-pointer"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
-                      <span>{isClearingCache ? 'Clearing...' : 'Clear Cache'}</span>
+                      <span>{isClearingPrivacyData ? 'Clearing...' : 'Clear Cache'}</span>
                     </Button>
                   </div>
                 </div>
@@ -880,6 +1083,30 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                     onCheckedChange={(val) => {
                       setGpuAcceleration(val)
                       setLocalPref('gpu_accel', val)
+                    }}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5">
+                      <p className="text-xs font-semibold text-foreground">
+                        Momentum Smooth Scrolling
+                      </p>
+                      <Badge variant="subtle" className="text-[9px] px-1.5 py-0 font-medium">
+                        Lenis & Compositor
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Buttery-smooth inertia scrolling powered by Lenis and Chromium GPU acceleration
+                    </p>
+                  </div>
+                  <Switch
+                    checked={smoothScrolling}
+                    onCheckedChange={(val) => {
+                      setSmoothScrolling(val)
+                      setLocalPref('smooth_scrolling', val)
+                      toast.success(`Smooth scrolling ${val ? 'enabled' : 'disabled'}`)
                     }}
                   />
                 </div>
@@ -976,7 +1203,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                   <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                     <p>Platform: {getPlatformDescription()}</p>
-                    <p>Runtime: Chromium 128 • Electron 32.2 • Node 20</p>
+                    <p>Runtime: Chromium 130 • Electron 33.2 • Node 20</p>
                     <p>Graphics: GPU Rasterization • Metal / Direct3D / Wayland-X11 Auto</p>
                     <p>Storage: 100% Local Machine Storage (Zero Cloud Sync)</p>
                     <p>Privacy: All Data Stored Locally on Your Computer</p>

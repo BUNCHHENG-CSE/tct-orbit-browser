@@ -12,6 +12,10 @@ interface PinnedTabsProps {
   onCloseTab: (id: string) => void
   onTogglePin: (tab: Tab) => void
   onDuplicateTab?: (tab: Tab) => void
+  onNewTabToRight?: (tabId: string) => void
+  onReloadTab?: (tabId: string) => void
+  onCloseOthers?: (tabId: string) => void
+  onCloseToRight?: (tabId: string) => void
 }
 
 export const PinnedTabs: React.FC<PinnedTabsProps> = ({
@@ -22,7 +26,11 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
   onSelectTab,
   onCloseTab,
   onTogglePin,
-  onDuplicateTab
+  onDuplicateTab,
+  onNewTabToRight,
+  onReloadTab,
+  onCloseOthers,
+  onCloseToRight
 }) => {
   const pinnedTabs = tabs.filter((t) => t.isPinned)
 
@@ -48,6 +56,10 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
             onClose={() => onCloseTab(tab.id)}
             onTogglePin={() => onTogglePin(tab)}
             onDuplicate={onDuplicateTab ? () => onDuplicateTab(tab) : undefined}
+            onNewTabToRight={onNewTabToRight ? () => onNewTabToRight(tab.id) : undefined}
+            onReload={onReloadTab ? () => onReloadTab(tab.id) : undefined}
+            onCloseOthers={onCloseOthers ? () => onCloseOthers(tab.id) : undefined}
+            onCloseToRight={onCloseToRight ? () => onCloseToRight(tab.id) : undefined}
           />
         ))}
       </div>

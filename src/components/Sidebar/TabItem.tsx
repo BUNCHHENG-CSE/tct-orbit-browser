@@ -1,5 +1,5 @@
 import React, { useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy } from 'lucide-react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2 } from 'lucide-react'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { modKey } from '@/lib/platform'
+import { useBrowserStore } from '@/store/useBrowserStore'
 import type { Tab } from '@/types/api'
 
 interface TabItemProps {
@@ -20,6 +21,10 @@ interface TabItemProps {
   onClose: () => void
   onTogglePin: () => void
   onDuplicate?: () => void
+  onNewTabToRight?: () => void
+  onReload?: () => void
+  onCloseOthers?: () => void
+  onCloseToRight?: () => void
 }
 
 export const TabItem: React.FC<TabItemProps> = ({
@@ -30,7 +35,11 @@ export const TabItem: React.FC<TabItemProps> = ({
   onSelect,
   onClose,
   onTogglePin,
-  onDuplicate
+  onDuplicate,
+  onNewTabToRight,
+  onReload,
+  onCloseOthers,
+  onCloseToRight
 }) => {
   const [faviconError, setFaviconError] = useState(false)
 
@@ -209,7 +218,25 @@ export const TabItem: React.FC<TabItemProps> = ({
         )}
       </ContextMenuTrigger>
 
-      <ContextMenuContent className="w-44 bg-popover text-popover-foreground border border-border shadow-xl rounded-xl p-1 z-50">
+      <ContextMenuContent className="w-48 bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl p-1 z-50">
+        {onNewTabToRight && (
+          <ContextMenuItem onClick={onNewTabToRight} className="text-xs rounded-lg cursor-pointer">
+            <Plus className="w-3.5 h-3.5 mr-2 text-primary" />
+            <span>New tab to right</span>
+          </ContextMenuItem>
+        )}
+        {onReload && (
+          <ContextMenuItem onClick={onReload} className="text-xs rounded-lg cursor-pointer">
+            <RotateCw className="w-3.5 h-3.5 mr-2" />
+            <span>Reload</span>
+          </ContextMenuItem>
+        )}
+        {onDuplicate && (
+          <ContextMenuItem onClick={onDuplicate} className="text-xs rounded-lg cursor-pointer">
+            <Copy className="w-3.5 h-3.5 mr-2" />
+            <span>Duplicate Tab</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={onTogglePin} className="text-xs rounded-lg cursor-pointer">
           {tab.isPinned ? (
             <>
@@ -227,17 +254,33 @@ export const TabItem: React.FC<TabItemProps> = ({
           <Copy className="w-3.5 h-3.5 mr-2" />
           <span>Copy URL</span>
         </ContextMenuItem>
-        {onDuplicate && (
-          <ContextMenuItem onClick={onDuplicate} className="text-xs rounded-lg cursor-pointer">
-            <Copy className="w-3.5 h-3.5 mr-2" />
-            <span>Duplicate Tab</span>
-          </ContextMenuItem>
-        )}
         <ContextMenuSeparator className="my-1 bg-border" />
         <ContextMenuItem onClick={onClose} className="text-xs rounded-lg cursor-pointer text-destructive hover:bg-destructive/10">
           <X className="w-3.5 h-3.5 mr-2" />
           <span>Close Tab</span>
         </ContextMenuItem>
+        {onCloseOthers && (
+          <ContextMenuItem onClick={onCloseOthers} className="text-xs rounded-lg cursor-pointer">
+            <span>Close Other Tabs</span>
+          </ContextMenuItem>
+        )}
+        {onCloseToRight && (
+          <ContextMenuItem onClick={onCloseToRight} className="text-xs rounded-lg cursor-pointer">
+            <span>Close Tabs to Right</span>
+          </ContextMenuItem>
+        )}
+        {import.meta.env.DEV && (
+          <>
+            <ContextMenuSeparator className="my-1 bg-border" />
+            <ContextMenuItem
+              onClick={() => useBrowserStore.getState().setDevToolsOpen(true)}
+              className="text-xs rounded-lg cursor-pointer text-muted-foreground"
+            >
+              <Code2 className="w-3.5 h-3.5 mr-2" />
+              <span>Inspect UI Element</span>
+            </ContextMenuItem>
+          </>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   )

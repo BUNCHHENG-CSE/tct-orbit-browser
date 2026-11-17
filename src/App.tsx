@@ -3,6 +3,9 @@ import { TitleBar } from '@/components/TitleBar/TitleBar'
 import { Sidebar } from '@/components/Sidebar/Sidebar'
 import { WebViewContainer } from '@/components/WebView/WebViewContainer'
 import { CommandBar } from '@/components/CommandBar/CommandBar'
+import { DockedDevToolsPane } from '@/components/DevTools/DockedDevToolsPane'
+import { BrowserContextMenu, QrCodeModal } from '@/components/ContextMenu/BrowserContextMenu'
+import { SmoothScroll } from '@/components/SmoothScroll'
 import { Toaster } from '@/components/ui/sonner'
 import { useSpaces } from '@/hooks/useSpaces'
 import { useTabs } from '@/hooks/useTabs'
@@ -16,6 +19,8 @@ export const App: React.FC = () => {
   const { tabs, activeTab, activeTabId, createTab, removeTab, setActiveTab, reopenLastClosedTab } = useTabs(activeSpaceId)
   const { settings, setSidebarCollapsed } = useSettings()
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
+  const setDevToolsOpen = useBrowserStore((s) => s.setDevToolsOpen)
+  const devtoolsOpen = useBrowserStore((s) => s.devtoolsOpen)
   const appInfo = useBrowserStore((s) => s.appInfo)
   const setAppInfo = useBrowserStore((s) => s.setAppInfo)
 
@@ -32,13 +37,54 @@ export const App: React.FC = () => {
   const lastExternalUrlRef = React.useRef<{ url: string; time: number }>({ url: '', time: 0 })
 
   useEffect(() => {
-    if (!api.onExternalUrl) return
+    if (!api.onOpenUrl) return
 
-    const unsub = api.onExternalUrl(async (url: string) => {
+    const unsub = api.onOpenUrl(async (payload) => {
+      const url = typeof payload === 'string' ? payload : payload.url
+      const isActive = typeof payload === 'object' && payload.active !== undefined ? payload.active : true
+
       if (!url || url === 'about:blank') return
 
       const now = Date.now()
-      if (lastExternalUrlRef.current.url === url && now - lastExternalUrlRef.current.time < 600) {
+      if (lastExternalUrlRef.current.url === url && now - lastExternalUrlRef.current.time < 500) {
+        return
+      }
+      lastExternalUrlRef.current = { url, time: now }
+
+      try {
+        const store = useBrowserStore.getState()
+        const targetSpace = store.activeSpaceId || store.spaces[0]?.id
+        if (!targetSpace) return
+
+        const currentActive = store.activeTabId ? store.tabsBySpace[targetSpace]?.find((t) => t.id === store.activeTabId) : null
+        const insertOrder = currentActive ? currentActive.order + 1 : undefined
+
+        const newTab = await api.tabs.create({
+          spaceId: targetSpace,
+          url,
+          title: 'Loading...',
+          order: insertOrder
+        })
+
+        store.insertTabNextTo(targetSpace, newTab, store.activeTabId, isActive)
+      } catch (err) {
+        console.error('[App] Failed to open external URL:', err)
+      }
+    })
+
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!api.onExternalUrl) return
+
+    const unsub = api.onExternalUrl(async (url) => {
+      if (!url || url === 'about:blank') return
+
+      const now = Date.now()
+      if (lastExternalUrlRef.current.url === url && now - lastExternalUrlRef.current.time < 500) {
         return
       }
       lastExternalUrlRef.current = { url, time: now }
@@ -53,8 +99,8 @@ export const App: React.FC = () => {
           url,
           title: 'Loading...'
         })
-        store.addTabToStore(targetSpace, newTab)
-        store.setActiveTabId(newTab.id)
+
+        store.insertTabNextTo(targetSpace, newTab, store.activeTabId, true)
       } catch (err) {
         console.error('[App] Failed to open external URL:', err)
       }
@@ -113,6 +159,32 @@ export const App: React.FC = () => {
   // Keyboard shortcuts listener
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // F12 or Ctrl+Shift+I → toggle DevTools
+      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'i')) {
+        e.preventDefault()
+        const nextState = !devtoolsOpen
+        setDevToolsOpen(nextState)
+        if (nextState) {
+          const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
+          const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
+          api.devtools?.open(wcId)
+        } else {
+          api.devtools?.close()
+        }
+        return
+      }
+
+      // Ctrl+Shift+S → screenshot
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
+        e.preventDefault()
+        const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
+        const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
+        if (wcId && api.webview?.captureScreenshot) {
+          api.webview.captureScreenshot(wcId)
+        }
+        return
+      }
+
       const isCmdOrCtrl = e.metaKey || e.ctrlKey
       if (!isCmdOrCtrl) return
 
@@ -211,35 +283,46 @@ export const App: React.FC = () => {
     activeTabId,
     tabs,
     settings,
+    devtoolsOpen,
     reopenLastClosedTab,
     removeTab,
     setActiveTab,
     setCommandBarOpen,
-    setSidebarCollapsed
+    setSidebarCollapsed,
+    setDevToolsOpen
   ])
 
   const resolvedTheme = useThemeStore((s) => s.resolved)
 
   return (
-    <div className="flex flex-col h-screen w-screen overflow-hidden bg-background text-foreground select-none font-sans">
-      {/* Title bar strip with drag region and window controls */}
-      <TitleBar
-        spaceName={activeSpace?.name || 'Personal'}
-        spaceColor={activeSpace?.color || '#6366f1'}
-      />
+    <SmoothScroll enabled={settings?.smoothScrolling ?? true}>
+      <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground select-none font-sans">
+        {/* Title bar strip with drag region and window controls */}
+        <TitleBar
+          spaceName={activeSpace?.name || 'Personal'}
+          spaceColor={activeSpace?.color || '#6366f1'}
+        />
 
-      {/* Main browser frame: Sidebar + WebViews */}
-      <div className="flex flex-1 w-full h-[calc(100vh-40px)] overflow-hidden">
-        <Sidebar />
-        <WebViewContainer spaceId={activeSpaceId} />
+        {/* Main browser frame: Sidebar + WebViews + Docked DevTools */}
+        <div className="flex flex-1 w-full min-h-0 overflow-hidden">
+          <Sidebar />
+          <WebViewContainer spaceId={activeSpaceId} />
+          <DockedDevToolsPane />
+        </div>
+
+        {/* TCT Orbit spotlight CommandBar overlay */}
+        <CommandBar />
+
+        {/* Edge-Style Right-Click Context Menu */}
+        <BrowserContextMenu />
+
+        {/* QR Code generator modal */}
+        <QrCodeModal />
+
+        {/* Sonner toast alerts */}
+        <Toaster theme={resolvedTheme} />
       </div>
-
-      {/* TCT Orbit spotlight CommandBar overlay */}
-      <CommandBar />
-
-      {/* Sonner toast alerts */}
-      <Toaster theme={resolvedTheme} />
-    </div>
+    </SmoothScroll>
   )
 }
 

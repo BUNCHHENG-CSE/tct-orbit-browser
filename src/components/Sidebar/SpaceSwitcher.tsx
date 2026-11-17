@@ -297,7 +297,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                       >
                         {/* Collapsed active indicator bar */}
                         {collapsed && isActive && (
-                          <span className="absolute -left-1 top-2 bottom-2 w-0.5 rounded-r-full bg-white shadow-sm" />
+                          <span className="absolute -left-1 top-2 bottom-2 w-0.5 rounded-r-full bg-foreground shadow-sm" />
                         )}
                         <span style={collapsed && !isActive ? { color: space.color } : { color: '#ffffff' }}>
                           {renderIcon(space.icon, 'w-4 h-4')}

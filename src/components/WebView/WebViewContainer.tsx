@@ -10,6 +10,7 @@ import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { modKey } from '@/lib/platform'
 import { getThemeSyncScript, resolveIsDark } from '@/lib/theme'
+import { api } from '@/lib/ipc'
 import type { Tab } from '@/types/api'
 
 interface SingleWebViewProps {
@@ -55,13 +56,19 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     }
   }, [tab.url])
 
-  // Reactive theme updater for active webview
+  // Reactive theme and DevTools active tab synchronizer
   useEffect(() => {
     const el = webviewRef.current
     if (!el) return
     try {
       if (typeof el.executeJavaScript === 'function') {
         el.executeJavaScript(getThemeSyncScript(isDark)).catch(() => {})
+      }
+      if (isActive && typeof el.getWebContentsId === 'function') {
+        const wcId = el.getWebContentsId()
+        if (wcId && api.devtools?.syncActiveTab) {
+          api.devtools.syncActiveTab(wcId).catch(() => {})
+        }
       }
     } catch {
       // ignore
@@ -71,6 +78,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   useEffect(() => {
     const el = webviewRef.current
     if (!el) return
+
+    // Guarantee allowpopups attribute is present on DOM node for Chromium
+    try {
+      el.setAttribute('allowpopups', 'true')
+    } catch {}
 
     registerWebviewRef(tab.id, el)
 
@@ -257,6 +269,15 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
             width: 0 !important;
             height: 0 !important;
           }
+          /* Eliminate double vertical scrollbar on responsive SPAs (DuckDuckGo, Next.js, etc.) */
+          html {
+            overflow-y: auto !important;
+            overflow-x: hidden !important;
+          }
+          body {
+            overflow-y: visible !important;
+            overflow-x: hidden !important;
+          }
         `).catch(() => {})
       } catch {
         // ignore
@@ -298,14 +319,14 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
   return (
     <div
-      className="w-full h-full relative bg-background"
+      className="w-full h-full relative bg-background overflow-hidden"
       style={{ display: isActive ? 'flex' : 'none' }}
     >
       <webview
         ref={webviewRef}
         src={initialUrlRef.current}
         className="w-full h-full bg-background"
-        allowpopups={true}
+        {...({ allowpopups: 'true' } as any)}
         webpreferences="contextIsolation=yes, javascript=yes"
       />
 
@@ -481,10 +502,15 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     const targetSpace = spaceId || useBrowserStore.getState().activeSpaceId
     if (targetSpace) {
       try {
+        const store = useBrowserStore.getState()
+        const currentActive = store.activeTabId ? store.tabsBySpace[targetSpace]?.find((t) => t.id === store.activeTabId) : null
+        const insertOrder = currentActive ? currentActive.order + 1 : undefined
+
         const newTab = await createTab({
           spaceId: targetSpace,
           url,
-          title: 'Loading...'
+          title: 'Loading...',
+          order: insertOrder
         })
         setActiveTab(newTab.id)
       } catch (err) {

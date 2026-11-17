@@ -1,38 +1,66 @@
 # ==============================================================================
-# Dependencies & Package Managers
+# 1. Dependencies & Package Managers
 # ==============================================================================
 node_modules/
 .pnp/
 .pnp.js
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+.yarn/build-state.yml
+.yarn/install-state.gz
 
 # ==============================================================================
-# Environment Variables & Secrets (Prevent accidental leaks)
+# 2. Environment Variables, Secrets & Code Signing Keys
 # ==============================================================================
 .env
 .env.*
 !.env.example
 *.local
 
+# Certificates, keystores & private signing keys (critical for Electron release builds)
+*.p12
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
+*.keystore
+*.jks
+csc-*.json
+
 # ==============================================================================
-# Build Outputs & Packaging (Electron / electron-vite / electron-builder)
-# Note: Do NOT ignore 'build/' as it contains icons & macOS entitlements.
+# 3. Build Outputs, Packaging & Installers (electron-builder / electron-vite)
+# Note: Do NOT ignore 'build/' as it contains static packaging icons and macOS entitlements.
 # ==============================================================================
 out/
 dist/
 dist-unpacked/
-dev-app-update.yml
+release/
 builder-debug.yml
 builder-effective-config.yaml
+dev-app-update.yml
+
+# Installer packages & distribution artifacts
 *.exe
+*.msi
 *.dmg
+*.pkg
 *.AppImage
 *.deb
 *.rpm
 *.pacman
+*.snap
+*.flatpak
+*.zip
+*.tar.gz
+*.tar.xz
 *.blockmap
+latest*.yml
+latest*.yaml
 
 # ==============================================================================
-# Bundler & TypeScript Incremental Build Caches
+# 4. Bundler, Vite & TypeScript Incremental Build Caches
 # ==============================================================================
 .vite/
 .cache/
@@ -41,17 +69,37 @@ builder-effective-config.yaml
 *.tsbuildinfo
 
 # ==============================================================================
-# Database & Local Storage Files
+# 5. Database, SQLite & Local Storage Files (Prisma / JSON Storage)
 # ==============================================================================
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *.sqlite-journal
 *.sqlite3-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 # ==============================================================================
-# Logs & Diagnostic Files
+# 6. Electron Runtime, Crash Dumps & Development User Data
+# ==============================================================================
+crash-dumps/
+Crashpad/
+minidumps/
+*.dmp
+*.dump
+userData/
+User Data/
+tct-orbit-data.json
+state.json
+orbit.db*
+
+# ==============================================================================
+# 7. Logs & Diagnostic Files
 # ==============================================================================
 logs/
 *.log
@@ -60,23 +108,25 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+core.[0-9]*
 
 # ==============================================================================
-# Testing & Code Coverage
+# 8. Testing & Code Coverage
 # ==============================================================================
 coverage/
 .nyc_output/
 *.lcov
 
 # ==============================================================================
-# Linter & Formatter Caches
+# 9. Linter & Formatter Caches
 # ==============================================================================
 .eslintcache
 .stylelintcache
 .prettiercache
 
 # ==============================================================================
-# IDE & Editor Configurations
+# 10. IDE & Editor Configurations
 # ==============================================================================
 .idea/
 *.suo
@@ -87,15 +137,27 @@ coverage/
 *.sublime-workspace
 *.sublime-project
 
-# VS Code: keep shared workspace configs, ignore temporary & local files
+# Visual Studio Code: retain team workspace configurations, ignore local user state
 .vscode/*
 !.vscode/settings.json
 !.vscode/launch.json
 !.vscode/extensions.json
+!.vscode/tasks.json
 .vscode/*.log
 
 # ==============================================================================
-# Operating System Artifacts (Windows, macOS, Linux)
+# 11. AI Assistants, Agents & Scratch Directories
+# ==============================================================================
+.gemini/
+.claude/
+.cursor/
+scratch/
+tmp/
+temp/
+.temp/
+
+# ==============================================================================
+# 12. Operating System Artifacts (macOS, Windows, Linux)
 # ==============================================================================
 # macOS
 .DS_Store
@@ -119,5 +181,3 @@ $RECYCLE.BIN/
 .fuse_hidden*
 .directory
 .Trash-*
-
-.vscode/

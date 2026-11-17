@@ -17,6 +17,10 @@ interface TabListProps {
   onCloseTab: (id: string) => void
   onTogglePin: (tab: Tab) => void
   onDuplicateTab?: (tab: Tab) => void
+  onNewTabToRight?: (tabId: string) => void
+  onReloadTab?: (tabId: string) => void
+  onCloseOthers?: (tabId: string) => void
+  onCloseToRight?: (tabId: string) => void
 }
 
 export const TabList: React.FC<TabListProps> = ({
@@ -27,13 +31,17 @@ export const TabList: React.FC<TabListProps> = ({
   onSelectTab,
   onCloseTab,
   onTogglePin,
-  onDuplicateTab
+  onDuplicateTab,
+  onNewTabToRight,
+  onReloadTab,
+  onCloseOthers,
+  onCloseToRight
 }) => {
   const unpinnedTabs = tabs.filter((t) => !t.isPinned)
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
 
   return (
-    <ScrollArea className="flex-1 w-full min-w-0">
+    <ScrollArea className="flex-1 w-full min-w-0" data-lenis-prevent>
       <div className={`w-full min-w-0 ${collapsed ? 'px-1' : 'px-2'}`}>
         {/* Pinned tabs section */}
         <PinnedTabs
@@ -45,6 +53,10 @@ export const TabList: React.FC<TabListProps> = ({
           onCloseTab={onCloseTab}
           onTogglePin={onTogglePin}
           onDuplicateTab={onDuplicateTab}
+          onNewTabToRight={onNewTabToRight}
+          onReloadTab={onReloadTab}
+          onCloseOthers={onCloseOthers}
+          onCloseToRight={onCloseToRight}
         />
 
         {/* Normal unpinned tabs */}
@@ -86,6 +98,10 @@ export const TabList: React.FC<TabListProps> = ({
                 onClose={() => onCloseTab(tab.id)}
                 onTogglePin={() => onTogglePin(tab)}
                 onDuplicate={onDuplicateTab ? () => onDuplicateTab(tab) : undefined}
+                onNewTabToRight={onNewTabToRight ? () => onNewTabToRight(tab.id) : undefined}
+                onReload={onReloadTab ? () => onReloadTab(tab.id) : undefined}
+                onCloseOthers={onCloseOthers ? () => onCloseOthers(tab.id) : undefined}
+                onCloseToRight={onCloseToRight ? () => onCloseToRight(tab.id) : undefined}
               />
             ))
           )}

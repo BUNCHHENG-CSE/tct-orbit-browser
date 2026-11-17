@@ -94,7 +94,7 @@ linux:
   executableName: tct-orbit
   maintainer: TCT Orbit Team <support@tctorbit.com>
   category: Network;WebBrowser;
-  icon: build/icon.png
+  icon: resources/browser-logo.png
   synopsis: Fast, Clean, and Modern Desktop Web Browser
   description: TCT Orbit is a fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.
   desktop:

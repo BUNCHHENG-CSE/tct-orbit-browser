@@ -55,6 +55,7 @@ export interface Settings {
   accentColor?: string;
   accentPreset?: AccentPreset;
   webColorScheme?: WebColorScheme;
+  smoothScrolling?: boolean;
   updatedAt: string | Date;
 }
 
@@ -100,6 +101,7 @@ export interface UpdateSettingsData {
   accentColor?: string;
   accentPreset?: AccentPreset;
   webColorScheme?: WebColorScheme;
+  smoothScrolling?: boolean;
 }
 
 export type ReleaseChannel = 'stable' | 'nova' | 'deep' | 'canary';
@@ -108,6 +110,83 @@ export interface AppInfo {
   name: string;
   version: string;
   channel: ReleaseChannel;
+}
+
+export interface ContextMenuParams {
+  x: number;
+  y: number;
+  linkURL?: string;
+  srcURL?: string;
+  mediaType?: string;
+  hasImageContents?: boolean;
+  isEditable?: boolean;
+  selectionText?: string;
+  titleText?: string;
+  pageURL?: string;
+  frameURL?: string;
+  editFlags?: {
+    canUndo?: boolean;
+    canRedo?: boolean;
+    canCut?: boolean;
+    canCopy?: boolean;
+    canPaste?: boolean;
+    canDelete?: boolean;
+    canSelectAll?: boolean;
+  };
+  dictionarySuggestions?: string[];
+}
+
+export interface ContextMenuEventData {
+  webContentsId: number;
+  params: ContextMenuParams;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  pageURL: string;
+}
+
+export interface DevToolsState {
+  isOpen: boolean;
+  isDetached: boolean;
+  isDocked: boolean;
+}
+
+export type DohProvider = 'mullvad' | 'cloudflare' | 'quad9' | 'adguard';
+export type MasterShieldStatus = 'ACTIVE' | 'PARTIALLY_ACTIVE' | 'OFF';
+
+export interface PrivacyShieldPrefs {
+  adBlockerEnabled: boolean;
+  trackerProtection: boolean;
+  fingerprintResistance: boolean;
+  httpsOnlyMode: boolean;
+  dnsOverHttps: boolean;
+  dohProvider: DohProvider;
+  webrtcProtection: boolean;
+  globalPrivacyControl: boolean;
+  stripTrackingParams: boolean;
+  blockThirdPartyCookies: boolean;
+  clearCacheOnExit: boolean;
+  whitelistedOrigins: string[];
+}
+
+export interface PrivacyStats {
+  adsBlockedTotal: number;
+  trackersBlockedTotal: number;
+  fingerprintProbesBlockedTotal: number;
+  httpsUpgradesTotal: number;
+}
+
+export interface SiteShieldStatus {
+  origin: string;
+  isWhitelisted: boolean;
+  adsBlocked: number;
+  trackersBlocked: number;
+  isHttps: boolean;
+}
+
+export interface PrivacyEngineState {
+  prefs: PrivacyShieldPrefs;
+  masterStatus: MasterShieldStatus;
+  stats: PrivacyStats;
 }
 
 export interface ElectronAPI {
@@ -152,6 +231,35 @@ export interface ElectronAPI {
   navigation: {
     openExternal: (url: string) => Promise<void>;
   };
+  devtools: {
+    open: (webContentsId?: number, bounds?: { x: number; y: number; width: number; height: number }) => Promise<void>;
+    inspect: (webContentsId: number, x: number, y: number, bounds?: { x: number; y: number; width: number; height: number }) => Promise<void>;
+    updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>;
+    detach: () => Promise<void>;
+    close: () => Promise<void>;
+    getState: () => Promise<DevToolsState>;
+    syncActiveTab: (webContentsId: number) => Promise<void>;
+    onStateChanged: (callback: (state: DevToolsState) => void) => () => void;
+  };
+  webview: {
+    call: (webContentsId: number, method: string, ...args: any[]) => Promise<any>;
+    saveAs: (webContentsId: number) => Promise<boolean>;
+    captureScreenshot: (webContentsId: number) => Promise<boolean>;
+  };
+  contextMenu: {
+    onOpen: (callback: (data: ContextMenuEventData) => void) => () => void;
+    onClose: (callback: () => void) => () => void;
+  };
+  privacy: {
+    getState: () => Promise<PrivacyEngineState>;
+    updatePrefs: (updates: Partial<PrivacyShieldPrefs>) => Promise<PrivacyEngineState>;
+    getSiteStatus: (url: string) => Promise<SiteShieldStatus>;
+    toggleSiteShield: (origin: string) => Promise<boolean>;
+    getStats: () => Promise<PrivacyStats>;
+    clearBrowsingData: () => Promise<{ success: boolean }>;
+    onStateChanged: (callback: (state: PrivacyEngineState) => void) => () => void;
+  };
+  onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;
 }
 

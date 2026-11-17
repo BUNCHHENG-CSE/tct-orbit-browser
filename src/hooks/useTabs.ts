@@ -137,6 +137,36 @@ export function useTabs(spaceId: string | null) {
     reorderTabs,
     setActiveTab,
     reopenLastClosedTab,
+    closeOtherTabs: async (keepTabId: string) => {
+      const toRemove = tabs.filter((t) => t.id !== keepTabId && !t.isPinned)
+      for (const t of toRemove) {
+        removeTabFromStore(t.id)
+        api.tabs.remove(t.id).catch(() => {})
+      }
+    },
+    closeTabsToRight: async (targetTabId: string) => {
+      const index = tabs.findIndex((t) => t.id === targetTabId)
+      if (index === -1) return
+      const toRemove = tabs.slice(index + 1).filter((t) => !t.isPinned)
+      for (const t of toRemove) {
+        removeTabFromStore(t.id)
+        api.tabs.remove(t.id).catch(() => {})
+      }
+    },
+    createTabNextTo: async (targetTabId: string, url: string = 'https://duckduckgo.com') => {
+      const targetSpaceId = spaceId
+      if (!targetSpaceId) return
+      const targetTab = tabs.find((t) => t.id === targetTabId)
+      const order = targetTab ? targetTab.order + 1 : undefined
+      const newTab = await api.tabs.create({
+        spaceId: targetSpaceId,
+        url,
+        title: 'New Tab',
+        order
+      })
+      useBrowserStore.getState().insertTabNextTo(targetSpaceId, newTab, targetTabId, true)
+      return newTab
+    },
     reloadTabs: loadTabs
   }
 }

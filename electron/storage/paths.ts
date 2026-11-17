@@ -2,6 +2,9 @@ import { app } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { resolveChannel, type ChannelMeta } from '../../shared/brand'
+import { getBrowserLogoPath } from '../resources'
+
+export { getBrowserLogoPath }
 
 export interface AppPaths {
   channelMeta: ChannelMeta

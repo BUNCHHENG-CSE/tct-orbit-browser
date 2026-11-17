@@ -12,8 +12,9 @@
     <script>
       (function() {
         try {
-          var mode = localStorage.getItem('tct_theme_mode') || 'dark';
-          var accent = localStorage.getItem('tct_theme_accent') || 'orbit-blue';
+          var storedMode = localStorage.getItem('tct_theme_mode') || localStorage.getItem('tct_pref_theme');
+          var mode = storedMode || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          var accent = localStorage.getItem('tct_theme_accent') || localStorage.getItem('tct_pref_accent_preset') || 'orbit-blue';
           var isDark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
           var root = document.documentElement;
           if (isDark) {

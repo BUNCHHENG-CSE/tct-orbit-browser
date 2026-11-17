@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TCTOrbitPrivacyShieldConfig",
+  "description": "Configuration schema mapping every TCT Orbit Privacy & Shield toggle to Electron session APIs, Chromium switches, preload hardening patches, and storage keys.",
+  "type": "object",
+  "storageKey": "privacyShieldPrefs",
+  "mullvadStandardBaseline": {
+    "defaultShieldState": "ACTIVE",
+    "allProtectionsHardenedByDefault": true,
+    "noDarkPatterns": true
+  },
+  "properties": {
+    "adBlockerEnabled": {
+      "type": "boolean",
+      "default": true,
+      "title": "Ad & Content Blocker",
+      "description": "Blocks YouTube video ads, sponsored banners, popups, and intrusive ad slots via EasyList, EasyPrivacy, and AdGuard engine.",
+      "implementation": {
+        "electronApi": "@ghostery/adblocker-electron in session.defaultSession",
+        "networkInterceptor": "session.webRequest.onBeforeRequest (blocking doubleclick, googleadservices, googlesyndication, youtube ad_break)",
+        "preloadScript": "Cosmetic DOM ad suppression & YouTube video ad auto-skipper",
+        "localStorageKey": "privacyShieldPrefs.adBlockerEnabled"
+      }
+    },
+    "trackerProtection": {
+      "type": "boolean",
+      "default": true,
+      "title": "Strict Tracker & Bounce Protection",
+      "description": "Intercepts tracking beacons, analytics telemetry, and intermediate redirect hops.",
+      "implementation": {
+        "electronApi": "session.webRequest.onBeforeRequest + onBeforeRedirect",
+        "networkInterceptor": "Cancellation of known analytics/beacon networks",
+        "preloadScript": "None (network level)",
+        "localStorageKey": "privacyShieldPrefs.trackerProtection"
+      }
+    },
+    "fingerprintResistance": {
+      "type": "boolean",
+      "default": true,
+      "title": "Browser Fingerprinting Resistance",
+      "description": "Injects subtle canvas/audio noise and normalizes hardware concurrency, memory & sensor APIs.",
+      "implementation": {
+        "electronApi": "privacyEngine.injectShieldScript(webContents)",
+        "preloadScript": [
+          "HTMLCanvasElement.toDataURL & CanvasRenderingContext2D.getImageData noise injection",
+          "WebGL UNMASKED_VENDOR/RENDERER masking & readPixels jitter",
+          "AudioBuffer.getChannelData & AnalyserNode frequency jitter",
+          "navigator.hardwareConcurrency locked to 4",
+          "navigator.deviceMemory locked to 8",
+          "navigator.getBattery disabled",
+          "navigator.getGamepads disabled"
+        ],
+        "localStorageKey": "privacyShieldPrefs.fingerprintResistance"
+      }
+    },
+    "httpsOnlyMode": {
+      "type": "boolean",
+      "default": true,
+      "title": "HTTPS-Only Mode",
+      "description": "Automatically upgrades all unencrypted HTTP connections to encrypted HTTPS.",
+      "implementation": {
+        "electronApi": "session.webRequest.onBeforeRequest (redirectURL: parsed.protocol = 'https:')",
+        "chromiumFlags": ["--enable-features=HttpsUpgrades"],
+        "localStorageKey": "privacyShieldPrefs.httpsOnlyMode"
+      }
+    },
+    "dnsOverHttps": {
+      "type": "boolean",
+      "default": true,
+      "title": "DNS over HTTPS (DoH)",
+      "description": "Encrypts domain name queries with zero unencrypted fallback (prevents ISP snooping).",
+      "implementation": {
+        "chromiumFlags": [
+          "--dns-over-https-templates=https://dns.mullvad.net/dns-query",
+          "--disable-features=DnsOverHttpsFallback"
+        ],
+        "resolvers": {
+          "mullvad": "https://dns.mullvad.net/dns-query",
+          "cloudflare": "https://cloudflare-dns.com/dns-query",
+          "quad9": "https://dns.quad9.net/dns-query",
+          "adguard": "https://dns.adguard-dns.com/dns-query"
+        },
+        "localStorageKey": "privacyShieldPrefs.dnsOverHttps"
+      }
+    },
+    "webrtcProtection": {
+      "type": "boolean",
+      "default": false,
+      "title": "WebRTC IP Leak Protection",
+      "description": "Disables non-proxied UDP to prevent websites from discovering your real public/local IP via WebRTC.",
+      "implementation": {
+        "chromiumFlags": [
+          "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"
+        ],
+        "sessionPermission": "session.setPermissionCheckHandler (deny audio/video enumeration)",
+        "localStorageKey": "privacyShieldPrefs.webrtcProtection"
+      }
+    },
+    "globalPrivacyControl": {
+      "type": "boolean",
+      "default": true,
+      "title": "Global Privacy Control (GPC) & DNT",
+      "description": "Sends Sec-GPC: 1 and DNT: 1 headers signaling visited sites not to track or sell your data.",
+      "implementation": {
+        "electronApi": "session.webRequest.onBeforeSendHeaders (requestHeaders['Sec-GPC'] = '1', requestHeaders['DNT'] = '1')",
+        "preloadScript": "navigator.globalPrivacyControl = true; navigator.doNotTrack = '1'",
+        "localStorageKey": "privacyShieldPrefs.globalPrivacyControl"
+      }
+    },
+    "stripTrackingParams": {
+      "type": "boolean",
+      "default": true,
+      "title": "Strip Tracking Query Parameters",
+      "description": "Removes tracking identifiers (utm_*, fbclid, gclid, mc_eid) from all navigation links.",
+      "implementation": {
+        "electronApi": "session.webRequest.onBeforeRequest (strip searchParams matching TRACKING_QUERY_PARAMS and redirectURL)",
+        "localStorageKey": "privacyShieldPrefs.stripTrackingParams"
+      }
+    },
+    "blockThirdPartyCookies": {
+      "type": "boolean",
+      "default": true,
+      "title": "Block Third-Party Cookies & State Isolation",
+      "description": "Isolates storage and prevents cross-site tracking cookies across different websites.",
+      "implementation": {
+        "electronApi": "session.webRequest.onBeforeSendHeaders (delete Cookie) + onHeadersReceived (delete Set-Cookie)",
+        "localStorageKey": "privacyShieldPrefs.blockThirdPartyCookies"
+      }
+    },
+    "clearCacheOnExit": {
+      "type": "boolean",
+      "default": false,
+      "title": "Clear Browsing Data on Exit",
+      "description": "Automatically clears cookies, cache, and visited site storage when closing the browser.",
+      "implementation": {
+        "electronApi": "app.on('before-quit') -> session.defaultSession.clearStorageData + clearCache",
+        "localStorageKey": "privacyShieldPrefs.clearCacheOnExit"
+      }
+    },
+    "whitelistedOrigins": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "title": "Per-Site Shield Whitelist",
+      "description": "List of origins for which ad and tracker protection is temporarily paused.",
+      "implementation": {
+        "electronApi": "privacyEngine.toggleSiteShield(origin)",
+        "titleBarUi": "SiteShieldPopover.tsx",
+        "localStorageKey": "privacyShieldPrefs.whitelistedOrigins"
+      }
+    }
+  }
+}

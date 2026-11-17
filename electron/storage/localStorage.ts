@@ -37,6 +37,7 @@ const DEFAULT_DATA: LocalBrowserData = {
     accentColor: '#6366f1',
     accentPreset: 'orbit-blue',
     webColorScheme: 'match-browser',
+    smoothScrolling: true,
     updatedAt: new Date().toISOString()
   },
   spaces: [
@@ -255,7 +256,18 @@ class LocalStorageService {
   }
 
   public createTab(data: CreateTabData): Tab {
-    const spaceTabs = this.data.tabs.filter((t) => t.spaceId === data.spaceId)
+    const spaceTabs = this.data.tabs.filter((t) => t.spaceId === data.spaceId).sort((a, b) => a.order - b.order)
+    const insertOrder = data.order !== undefined ? data.order : spaceTabs.length
+
+    // If inserting in the middle, shift all subsequent tabs' orders by 1
+    if (data.order !== undefined) {
+      for (const t of spaceTabs) {
+        if (t.order >= insertOrder) {
+          t.order += 1
+        }
+      }
+    }
+
     const newTab: Tab = {
       id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
       spaceId: data.spaceId,
@@ -263,7 +275,7 @@ class LocalStorageService {
       title: data.title || 'New Tab',
       favicon: data.favicon || null,
       isPinned: data.isPinned || false,
-      order: data.order !== undefined ? data.order : spaceTabs.length,
+      order: insertOrder,
       lastVisited: new Date().toISOString(),
       createdAt: new Date().toISOString()
     }
