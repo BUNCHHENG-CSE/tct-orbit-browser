@@ -137,7 +137,7 @@ export const CommandBar: React.FC = () => {
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>
       {/* Top Header with Dynamic Leading Icon, Search Input and Inline Engine Switcher */}
-      <div className="relative flex items-center px-4 h-14 border-b dark:border-white/[0.08] border-slate-200 dark:bg-[#151722]/95 bg-white/95 backdrop-blur-md gap-3">
+      <div className="relative flex items-center px-4 h-14 border-b border-border bg-popover/95 backdrop-blur-md gap-3">
         {/* Dynamic Leading Icon */}
         <div className="shrink-0 flex items-center justify-center">
           {trimmed ? (
@@ -151,7 +151,7 @@ export const CommandBar: React.FC = () => {
               </div>
             )
           ) : (
-            <div className="w-7 h-7 rounded-lg dark:bg-white/5 bg-slate-100 flex items-center justify-center dark:text-white/40 text-slate-400">
+            <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center text-muted-foreground">
               <Search className="w-4 h-4" />
             </div>
           )}
@@ -169,7 +169,7 @@ export const CommandBar: React.FC = () => {
             onValueChange={setQuery}
             onKeyDown={handleKeyDown}
             autoFocus
-            className="w-full bg-transparent text-[15px] font-medium dark:text-white text-slate-900 dark:placeholder:text-white/30 placeholder:text-slate-400 outline-none border-none focus:outline-none focus:ring-0 selection:bg-primary/30"
+            className="w-full bg-transparent text-[15px] font-medium text-foreground placeholder:text-muted-foreground outline-none border-none focus:outline-none focus:ring-0 selection:bg-primary/30"
           />
         </div>
 
@@ -177,7 +177,7 @@ export const CommandBar: React.FC = () => {
         {query.length > 0 && (
           <button
             onClick={() => setQuery('')}
-            className="p-1 rounded-full dark:text-white/40 text-slate-400 hover:dark:text-white hover:text-slate-800 dark:hover:bg-white/10 hover:bg-slate-100 transition-colors shrink-0 outline-none focus:outline-none"
+            className="p-1 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0 outline-none focus:outline-none"
             title="Clear input"
           >
             <X className="w-3.5 h-3.5" />
@@ -189,17 +189,17 @@ export const CommandBar: React.FC = () => {
           <DropdownMenuTrigger asChild>
             <button
               type="button"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-full dark:bg-white/[0.06] bg-slate-100 hover:dark:bg-white/[0.12] hover:bg-slate-200 active:dark:bg-white/[0.15] active:bg-slate-300 dark:text-white/80 text-slate-700 hover:dark:text-white hover:text-slate-900 transition-all text-xs font-medium border dark:border-white/[0.08] border-slate-200 shadow-sm shrink-0 outline-none focus:outline-none select-none cursor-pointer"
+              className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-muted hover:bg-muted/80 text-foreground transition-colors text-xs font-medium border border-border shadow-xs shrink-0 outline-none focus:outline-none select-none cursor-pointer"
               title="Click or press Tab to change search engine"
             >
               <span className={`w-2 h-2 rounded-full ${ENGINE_META[currentEngine]?.dot || 'bg-primary'}`} />
               <span className="tracking-tight">{SEARCH_ENGINES[currentEngine]?.name || 'DuckDuckGo'}</span>
-              <ChevronDown className="w-3 h-3 dark:text-white/40 text-slate-400" />
+              <ChevronDown className="w-3 h-3 text-muted-foreground" />
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent
             align="end"
-            className="w-44 dark:bg-[#181a24] bg-white border dark:border-white/10 border-slate-200 backdrop-blur-xl shadow-2xl rounded-xl p-1 z-50"
+            className="w-44 bg-popover text-popover-foreground border border-border backdrop-blur-xl shadow-2xl rounded-xl p-1 z-50"
           >
             {Object.values(SEARCH_ENGINES).map((eng) => {
               const isSelected = currentEngine === eng.id
@@ -208,7 +208,7 @@ export const CommandBar: React.FC = () => {
                 <DropdownMenuItem
                   key={eng.id}
                   onClick={() => handleSelectEngine(eng.id as SearchEngineId)}
-                  className="flex items-center justify-between px-2.5 py-2 text-xs rounded-lg cursor-pointer dark:hover:bg-white/10 hover:bg-slate-100 dark:text-white/90 text-slate-800 dark:focus:bg-white/10 focus:bg-slate-100 transition-colors"
+                  className="flex items-center justify-between px-2.5 py-2 text-xs rounded-lg cursor-pointer hover:bg-accent focus:bg-accent text-foreground transition-colors"
                 >
                   <div className="flex items-center gap-2">
                     <span className={`w-2 h-2 rounded-full ${meta?.dot || 'bg-primary'}`} />
@@ -225,9 +225,9 @@ export const CommandBar: React.FC = () => {
       </div>
 
       {/* Results and suggestions */}
-      <CommandList className="dark:bg-[#121319] bg-white max-h-[380px] p-2">
-        <CommandEmpty className="py-8 text-center text-xs dark:text-white/40 text-slate-400">
-          Press <kbd className="px-1.5 py-0.5 rounded dark:bg-white/5 bg-slate-100 border dark:border-white/10 border-slate-200 dark:text-white/70 text-slate-600 font-mono">↵ Enter</kbd> to search with {SEARCH_ENGINES[currentEngine]?.name}
+      <CommandList className="bg-popover text-popover-foreground max-h-[380px] p-2">
+        <CommandEmpty className="py-8 text-center text-xs text-muted-foreground">
+          Press <kbd className="px-1.5 py-0.5 rounded bg-muted border border-border text-foreground font-mono">↵ Enter</kbd> to search with {SEARCH_ENGINES[currentEngine]?.name}
         </CommandEmpty>
 
         <SearchResults
@@ -244,28 +244,28 @@ export const CommandBar: React.FC = () => {
       </CommandList>
 
       {/* Bottom Keyboard Hints & Space Indicator */}
-      <div className="h-9 px-4 flex items-center justify-between border-t dark:border-white/[0.08] border-slate-200 dark:bg-[#0d0e14]/90 bg-slate-50 text-[11px] dark:text-white/45 text-slate-500 font-medium select-none">
+      <div className="h-9 px-4 flex items-center justify-between border-t border-border bg-muted/40 text-[11px] text-muted-foreground font-medium select-none">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded dark:bg-white/5 bg-white border dark:border-white/10 border-slate-200 font-mono text-[10px] dark:text-white/70 text-slate-600 shadow-sm">↵</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">↵</kbd>
             <span>Open</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded dark:bg-white/5 bg-white border dark:border-white/10 border-slate-200 font-mono text-[10px] dark:text-white/70 text-slate-600 shadow-sm">↑↓</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">↑↓</kbd>
             <span>Navigate</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded dark:bg-white/5 bg-white border dark:border-white/10 border-slate-200 font-mono text-[10px] dark:text-white/70 text-slate-600 shadow-sm">Tab</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">Tab</kbd>
             <span>Engine</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded dark:bg-white/5 bg-white border dark:border-white/10 border-slate-200 font-mono text-[10px] dark:text-white/70 text-slate-600 shadow-sm">Esc</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">Esc</kbd>
             <span>Close</span>
           </span>
         </div>
 
         {activeSpace && (
-          <div className="flex items-center gap-1.5 dark:text-white/60 text-slate-600 text-[11px]">
+          <div className="flex items-center gap-1.5 text-foreground text-[11px]">
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{ backgroundColor: activeSpace.color }}
@@ -273,6 +273,7 @@ export const CommandBar: React.FC = () => {
             <span className="truncate max-w-[120px]">{activeSpace.name}</span>
           </div>
         )}
+      </div>
       </div>
     </CommandDialog>
   )

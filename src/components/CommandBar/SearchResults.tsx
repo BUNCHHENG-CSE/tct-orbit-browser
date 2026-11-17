@@ -33,16 +33,18 @@ const TabFavicon: React.FC<{ tab: Tab }> = ({ tab }) => {
 
   if (src && !error) {
     return (
-      <img
-        src={src}
-        alt=""
-        className="w-4 h-4 object-contain rounded-sm"
-        onError={() => setError(true)}
-      />
+      <div className="w-5 h-5 shrink-0 flex items-center justify-center rounded-md p-0.5 dark:bg-white/[0.08] bg-transparent">
+        <img
+          src={src}
+          alt=""
+          className="w-3.5 h-3.5 object-contain rounded-xs"
+          onError={() => setError(true)}
+        />
+      </div>
     )
   }
 
-  return <Globe className="w-3.5 h-3.5 text-white/50" />
+  return <Globe className="w-3.5 h-3.5 text-muted-foreground" />
 }
 
 export const SearchResults: React.FC<SearchResultsProps> = ({

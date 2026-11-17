@@ -7,6 +7,7 @@ import {
 import { useTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { useThemeStore } from '@/store/useThemeStore'
 import { modKey } from '@/lib/platform'
 import { getThemeSyncScript, resolveIsDark } from '@/lib/theme'
 import type { Tab } from '@/types/api'
@@ -297,13 +298,13 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
   return (
     <div
-      className="w-full h-full relative dark:bg-[#0c0d12] bg-[#f8f9fd]"
+      className="w-full h-full relative bg-background"
       style={{ display: isActive ? 'flex' : 'none' }}
     >
       <webview
         ref={webviewRef}
         src={initialUrlRef.current}
-        className="w-full h-full dark:bg-[#0c0d12] bg-white"
+        className="w-full h-full bg-background"
         allowpopups={true}
         webpreferences="contextIsolation=yes, javascript=yes"
       />
@@ -317,27 +318,27 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
       {/* Error overlay on did-fail-load */}
       {hasError && (
-        <div className="absolute inset-0 dark:bg-[#0f1117] bg-white flex flex-col items-center justify-center p-6 text-center z-10">
+        <div className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-10">
           <div className="w-12 h-12 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-4">
             <AlertCircle className="w-6 h-6" />
           </div>
-          <h3 className="text-base font-semibold dark:text-white text-slate-900 mb-1">
+          <h3 className="text-base font-semibold text-foreground mb-1">
             Unable to reach webpage
           </h3>
-          <p className="text-xs dark:text-white/50 text-slate-500 max-w-sm mb-4">
+          <p className="text-xs text-muted-foreground max-w-sm mb-4">
             {errorMessage || 'Check your internet connection or the URL.'}
           </p>
           <div className="flex items-center gap-2">
             <button
               onClick={handleRetry}
-              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-medium flex items-center gap-2 transition-colors"
+              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium flex items-center gap-2 transition-colors shadow-sm"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Retry</span>
             </button>
             <button
               onClick={() => onOpenNewTab('https://duckduckgo.com')}
-              className="px-4 py-2 rounded-xl dark:bg-white/5 dark:hover:bg-white/10 bg-slate-100 hover:bg-slate-200 dark:text-white/80 text-slate-700 text-xs font-medium flex items-center gap-2 transition-colors"
+              className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium flex items-center gap-2 transition-colors border border-border"
             >
               <span>Go to Home</span>
             </button>
@@ -357,7 +358,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const { settings } = useSettings()
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
 
-  const isDark = resolveIsDark(settings?.theme)
+  const resolvedTheme = useThemeStore((s) => s.resolved)
+  const isDark = resolvedTheme === 'dark'
   const webviewsRef = useRef<Map<string, any>>(new Map())
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
@@ -489,19 +491,19 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   }
 
   return (
-    <div className="flex-1 relative w-full h-full overflow-hidden dark:bg-[#0c0d12] bg-[#f8f9fd]">
+    <div className="flex-1 relative w-full h-full overflow-hidden bg-background">
       {tabs.length === 0 ? (
-          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none dark:bg-[#0c0d12] bg-[#f8f9fd]">
-            <div className="w-12 h-12 rounded-2xl dark:bg-white/5 bg-slate-200/60 border dark:border-white/10 border-slate-300/80 flex items-center justify-center dark:text-white/40 text-slate-500 mb-3">
+          <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none bg-background">
+            <div className="w-12 h-12 rounded-2xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground mb-3">
               <Globe className="w-6 h-6" />
             </div>
-            <h2 className="text-sm font-semibold dark:text-white text-slate-800 mb-1">No Open Tabs</h2>
-            <p className="text-xs dark:text-white/40 text-slate-500 mb-4 max-w-xs">
+            <h2 className="text-sm font-semibold text-foreground mb-1">No Open Tabs</h2>
+            <p className="text-xs text-muted-foreground mb-4 max-w-xs">
               Press {modKey}+T or click below to search the web or enter a URL.
             </p>
             <button
               onClick={() => setCommandBarOpen(true, '', 'new-tab')}
-              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-white text-xs font-medium transition-colors shadow-sm"
+              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium transition-colors shadow-sm"
             >
               Open New Tab
             </button>
