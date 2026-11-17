@@ -31,7 +31,7 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
   return (
     <div className="mb-2">
       {!collapsed && (
-        <div className="flex items-center gap-1.5 px-3 py-1 mb-1 text-[10px] font-semibold tracking-wider dark:text-white/40 text-slate-400 uppercase">
+        <div className="flex items-center gap-1.5 px-3 py-1 mb-1 text-[10px] font-semibold tracking-wider text-muted-foreground uppercase">
           <Pin className="w-2.5 h-2.5" />
           <span>Pinned</span>
         </div>
@@ -51,7 +51,7 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
           />
         ))}
       </div>
-      <div className={`my-2 border-b dark:border-white/5 border-slate-200 ${collapsed ? 'w-7 mx-auto' : 'mx-2'}`} />
+      <div className={`my-2 border-b border-sidebar-border ${collapsed ? 'w-7 mx-auto' : 'mx-2'}`} />
     </div>
   )
 }

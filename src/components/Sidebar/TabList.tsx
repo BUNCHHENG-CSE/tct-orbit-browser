@@ -57,7 +57,7 @@ export const TabList: React.FC<TabListProps> = ({
                     <TooltipTrigger asChild>
                       <button
                         onClick={() => setCommandBarOpen(true, '', 'new-tab')}
-                        className="w-9 h-9 rounded-xl border border-dashed dark:border-white/10 border-slate-300 dark:hover:border-white/30 hover:border-slate-400 dark:text-white/30 text-slate-400 hover:text-primary flex items-center justify-center transition-all group"
+                        className="w-9 h-9 rounded-xl border border-dashed border-border hover:border-primary/50 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors group"
                         aria-label="Open new tab"
                       >
                         <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
@@ -70,7 +70,7 @@ export const TabList: React.FC<TabListProps> = ({
                 </TooltipProvider>
               </div>
             ) : (
-              <div className="text-center py-6 px-2 dark:text-white/30 text-slate-400 text-xs">
+              <div className="text-center py-6 px-2 text-muted-foreground text-xs">
                 No open tabs
               </div>
             )

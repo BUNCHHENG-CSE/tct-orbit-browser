@@ -252,8 +252,8 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
         onWheel={handleWheel}
         className={
           collapsed
-            ? 'flex flex-col items-center gap-1.5 p-1 rounded-2xl dark:bg-white/[0.04] bg-slate-200/50 border dark:border-white/5 border-slate-300/60 shadow-inner'
-            : 'flex items-center gap-1.5 p-1.5 rounded-2xl dark:bg-white/[0.04] bg-slate-200/50 border dark:border-white/5 border-slate-300/60 shadow-inner overflow-x-auto scrollbar-none'
+            ? 'flex flex-col items-center gap-1.5 p-1 rounded-2xl bg-muted/60 border border-border shadow-inner'
+            : 'flex items-center gap-1.5 p-1.5 rounded-2xl bg-muted/60 border border-border shadow-inner overflow-x-auto scrollbar-none'
         }
       >
         {/* Quick Dock Visible Spaces */}
@@ -273,12 +273,12 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                           collapsed
                             ? `w-9 h-9 rounded-xl ${
                                 isActive
-                                  ? 'scale-105 shadow-md ring-1.5 dark:ring-white/90 ring-slate-800/80'
+                                  ? 'scale-105 shadow-md ring-1.5 ring-foreground/80'
                                   : 'hover:scale-105 opacity-80 hover:opacity-100'
                               }`
                             : `w-8 h-8 rounded-xl ${
                                 isActive
-                                  ? 'scale-105 shadow-md ring-2 dark:ring-white/80 ring-slate-800/70 ring-offset-2 dark:ring-offset-[#121319] ring-offset-[#f5f6fa]'
+                                  ? 'scale-105 shadow-md ring-2 ring-foreground/70 ring-offset-2 ring-offset-background'
                                   : 'opacity-70 hover:opacity-100 hover:scale-105'
                               }`
                         }`}
@@ -320,19 +320,19 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                 </div>
               </ContextMenuTrigger>
 
-              <ContextMenuContent className="w-44 dark:bg-[#181a24] bg-white border dark:border-white/10 border-slate-200 shadow-xl rounded-xl p-1 z-50">
+              <ContextMenuContent className="w-44 bg-popover text-popover-foreground border border-border shadow-xl rounded-xl p-1 z-50">
                 <ContextMenuItem
                   onClick={() => handleOpenEdit(space)}
-                  className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-pointer dark:hover:bg-white/10 hover:bg-slate-100 dark:text-white/90 text-slate-800"
+                  className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-pointer hover:bg-accent text-foreground"
                 >
-                  <Pencil className="w-3.5 h-3.5 text-slate-400" />
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
                   <span>Edit Space</span>
                 </ContextMenuItem>
-                <ContextMenuSeparator className="my-1 dark:bg-white/10 bg-slate-200" />
+                <ContextMenuSeparator className="my-1 bg-border" />
                 <ContextMenuItem
                   onClick={() => handleDeleteSpace(space.id)}
                   disabled={spaces.length <= 1}
-                  className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-pointer text-red-500 hover:text-red-400 dark:hover:bg-red-500/10 hover:bg-red-50 disabled:opacity-40"
+                  className="flex items-center gap-2 px-2.5 py-1.5 text-xs rounded-lg cursor-pointer text-destructive hover:bg-destructive/10 disabled:opacity-40"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
                   <span>Delete Space</span>
@@ -353,14 +353,14 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                 }}
                 className={
                   collapsed
-                    ? 'relative w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 dark:bg-white/5 dark:hover:bg-white/10 bg-slate-200/60 hover:bg-slate-200 border dark:border-white/5 border-slate-300/50 dark:text-white/70 text-slate-700 hover:scale-105 active:scale-95 cursor-pointer group shrink-0'
-                    : 'relative flex items-center gap-1.5 px-2.5 h-8 rounded-xl dark:bg-white/5 dark:hover:bg-white/10 bg-slate-200/60 hover:bg-slate-200 dark:text-white/70 text-slate-700 border dark:border-white/5 border-slate-300/50 text-xs font-semibold transition-all hover:scale-105 active:scale-95 shrink-0 cursor-pointer group'
+                    ? 'relative w-9 h-9 rounded-xl flex items-center justify-center transition-colors bg-muted/70 hover:bg-muted border border-border text-foreground hover:scale-105 active:scale-95 cursor-pointer group shrink-0'
+                    : 'relative flex items-center gap-1.5 px-2.5 h-8 rounded-xl bg-muted/70 hover:bg-muted text-foreground border border-border text-xs font-semibold transition-colors hover:scale-105 active:scale-95 shrink-0 cursor-pointer group'
                 }
                 aria-label="Spaces Hub"
               >
                 <LayoutGrid className="w-4 h-4 transition-transform group-hover:scale-110" />
                 {collapsed ? (
-                  <span className="absolute -top-1 -right-1 min-w-[17px] h-4 px-1 rounded-full text-[9px] font-bold bg-primary text-white flex items-center justify-center shadow-sm">
+                  <span className="absolute -top-1 -right-1 min-w-[17px] h-4 px-1 rounded-full text-[9px] font-bold bg-primary text-primary-foreground flex items-center justify-center shadow-sm">
                     +{overflowCount}
                   </span>
                 ) : (
@@ -387,8 +387,8 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
               onClick={() => setCreateDialogOpen(true)}
               className={
                 collapsed
-                  ? 'w-9 h-9 rounded-xl border border-dashed dark:border-white/20 dark:hover:border-white/50 border-slate-300 dark:text-white/40 dark:hover:text-white text-slate-400 hover:text-slate-800 bg-transparent dark:hover:bg-white/5 hover:bg-slate-200/60 transition-all flex items-center justify-center shrink-0 cursor-pointer hover:scale-105 active:scale-95'
-                  : 'flex items-center justify-center w-8 h-8 rounded-xl dark:bg-white/5 dark:hover:bg-white/10 bg-slate-200/70 hover:bg-slate-200 dark:text-white/60 dark:hover:text-white text-slate-500 hover:text-slate-800 transition-all shrink-0 border dark:border-white/5 border-slate-300/60 cursor-pointer hover:scale-105 active:scale-95'
+                  ? 'w-9 h-9 rounded-xl border border-dashed border-border hover:border-primary/50 text-muted-foreground hover:text-foreground bg-transparent hover:bg-muted/50 transition-colors flex items-center justify-center shrink-0 cursor-pointer hover:scale-105 active:scale-95'
+                  : 'flex items-center justify-center w-8 h-8 rounded-xl bg-muted/70 hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0 border border-border cursor-pointer hover:scale-105 active:scale-95'
               }
               aria-label="New Space"
             >
@@ -402,9 +402,9 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
         {/* Spaces Hub Modal (for 100+ Spaces) */}
         <Dialog open={spacesHubOpen} onOpenChange={setSpacesHubOpen}>
-          <DialogContent className="w-[92vw] max-w-xl max-h-[85vh] p-0 overflow-hidden dark:bg-[#141620] bg-white border dark:border-white/10 border-slate-200 shadow-2xl rounded-2xl flex flex-col">
+          <DialogContent className="w-[92vw] max-w-xl max-h-[85vh] p-0 overflow-hidden bg-card text-card-foreground border border-border shadow-2xl rounded-2xl flex flex-col">
             {/* Header */}
-            <div className="p-5 pb-3 border-b dark:border-white/5 border-slate-100 dark:bg-white/[0.02] bg-slate-50/50 shrink-0">
+            <div className="p-5 pb-3 border-b border-border bg-muted/30 shrink-0">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <img
@@ -414,14 +414,14 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                   />
                   <div>
                     <div className="flex items-center gap-2">
-                      <DialogTitle className="text-base font-bold dark:text-white text-slate-900">
+                      <DialogTitle className="text-base font-bold text-foreground">
                         Spaces Hub
                       </DialogTitle>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-primary/15 text-primary border border-primary/20">
                         {spaces.length} {spaces.length === 1 ? 'Space' : 'Spaces'}
                       </span>
                     </div>
-                    <p className="text-xs dark:text-white/50 text-slate-500 mt-0.5">
+                    <p className="text-xs text-muted-foreground mt-0.5">
                       Search, switch, and manage all your workspace environments
                     </p>
                   </div>
@@ -430,19 +430,19 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
               {/* Real-time Search Filter */}
               <div className="relative mt-4">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Filter spaces by name... (e.g. Work, Research, Personal)"
-                  className="pl-9 pr-9 h-9 text-xs rounded-xl dark:bg-white/5 bg-white border dark:border-white/10 border-slate-200"
+                  className="pl-9 pr-9 h-9 text-xs rounded-xl bg-background border border-border"
                   autoFocus
                 />
                 {searchQuery && (
                   <button
                     type="button"
                     onClick={() => setSearchQuery('')}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted-foreground hover:text-foreground"
                   >
                     <X className="w-3.5 h-3.5" />
                   </button>
@@ -454,7 +454,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
             <div className="p-4 flex-1 overflow-y-auto max-h-[50vh] min-h-0">
               {filteredSpaces.length === 0 ? (
                 <div className="py-12 text-center">
-                  <p className="text-xs dark:text-white/50 text-slate-500">
+                  <p className="text-xs text-muted-foreground">
                     No spaces found matching &ldquo;{searchQuery}&rdquo;
                   </p>
                   <Button
@@ -484,10 +484,10 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                           setActive(space.id)
                           setSpacesHubOpen(false)
                         }}
-                        className={`group relative flex items-center justify-between p-2.5 rounded-xl border transition-all cursor-pointer ${
+                        className={`group relative flex items-center justify-between p-2.5 rounded-xl border transition-colors cursor-pointer ${
                           isActive
-                            ? 'dark:bg-primary/15 bg-primary/10 border-primary/40 shadow-sm ring-1 ring-primary/30'
-                            : 'dark:bg-white/[0.03] bg-slate-50 hover:dark:bg-white/[0.07] hover:bg-slate-100 border-transparent dark:border-white/5 border-slate-200/60'
+                            ? 'bg-primary/15 border-primary/40 shadow-sm ring-1 ring-primary/30'
+                            : 'bg-muted/30 hover:bg-muted/60 border-border text-foreground'
                         }`}
                       >
                         <div className="flex items-center gap-2.5 min-w-0 pr-2">
@@ -502,16 +502,16 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                           </div>
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="font-semibold text-xs truncate dark:text-white text-slate-800">
+                              <span className="font-semibold text-xs truncate text-foreground">
                                 {space.name}
                               </span>
                               {isActive && (
-                                <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-primary text-white shrink-0">
+                                <span className="inline-flex items-center px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-primary text-primary-foreground shrink-0">
                                   Active
                                 </span>
                               )}
                             </div>
-                            <span className="text-[10px] dark:text-white/40 text-slate-400 block mt-0.5">
+                            <span className="text-[10px] text-muted-foreground block mt-0.5">
                               {tabCount} {tabCount === 1 ? 'tab' : 'tabs'}
                             </span>
                           </div>
@@ -527,7 +527,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                               setSpacesHubOpen(false)
                               handleOpenEdit(space)
                             }}
-                            className="p-1.5 rounded-lg dark:hover:bg-white/10 hover:bg-slate-200 text-slate-400 hover:text-slate-800 dark:hover:text-white transition-colors"
+                            className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
@@ -539,7 +539,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                               e.stopPropagation()
                               handleDeleteSpace(space.id)
                             }}
-                            className="p-1.5 rounded-lg dark:hover:bg-red-500/20 hover:bg-red-100 text-slate-400 hover:text-red-500 transition-colors disabled:opacity-30 disabled:pointer-events-none"
+                            className="p-1.5 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-30 disabled:pointer-events-none"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -552,8 +552,8 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
             </div>
 
             {/* Footer */}
-            <DialogFooter className="px-5 py-3 border-t dark:border-white/5 border-slate-100 flex items-center justify-between sm:justify-between w-full dark:bg-white/[0.02] bg-slate-50/50 shrink-0">
-              <div className="flex items-center gap-1.5 text-[11px] dark:text-white/40 text-slate-400">
+            <DialogFooter className="px-5 py-3 border-t border-border flex items-center justify-between sm:justify-between w-full bg-muted/30 shrink-0">
+              <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 <Sparkles className="w-3.5 h-3.5 text-primary" />
                 <span>Scroll wheel on dock to cycle spaces</span>
               </div>
@@ -588,11 +588,11 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
         <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="dark:text-white text-slate-900">Create New Space</DialogTitle>
+              <DialogTitle className="text-foreground">Create New Space</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreateSpace} className="space-y-4 pt-2">
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Space Name
                 </label>
                 <Input
@@ -606,7 +606,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
               {/* Color Preset Palette */}
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Theme Color
                 </label>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -626,7 +626,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
               {/* Icon Selector */}
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Icon
                 </label>
                 <div className="grid grid-cols-6 gap-2 max-h-36 overflow-y-auto p-1">
@@ -637,10 +637,10 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                         key={iconKey}
                         type="button"
                         onClick={() => setSelectedIcon(iconKey)}
-                        className={`flex items-center justify-center p-2 rounded-lg border transition-all cursor-pointer ${
+                        className={`flex items-center justify-center p-2 rounded-lg border transition-colors cursor-pointer ${
                           isSelected
-                            ? 'dark:bg-white/15 dark:border-white/40 bg-primary/10 border-primary text-primary dark:text-white shadow-sm'
-                            : 'dark:bg-white/5 dark:border-white/5 bg-slate-100 border-slate-200 dark:text-white/60 text-slate-600 hover:dark:bg-white/10 hover:bg-slate-200'
+                            ? 'bg-primary/10 border-primary text-primary shadow-sm'
+                            : 'bg-muted/50 border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                         }`}
                       >
                         {renderIcon(iconKey, 'w-4 h-4')}
@@ -670,11 +670,11 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
         <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
           <DialogContent className="max-w-md">
             <DialogHeader>
-              <DialogTitle className="dark:text-white text-slate-900">Edit Space</DialogTitle>
+              <DialogTitle className="text-foreground">Edit Space</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleUpdateSpace} className="space-y-4 pt-2">
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Space Name
                 </label>
                 <Input
@@ -688,7 +688,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
               {/* Color Preset Palette */}
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Theme Color
                 </label>
                 <div className="flex items-center gap-2 flex-wrap">
@@ -708,7 +708,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
               {/* Icon Selector */}
               <div>
-                <label className="text-xs font-medium dark:text-white/70 text-slate-700 block mb-1.5">
+                <label className="text-xs font-medium text-foreground block mb-1.5">
                   Icon
                 </label>
                 <div className="grid grid-cols-6 gap-2 max-h-36 overflow-y-auto p-1">
@@ -719,10 +719,10 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                         key={iconKey}
                         type="button"
                         onClick={() => setEditIcon(iconKey)}
-                        className={`flex items-center justify-center p-2 rounded-lg border transition-all cursor-pointer ${
+                        className={`flex items-center justify-center p-2 rounded-lg border transition-colors cursor-pointer ${
                           isSelected
-                            ? 'dark:bg-white/15 dark:border-white/40 bg-primary/10 border-primary text-primary dark:text-white shadow-sm'
-                            : 'dark:bg-white/5 dark:border-white/5 bg-slate-100 border-slate-200 dark:text-white/60 text-slate-600 hover:dark:bg-white/10 hover:bg-slate-200'
+                            ? 'bg-primary/10 border-primary text-primary shadow-sm'
+                            : 'bg-muted/50 border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                         }`}
                       >
                         {renderIcon(iconKey, 'w-4 h-4')}
