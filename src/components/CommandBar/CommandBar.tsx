@@ -274,7 +274,7 @@ export const CommandBar: React.FC = () => {
           </div>
         )}
       </div>
-      </div>
+
     </CommandDialog>
   )
 }

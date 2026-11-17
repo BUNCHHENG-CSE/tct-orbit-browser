@@ -13,7 +13,9 @@ import { Badge } from '@/components/ui/badge'
 import { useSettings } from '@/hooks/useSettings'
 import { useSpaces } from '@/hooks/useSpaces'
 import { useBrowserStore } from '@/store/useBrowserStore'
-import { applyAccentColor, resolveIsDark } from '@/lib/theme'
+import { useThemeStore } from '@/store/useThemeStore'
+import { ACCENT_PRESETS } from '@/lib/theme'
+import type { ThemeMode, AccentPreset, WebColorScheme } from '@/types/api'
 import { SEARCH_ENGINES, type SearchEngineId } from '@/lib/searchEngines'
 import { modKey, getPlatformDescription } from '@/lib/platform'
 import browserLogo from '@/assets/logo.png'
@@ -31,11 +33,7 @@ import {
   Monitor,
   Trash2,
   RefreshCw,
-  Sparkles,
-  ExternalLink,
-  Lock,
-  Cpu,
-  CheckCircle2,
+  Globe,
   RotateCcw
 } from 'lucide-react'
 import { toast } from 'sonner'
@@ -54,34 +52,35 @@ type SettingsTab =
   | 'shortcuts'
   | 'about'
 
-const THEMES = [
+const ACCENT_OPTIONS = ACCENT_PRESETS
+
+const WEB_COLOR_SCHEME_OPTIONS: {
+  id: WebColorScheme
+  name: string
+  desc: string
+  badge?: string
+}[] = [
+  {
+    id: 'match-browser',
+    name: 'Match Browser Theme',
+    desc: 'Websites follow TCT Orbit’s active theme (Light or Dark).',
+    badge: 'Default'
+  },
   {
     id: 'dark',
-    name: 'Dark Mode',
-    desc: 'Midnight dark aesthetic',
-    icon: Moon
+    name: 'Always Dark',
+    desc: 'Requests dark mode stylesheets from all websites supporting dark themes.'
   },
   {
     id: 'light',
-    name: 'Light Mode',
-    desc: 'Clean porcelain bright',
-    icon: Sun
+    name: 'Always Light',
+    desc: 'Requests standard light mode stylesheets from all websites.'
   },
   {
     id: 'system',
-    name: 'System',
-    desc: 'Sync with system OS',
-    icon: Monitor
+    name: 'Follow OS Setting',
+    desc: 'Websites synchronize directly with your Windows / macOS theme.'
   }
-]
-
-const ACCENT_COLORS = [
-  { id: 'indigo', name: 'Orbit Indigo', hex: '#6366f1' },
-  { id: 'purple', name: 'Electric Purple', hex: '#8b5cf6' },
-  { id: 'cyan', name: 'Cyan Glow', hex: '#06b6d4' },
-  { id: 'emerald', name: 'Emerald', hex: '#10b981' },
-  { id: 'amber', name: 'Amber Gold', hex: '#f59e0b' },
-  { id: 'pink', name: 'Neon Pink', hex: '#ec4899' }
 ]
 
 const KEYBOARD_SHORTCUTS = [
@@ -114,17 +113,33 @@ const setLocalPref = <T,>(key: string, value: T): void => {
 }
 
 export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChange }) => {
-  const { settings, setDefaultSearchEngine, setTheme, setSidebarCollapsed, setAccentColor } = useSettings()
+  const {
+    settings,
+    setDefaultSearchEngine,
+    setTheme,
+    setSidebarCollapsed,
+    setAccentPreset,
+    setWebColorScheme: persistWebColorScheme
+  } = useSettings()
+
   const { activeSpace, updateSpace } = useSpaces()
   const appInfo = useBrowserStore((s) => s.appInfo)
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
 
+  // Theme Store
+  const themeMode = useThemeStore((s) => s.mode)
+  const resolvedTheme = useThemeStore((s) => s.resolved)
+  const currentAccent = useThemeStore((s) => s.accent)
+  const webColorScheme = useThemeStore((s) => s.webColorScheme)
+  const setThemeModeStore = useThemeStore((s) => s.setThemeMode)
+  const setAccentStore = useThemeStore((s) => s.setAccent)
+  const setWebColorSchemeStore = useThemeStore((s) => s.setWebColorScheme)
+
   const currentEngine = (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
-  const currentTheme = settings?.theme || 'dark'
   const isSidebarCollapsed = settings?.sidebarCollapsed ?? false
 
   // Local preferences state
-  const [selectedAccent, setSelectedAccent] = useState(() => settings?.accentColor || getLocalPref('accent_color', '#6366f1'))
+  const [selectedAccent, setSelectedAccent] = useState(() => ACCENT_PRESETS.find((p) => p.id === currentAccent)?.hex || '#3b82f6')
   const [glassmorphism, setGlassmorphism] = useState(() => getLocalPref('glassmorphism', true))
   const [smoothTransitions, setSmoothTransitions] = useState(() => getLocalPref('smooth_transitions', true))
   const [tabCyclingSearch, setTabCyclingSearch] = useState(() => getLocalPref('tab_cycling_search', true))
@@ -143,30 +158,37 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
   const [isClearingCache, setIsClearingCache] = useState(false)
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
 
-  const handleSelectTheme = async (themeId: string) => {
-    const isDark = resolveIsDark(themeId)
-    document.documentElement.classList.toggle('dark', isDark)
-    await setTheme(themeId)
+  const handleSelectTheme = async (mode: ThemeMode) => {
+    await setThemeModeStore(mode)
+    await setTheme(mode)
+    toast.success(`Theme mode set to ${mode === 'system' ? 'System sync' : mode === 'dark' ? 'Dark' : 'Light'}`)
+  }
+
+  const handleAccentPresetChange = async (preset: AccentPreset) => {
+    await setAccentStore(preset)
+    await setAccentPreset(preset)
+    const presetObj = ACCENT_PRESETS.find((p) => p.id === preset)
+    const hex = presetObj?.hex || '#3b82f6'
+    setSelectedAccent(hex)
+    if (activeSpace && (activeSpace.color === selectedAccent || activeSpace.color === '#6366f1' || activeSpace.color === '#3b82f6')) {
+      try {
+        await updateSpace(activeSpace.id, { color: hex })
+      } catch (err) {
+        console.error('Failed to persist accent to space:', err)
+      }
+    }
+    toast.success(`Accent color set to ${presetObj?.name || preset}`)
+  }
+
+  const handleWebColorSchemeChange = async (scheme: WebColorScheme) => {
+    await setWebColorSchemeStore(scheme)
+    await persistWebColorScheme(scheme)
+    toast.success(`Website color scheme updated to ${scheme}`)
   }
 
   const handleSelectEngine = async (engineId: SearchEngineId) => {
     await setDefaultSearchEngine(engineId)
     toast.success(`Default search engine set to ${SEARCH_ENGINES[engineId]?.name}`)
-  }
-
-  const handleAccentChange = async (hex: string) => {
-    setSelectedAccent(hex)
-    setLocalPref('accent_color', hex)
-    applyAccentColor(hex)
-    try {
-      await setAccentColor(hex)
-      if (activeSpace && (activeSpace.color === selectedAccent || activeSpace.color === '#6366f1')) {
-        await updateSpace(activeSpace.id, { color: hex })
-      }
-    } catch (err) {
-      console.error('Failed to persist accent color:', err)
-    }
-    toast.success('Accent highlight color updated')
   }
 
   const handleClearCache = async () => {
@@ -185,14 +207,16 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     }, 900)
   }
 
-  const handleResetSettings = () => {
-    setTheme('dark')
+  const handleResetSettings = async () => {
+    await setThemeModeStore('dark')
+    await setTheme('dark')
+    await setAccentStore('orbit-blue')
+    await setAccentPreset('orbit-blue')
+    await setWebColorSchemeStore('match-browser')
+    await persistWebColorScheme('match-browser')
     setDefaultSearchEngine('duckduckgo')
     setSidebarCollapsed(false)
-    setSelectedAccent('#6366f1')
-    setLocalPref('accent_color', '#6366f1')
-    applyAccentColor('#6366f1')
-    setAccentColor('#6366f1')
+    setSelectedAccent(ACCENT_PRESETS[0].hex)
     setGlassmorphism(true)
     setLocalPref('glassmorphism', true)
     setAdBlockEnabled(true)
@@ -214,9 +238,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[92vw] max-w-2xl h-[85vh] max-h-[580px] min-h-[380px] p-0 overflow-hidden dark:bg-[#13151f] bg-white border dark:border-white/10 border-slate-200 shadow-2xl rounded-2xl flex flex-col">
+      <DialogContent className="w-[92vw] max-w-2xl h-[85vh] max-h-[620px] min-h-[420px] p-0 overflow-hidden bg-card text-card-foreground border border-border shadow-2xl rounded-2xl flex flex-col">
         {/* Header */}
-        <DialogHeader className="px-5 py-3.5 border-b dark:border-white/5 border-slate-200/80 dark:bg-white/[0.02] bg-slate-50/70 shrink-0">
+        <DialogHeader className="px-5 py-3.5 border-b border-border bg-muted/30 shrink-0">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2.5">
               <img
@@ -225,10 +249,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 className="w-8 h-8 rounded-xl object-contain shadow-xs shrink-0"
               />
               <div>
-                <DialogTitle className="text-base font-bold dark:text-white text-slate-900 leading-tight">
+                <DialogTitle className="text-base font-bold text-foreground leading-tight">
                   Browser Settings
                 </DialogTitle>
-                <DialogDescription className="text-xs dark:text-white/50 text-slate-500 mt-0.5">
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   Customize theme, search engine, spaces dock, and security
                 </DialogDescription>
               </div>
@@ -239,7 +263,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
         {/* Modal Body: Left Navigation + Right Content */}
         <div className="flex-1 flex overflow-hidden min-h-0">
           {/* Left Navigation Rail */}
-          <nav className="w-36 sm:w-48 border-r dark:border-white/5 border-slate-200/80 p-2 space-y-0.5 dark:bg-white/[0.01] bg-slate-50/40 shrink-0 overflow-y-auto">
+          <nav className="w-36 sm:w-48 border-r border-border p-2 space-y-0.5 bg-muted/20 shrink-0 overflow-y-auto">
             {navItems.map((item) => {
               const IconComp = item.icon
               const isSelected = activeTab === item.id
@@ -249,8 +273,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   onClick={() => setActiveTab(item.id)}
                   className={`w-full flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-medium transition-all text-left cursor-pointer ${
                     isSelected
-                      ? 'dark:bg-primary/15 bg-primary/10 text-primary dark:text-white font-semibold shadow-xs'
-                      : 'dark:text-white/70 text-slate-600 hover:dark:bg-white/5 hover:bg-slate-200/60 hover:text-slate-900 dark:hover:text-white'
+                      ? 'bg-primary/15 text-primary font-semibold shadow-xs'
+                      : 'text-muted-foreground hover:bg-muted hover:text-foreground'
                   }`}
                 >
                   <IconComp className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-primary' : 'opacity-60'}`} />
@@ -265,90 +289,244 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 1. APPEARANCE TAB */}
             {activeTab === 'appearance' && (
               <div className="space-y-6">
+                {/* Theme Mode Visual Previews */}
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-2.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
                     Theme Mode
                   </h4>
                   <div className="grid grid-cols-3 gap-2.5">
-                    {THEMES.map((themeOption) => {
-                      const isSelected = currentTheme === themeOption.id
-                      const IconComponent = themeOption.icon
-                      return (
-                        <button
-                          key={themeOption.id}
-                          type="button"
-                          onClick={() => handleSelectTheme(themeOption.id)}
-                          className={`flex flex-col items-center justify-center p-3.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
-                            isSelected
-                              ? 'dark:bg-primary/20 bg-primary/10 border-primary text-primary dark:text-white shadow-sm ring-1 ring-primary/40'
-                              : 'dark:bg-white/5 bg-slate-100/80 dark:border-white/5 border-slate-200 dark:text-white/70 text-slate-600 hover:dark:bg-white/10 hover:bg-slate-200/80'
-                          }`}
-                        >
-                          <IconComponent className={`w-4 h-4 mb-1.5 ${isSelected ? 'text-primary' : 'opacity-70'}`} />
-                          <span className="font-semibold text-xs mb-0.5">{themeOption.name}</span>
-                          {isSelected && (
-                            <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
-                              <Check className="w-2.5 h-2.5" /> Active
-                            </span>
-                          )}
-                        </button>
-                      )
-                    })}
+                    {/* Light Mode Preview Card */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTheme('light')}
+                      className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                        themeMode === 'light'
+                          ? 'border-primary ring-2 ring-primary/40 bg-primary/5 shadow-xs'
+                          : 'border-border bg-card hover:border-primary/40 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-slate-200 bg-white flex flex-col shadow-xs mb-2">
+                        <div className="h-4 bg-[#f4f4f5] border-b border-slate-200 px-1.5 flex items-center justify-between">
+                          <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          </div>
+                          <div className="h-2.5 w-14 rounded-xs bg-white border border-slate-200 flex items-center px-1">
+                            <div className="w-1 h-1 rounded-full bg-primary" />
+                          </div>
+                          <div className="w-3" />
+                        </div>
+                        <div className="h-4 bg-white border-b border-slate-100 px-2 flex items-center">
+                          <div className="h-2 w-full rounded-xs bg-slate-100 border border-slate-200/60" />
+                        </div>
+                        <div className="flex-1 p-2 bg-white flex flex-col gap-1">
+                          <div className="h-1.5 w-1/2 rounded-full bg-slate-200" />
+                          <div className="h-1 w-3/4 rounded-full bg-slate-100" />
+                          <div className="h-1 w-2/3 rounded-full bg-slate-100" />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-1.5">
+                          <Sun className="w-3.5 h-3.5 text-amber-500" />
+                          <span className="text-xs font-semibold text-foreground">Light</span>
+                        </div>
+                        {themeMode === 'light' && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                            <Check className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Clean porcelain bright</p>
+                    </button>
+
+                    {/* Dark Mode Preview Card */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTheme('dark')}
+                      className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                        themeMode === 'dark'
+                          ? 'border-primary ring-2 ring-primary/40 bg-primary/5 shadow-xs'
+                          : 'border-border bg-card hover:border-primary/40 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-zinc-800 bg-[#09090b] flex flex-col shadow-xs mb-2">
+                        <div className="h-4 bg-[#121215] border-b border-zinc-800 px-1.5 flex items-center justify-between">
+                          <div className="flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-400/80" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400/80" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                          </div>
+                          <div className="h-2.5 w-14 rounded-xs bg-[#18181b] border border-zinc-700 flex items-center px-1">
+                            <div className="w-1 h-1 rounded-full bg-primary" />
+                          </div>
+                          <div className="w-3" />
+                        </div>
+                        <div className="h-4 bg-[#09090b] border-b border-zinc-800/80 px-2 flex items-center">
+                          <div className="h-2 w-full rounded-xs bg-[#18181b] border border-zinc-800" />
+                        </div>
+                        <div className="flex-1 p-2 bg-[#09090b] flex flex-col gap-1">
+                          <div className="h-1.5 w-1/2 rounded-full bg-zinc-700" />
+                          <div className="h-1 w-3/4 rounded-full bg-zinc-800" />
+                          <div className="h-1 w-2/3 rounded-full bg-zinc-800" />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-1.5">
+                          <Moon className="w-3.5 h-3.5 text-blue-400" />
+                          <span className="text-xs font-semibold text-foreground">Dark</span>
+                        </div>
+                        {themeMode === 'dark' && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                            <Check className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">Midnight dark aesthetic</p>
+                    </button>
+
+                    {/* System Mode Split Preview Card */}
+                    <button
+                      type="button"
+                      onClick={() => handleSelectTheme('system')}
+                      className={`group relative flex flex-col rounded-xl border p-2.5 text-left transition-all cursor-pointer ${
+                        themeMode === 'system'
+                          ? 'border-primary ring-2 ring-primary/40 bg-primary/5 shadow-xs'
+                          : 'border-border bg-card hover:border-primary/40 hover:bg-muted/50'
+                      }`}
+                    >
+                      <div className="w-full h-20 rounded-lg overflow-hidden border border-border flex mb-2 shadow-xs">
+                        <div className="w-1/2 h-full bg-white flex flex-col border-r border-border">
+                          <div className="h-4 bg-[#f4f4f5] border-b border-slate-200 px-1 flex items-center gap-1">
+                            <div className="w-1.5 h-1.5 rounded-full bg-red-400" />
+                            <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                          </div>
+                          <div className="h-4 bg-white border-b border-slate-100 px-1 flex items-center">
+                            <div className="h-2 w-full rounded-xs bg-slate-100" />
+                          </div>
+                          <div className="flex-1 p-1.5 bg-white flex flex-col gap-1">
+                            <div className="h-1.5 w-3/4 rounded-full bg-slate-200" />
+                            <div className="h-1 w-full rounded-full bg-slate-100" />
+                          </div>
+                        </div>
+                        <div className="w-1/2 h-full bg-[#09090b] flex flex-col">
+                          <div className="h-4 bg-[#121215] border-b border-zinc-800 px-1 flex items-center justify-end">
+                            <div className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                          </div>
+                          <div className="h-4 bg-[#09090b] border-b border-zinc-800/80 px-1 flex items-center">
+                            <div className="h-2 w-full rounded-xs bg-[#18181b]" />
+                          </div>
+                          <div className="flex-1 p-1.5 bg-[#09090b] flex flex-col gap-1">
+                            <div className="h-1.5 w-3/4 rounded-full bg-zinc-700" />
+                            <div className="h-1 w-full rounded-full bg-zinc-800" />
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center gap-1.5">
+                          <Monitor className="w-3.5 h-3.5 text-primary" />
+                          <span className="text-xs font-semibold text-foreground">System</span>
+                        </div>
+                        {themeMode === 'system' && (
+                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                            <Check className="w-3 h-3" />
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        Follows OS ({resolvedTheme === 'dark' ? 'Dark' : 'Light'})
+                      </p>
+                    </button>
                   </div>
                 </div>
 
+                {/* Accent Color Presets */}
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-2.5">
-                    Accent Highlight Color
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
+                    Accent Color Presets
                   </h4>
-                  <div className="flex items-center gap-2.5 flex-wrap">
-                    {ACCENT_COLORS.map((accent) => {
-                      const isSelected = selectedAccent === accent.hex
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {ACCENT_OPTIONS.map((opt) => {
+                      const isSelected = currentAccent === opt.id
                       return (
                         <button
-                          key={accent.id}
-                          onClick={() => handleAccentChange(accent.hex)}
-                          className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-xs transition-all cursor-pointer ${
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleAccentPresetChange(opt.id)}
+                          className={`flex items-center gap-2.5 px-3 py-2 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                             isSelected
-                              ? 'dark:bg-white/10 bg-slate-200/80 font-semibold shadow-xs'
-                              : 'dark:bg-white/5 bg-slate-100 dark:border-white/5 border-slate-200 hover:scale-105'
+                              ? 'border-primary ring-2 ring-primary/40 bg-primary/5 text-foreground shadow-xs'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/60'
                           }`}
-                          style={
-                            isSelected
-                              ? {
-                                  borderColor: accent.hex,
-                                  boxShadow: `0 0 10px ${accent.hex}35`
-                                }
-                              : undefined
-                          }
                         >
                           <span
-                            className="w-3.5 h-3.5 rounded-full shrink-0 shadow-sm transition-transform"
-                            style={{
-                              backgroundColor: accent.hex,
-                              transform: isSelected ? 'scale(1.15)' : 'scale(1)'
-                            }}
-                          />
-                          <span className="dark:text-white/90 text-slate-800 font-medium">{accent.name}</span>
-                          {isSelected && (
-                            <Check
-                              className="w-3.5 h-3.5 ml-auto shrink-0"
-                              style={{ color: accent.hex }}
-                            />
-                          )}
+                            className="w-4 h-4 rounded-full shrink-0 shadow-xs border border-white/20 transition-transform flex items-center justify-center"
+                            style={{ backgroundColor: opt.hex }}
+                          >
+                            {isSelected && <Check className="w-2.5 h-2.5 text-white" />}
+                          </span>
+                          <span className="truncate">{opt.name}</span>
                         </button>
                       )
                     })}
                   </div>
                 </div>
 
-                <div className="space-y-3.5 pt-1 border-t dark:border-white/5 border-slate-200">
+                {/* Website Original Color Scheme */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Website Original Color Scheme
+                    </h4>
+                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                      Native CSS Engine
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mb-2.5">
+                    Websites render using their author&apos;s native Light and Dark CSS stylesheets via @media (prefers-color-scheme).
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {WEB_COLOR_SCHEME_OPTIONS.map((opt) => {
+                      const isSelected = webColorScheme === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleWebColorSchemeChange(opt.id)}
+                          className={`flex flex-col p-2.5 rounded-xl border text-left transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-primary ring-2 ring-primary/40 bg-primary/5 shadow-xs'
+                              : 'border-border bg-card hover:bg-muted/60'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                              <Globe className="w-3.5 h-3.5 text-primary" />
+                              {opt.name}
+                            </span>
+                            {opt.badge ? (
+                              <span className="text-[9px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                                {opt.badge}
+                              </span>
+                            ) : isSelected ? (
+                              <Check className="w-3.5 h-3.5 text-primary" />
+                            ) : null}
+                          </div>
+                          <p className="text-[10px] text-muted-foreground leading-relaxed">{opt.desc}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* Visual Customizations Switches */}
+                <div className="space-y-3.5 pt-1 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Glassmorphism & Transparency
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Render frosted glass blurs across sidebar and command bar
                       </p>
                     </div>
@@ -363,10 +541,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Smooth Tab Transitions
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Animate tab switching and sidebar collapse transitions
                       </p>
                     </div>
@@ -386,7 +564,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {activeTab === 'search' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-2.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
                     Default Search Engine
                   </h4>
                   <div className="grid grid-cols-3 gap-2.5">
@@ -399,8 +577,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           onClick={() => handleSelectEngine(engine.id as SearchEngineId)}
                           className={`flex flex-col items-center justify-center p-3.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                             isSelected
-                              ? 'dark:bg-primary/20 bg-primary/10 border-primary text-primary dark:text-white shadow-sm ring-1 ring-primary/40'
-                              : 'dark:bg-white/5 bg-slate-100/80 dark:border-white/5 border-slate-200 dark:text-white/70 text-slate-600 hover:dark:bg-white/10 hover:bg-slate-200/80'
+                              ? 'bg-primary/15 border-primary text-primary font-bold shadow-xs ring-1 ring-primary/40'
+                              : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                           }`}
                         >
                           <span className="text-sm font-bold mb-1">{engine.name}</span>
@@ -415,13 +593,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                 </div>
 
-                <div className="space-y-3.5 pt-2 border-t dark:border-white/5 border-slate-200">
+                <div className="space-y-3.5 pt-2 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Spotlight Search Suggestions
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Display direct search queries and quick navigation links in Command Bar
                       </p>
                     </div>
@@ -436,10 +614,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Tab Key Search Engine Switching
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Press Tab in Command Bar to quickly cycle between Google, DuckDuckGo, and Bing
                       </p>
                     </div>
@@ -459,10 +637,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {activeTab === 'tabs' && (
               <div className="space-y-6">
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-1.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Quick Spaces in Dock
                   </h4>
-                  <p className="text-[11px] dark:text-white/50 text-slate-500 mb-2.5">
+                  <p className="text-[11px] text-muted-foreground mb-2.5">
                     Limit visible spaces in sidebar rail. Spaces beyond this count are accessible via the Spaces Hub (+N).
                   </p>
                   <div className="grid grid-cols-3 gap-2">
@@ -478,8 +656,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           }}
                           className={`py-2 px-3 rounded-xl border text-xs font-medium transition-all cursor-pointer text-center ${
                             isSelected
-                              ? 'dark:bg-primary/20 bg-primary/10 border-primary text-primary font-bold shadow-xs'
-                              : 'dark:bg-white/5 bg-slate-100 dark:border-white/5 border-slate-200 dark:text-white/70 text-slate-600 hover:dark:bg-white/10 hover:bg-slate-200'
+                              ? 'bg-primary/15 border-primary text-primary font-bold shadow-xs'
+                              : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                           }`}
                         >
                           {num} Spaces {num === 2 ? '(Default)' : ''}
@@ -490,7 +668,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 </div>
 
                 <div>
-                  <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-1.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Sidebar Rail Mode
                   </h4>
                   <div className="grid grid-cols-2 gap-2">
@@ -498,8 +676,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       onClick={() => setSidebarCollapsed(false)}
                       className={`p-3 rounded-xl border text-xs text-left transition-all cursor-pointer ${
                         !isSidebarCollapsed
-                          ? 'dark:bg-primary/20 bg-primary/10 border-primary text-primary font-semibold'
-                          : 'dark:bg-white/5 bg-slate-100 dark:border-white/5 border-slate-200 dark:text-white/70 text-slate-600'
+                          ? 'bg-primary/15 border-primary text-primary font-semibold'
+                          : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
                       <p className="font-bold">Expanded (260px)</p>
@@ -509,8 +687,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       onClick={() => setSidebarCollapsed(true)}
                       className={`p-3 rounded-xl border text-xs text-left transition-all cursor-pointer ${
                         isSidebarCollapsed
-                          ? 'dark:bg-primary/20 bg-primary/10 border-primary text-primary font-semibold'
-                          : 'dark:bg-white/5 bg-slate-100 dark:border-white/5 border-slate-200 dark:text-white/70 text-slate-600'
+                          ? 'bg-primary/15 border-primary text-primary font-semibold'
+                          : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground'
                       }`}
                     >
                       <p className="font-bold">Compact Rail (60px)</p>
@@ -519,13 +697,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                 </div>
 
-                <div className="space-y-3.5 pt-1 border-t dark:border-white/5 border-slate-200">
+                <div className="space-y-3.5 pt-1 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Restore Previous Tabs on Launch
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Automatically reload tabs and active spaces from your last session
                       </p>
                     </div>
@@ -540,10 +718,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Confirm Before Deleting Space
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Warn when attempting to delete a space with open tabs
                       </p>
                     </div>
@@ -562,14 +740,14 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 4. PRIVACY & SHIELD TAB */}
             {activeTab === 'privacy' && (
               <div className="space-y-5">
-                <div className="p-3.5 rounded-xl dark:bg-primary/10 bg-primary/5 border border-primary/20 flex items-center justify-between">
+                <div className="p-3.5 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <Shield className="w-5 h-5 text-primary shrink-0" />
                     <div>
-                      <p className="text-xs font-bold dark:text-white text-slate-900">
+                      <p className="text-xs font-bold text-foreground">
                         TCT Orbit Shield Protection
                       </p>
-                      <p className="text-[11px] dark:text-white/60 text-slate-600">
+                      <p className="text-[11px] text-muted-foreground">
                         Blocks trackers, fingerprinting scripts, and third-party advertising
                       </p>
                     </div>
@@ -582,10 +760,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 <div className="space-y-3.5">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Ad & Tracker Blocking
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Block cross-site tracking cookies and intrusive banners
                       </p>
                     </div>
@@ -601,10 +779,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Send &quot;Do Not Track&quot; (DNT) Header
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Instruct visited websites not to track browsing activity
                       </p>
                     </div>
@@ -619,10 +797,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         HTTPS-First Mode
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Automatically upgrade unencrypted HTTP connections to secure HTTPS
                       </p>
                     </div>
@@ -637,13 +815,13 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 </div>
 
                 {/* Clear Cache Card */}
-                <div className="pt-3 border-t dark:border-white/5 border-slate-200">
-                  <div className="p-3.5 rounded-xl dark:bg-white/[0.03] bg-slate-100/70 border dark:border-white/5 border-slate-200 flex items-center justify-between">
+                <div className="pt-3 border-t border-border">
+                  <div className="p-3.5 rounded-xl bg-muted/40 border border-border flex items-center justify-between">
                     <div>
-                      <p className="text-xs font-bold dark:text-white text-slate-900">
+                      <p className="text-xs font-bold text-foreground">
                         Clear Browsing Cache & Temp Data
                       </p>
-                      <p className="text-[11px] dark:text-white/50 text-slate-500">
+                      <p className="text-[11px] text-muted-foreground">
                         Free disk space and clear temporary cookies and session data
                       </p>
                     </div>
@@ -654,7 +832,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       disabled={isClearingCache}
                       className="text-xs flex items-center gap-1.5 h-8 shrink-0"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+                      <Trash2 className="w-3.5 h-3.5 text-muted-foreground" />
                       <span>{isClearingCache ? 'Clearing...' : 'Clear Cache'}</span>
                     </Button>
                   </div>
@@ -668,14 +846,14 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-1.5">
-                      <p className="text-xs font-semibold dark:text-white text-slate-800">
+                      <p className="text-xs font-semibold text-foreground">
                         Automatic Tab Sleeping (Memory Saver)
                       </p>
                       <Badge variant="subtle" className="text-[9px] px-1.5 py-0 font-medium">
                         Saves ~35% RAM
                       </Badge>
                     </div>
-                    <p className="text-[11px] dark:text-white/50 text-slate-500">
+                    <p className="text-[11px] text-muted-foreground">
                       Puts inactive background tabs to sleep after 30 minutes to free memory
                     </p>
                   </div>
@@ -690,10 +868,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold dark:text-white text-slate-800">
+                    <p className="text-xs font-semibold text-foreground">
                       Hardware GPU Acceleration
                     </p>
-                    <p className="text-[11px] dark:text-white/50 text-slate-500">
+                    <p className="text-[11px] text-muted-foreground">
                       Utilize graphics card acceleration for smooth 60fps rendering
                     </p>
                   </div>
@@ -708,10 +886,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-xs font-semibold dark:text-white text-slate-800">
+                    <p className="text-xs font-semibold text-foreground">
                       Background Video Optimization
                     </p>
-                    <p className="text-[11px] dark:text-white/50 text-slate-500">
+                    <p className="text-[11px] text-muted-foreground">
                       Throttle non-visible video players in hidden tabs to extend laptop battery life
                     </p>
                   </div>
@@ -729,21 +907,21 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 6. KEYBOARD SHORTCUTS TAB */}
             {activeTab === 'shortcuts' && (
               <div className="space-y-3">
-                <h4 className="text-xs font-semibold uppercase tracking-wider dark:text-white/40 text-slate-400 mb-2">
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                   Keyboard Shortcuts Reference
                 </h4>
                 <div className="space-y-2">
                   {KEYBOARD_SHORTCUTS.map((sc, i) => (
                     <div
                       key={i}
-                      className="flex items-center justify-between p-2 rounded-xl dark:bg-white/[0.02] bg-slate-50 border dark:border-white/5 border-slate-200/80 text-xs"
+                      className="flex items-center justify-between p-2 rounded-xl bg-muted/40 border border-border text-xs"
                     >
-                      <span className="dark:text-white/80 text-slate-700">{sc.description}</span>
+                      <span className="text-foreground">{sc.description}</span>
                       <div className="flex items-center gap-1">
                         {sc.keys.map((k, j) => (
                           <kbd
                             key={j}
-                            className="px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold dark:bg-white/10 bg-slate-200 text-slate-700 dark:text-white border dark:border-white/10 border-slate-300 shadow-xs"
+                            className="px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold bg-muted text-foreground border border-border shadow-xs"
                           >
                             {k}
                           </kbd>
@@ -758,19 +936,19 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 7. ABOUT TAB */}
             {activeTab === 'about' && (
               <div className="space-y-5">
-                <div className="p-4 rounded-xl dark:bg-white/[0.03] bg-slate-50 border dark:border-white/5 border-slate-200/80 space-y-2.5">
+                <div className="p-4 rounded-xl bg-muted/30 border border-border space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <img
                         src={browserLogo}
                         alt="TCT Orbit Logo"
-                        className="w-10 h-10 rounded-xl object-contain shadow-sm shrink-0"
+                        className="w-10 h-10 rounded-xl object-contain shadow-xs shrink-0"
                       />
                       <div>
-                        <h3 className="text-sm font-bold dark:text-white text-slate-900">
+                        <h3 className="text-sm font-bold text-foreground">
                           {appInfo?.name || 'TCT Orbit'}
                         </h3>
-                        <p className="text-xs dark:text-white/50 text-slate-500">
+                        <p className="text-xs text-muted-foreground">
                           Version {appInfo?.version || '0.1.0'} ({getPlatformDescription()})
                         </p>
                       </div>
@@ -796,7 +974,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                         : 'Stable'}
                     </Badge>
                   </div>
-                  <div className="text-[11px] dark:text-white/40 text-slate-400 space-y-0.5 pt-1 border-t dark:border-white/5 border-slate-200">
+                  <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                     <p>Platform: {getPlatformDescription()}</p>
                     <p>Runtime: Chromium 128 • Electron 32.2 • Node 20</p>
                     <p>Graphics: GPU Rasterization • Metal / Direct3D / Wayland-X11 Auto</p>
@@ -833,8 +1011,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
         </div>
 
         {/* Footer */}
-        <DialogFooter className="px-5 py-3 border-t dark:border-white/5 border-slate-200/80 flex items-center justify-between sm:justify-between dark:bg-white/[0.02] bg-slate-50/70">
-          <span className="text-[11px] dark:text-white/40 text-slate-400">
+        <DialogFooter className="px-5 py-3 border-t border-border flex items-center justify-between sm:justify-between bg-muted/20">
+          <span className="text-[11px] text-muted-foreground">
             Preferences auto-save instantly
           </span>
           <Button
