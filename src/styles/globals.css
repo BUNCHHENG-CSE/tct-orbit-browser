@@ -1,0 +1,301 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+
+    /* Core Surfaces */
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+
+    /* Interactive & States (Default: Orbit Blue) */
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+
+    --accent: 240 4.8% 95.9%;
+    --accent-foreground: 240 5.9% 10%;
+
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders & Focus */
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --ring: 221.2 83.2% 53.3%;
+
+    --radius: 0.75rem;
+
+    /* Sidebar Surfaces */
+    --sidebar-background: 240 5% 96.5%;
+    --sidebar-foreground: 240 10% 20%;
+    --sidebar-primary: 221.2 83.2% 53.3%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 240 5% 91%;
+    --sidebar-accent-foreground: 240 5.9% 10%;
+    --sidebar-border: 240 5.9% 89%;
+    --sidebar-ring: 221.2 83.2% 53.3%;
+
+    /* Browser Chrome Tokens */
+    --chrome-bg: 240 5% 96%;
+    --chrome-border: 240 5.9% 88%;
+    --tab-active: 0 0% 100%;
+    --tab-inactive: 0 0% 0% / 0;
+    --tab-hover: 240 5% 91%;
+    --omnibox-bg: 0 0% 100%;
+    --omnibox-border: 240 5.9% 85%;
+  }
+
+  .dark {
+    color-scheme: dark;
+
+    /* Core Surfaces */
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+
+    --card: 240 10% 5%;
+    --card-foreground: 0 0% 98%;
+
+    --popover: 240 10% 5%;
+    --popover-foreground: 0 0% 98%;
+
+    /* Interactive & States (Default: Orbit Blue) */
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 0 0% 98%;
+
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+
+    /* Borders & Focus */
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --ring: 217.2 91.2% 59.8%;
+
+    --radius: 0.75rem;
+
+    /* Sidebar Surfaces */
+    --sidebar-background: 240 10% 5.5%;
+    --sidebar-foreground: 240 5% 90%;
+    --sidebar-primary: 217.2 91.2% 59.8%;
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+    --sidebar-accent: 240 6% 12%;
+    --sidebar-accent-foreground: 240 5% 95%;
+    --sidebar-border: 240 6% 12%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+
+    /* Browser Chrome Tokens */
+    --chrome-bg: 240 10% 5.5%;
+    --chrome-border: 240 6% 12%;
+    --tab-active: 240 6% 13%;
+    --tab-inactive: 0 0% 0% / 0;
+    --tab-hover: 240 6% 10%;
+    --omnibox-bg: 240 8% 9%;
+    --omnibox-border: 240 6% 16%;
+  }
+
+  /* ------------------------------------------------------------- */
+  /* ACCENT COLOR PRESETS (Light & Dark Variants)                 */
+  /* ------------------------------------------------------------- */
+
+  /* 1. Orbit Blue */
+  :root[data-accent="orbit-blue"] {
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --ring: 221.2 83.2% 53.3%;
+    --sidebar-primary: 221.2 83.2% 53.3%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-ring: 221.2 83.2% 53.3%;
+  }
+  .dark[data-accent="orbit-blue"],
+  .dark [data-accent="orbit-blue"] {
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --ring: 217.2 91.2% 59.8%;
+    --sidebar-primary: 217.2 91.2% 59.8%;
+    --sidebar-primary-foreground: 222.2 47.4% 11.2%;
+    --sidebar-ring: 217.2 91.2% 59.8%;
+  }
+
+  /* 2. Nebula Violet */
+  :root[data-accent="nebula-violet"] {
+    --primary: 262.1 83.3% 57.8%;
+    --primary-foreground: 210 40% 98%;
+    --ring: 262.1 83.3% 57.8%;
+    --sidebar-primary: 262.1 83.3% 57.8%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-ring: 262.1 83.3% 57.8%;
+  }
+  .dark[data-accent="nebula-violet"],
+  .dark [data-accent="nebula-violet"] {
+    --primary: 263.4 70% 50.4%;
+    --primary-foreground: 210 40% 98%;
+    --ring: 263.4 70% 50.4%;
+    --sidebar-primary: 263.4 70% 50.4%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-ring: 263.4 70% 50.4%;
+  }
+
+  /* 3. Emerald */
+  :root[data-accent="emerald"] {
+    --primary: 158 64% 39%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 158 64% 39%;
+    --sidebar-primary: 158 64% 39%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring: 158 64% 39%;
+  }
+  .dark[data-accent="emerald"],
+  .dark [data-accent="emerald"] {
+    --primary: 160 84% 39%;
+    --primary-foreground: 160 95% 8%;
+    --ring: 160 84% 39%;
+    --sidebar-primary: 160 84% 39%;
+    --sidebar-primary-foreground: 160 95% 8%;
+    --sidebar-ring: 160 84% 39%;
+  }
+
+  /* 4. Amber */
+  :root[data-accent="amber"] {
+    --primary: 38 92% 50%;
+    --primary-foreground: 48 96% 12%;
+    --ring: 38 92% 50%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 48 96% 12%;
+    --sidebar-ring: 38 92% 50%;
+  }
+  .dark[data-accent="amber"],
+  .dark [data-accent="amber"] {
+    --primary: 38 92% 50%;
+    --primary-foreground: 48 96% 10%;
+    --ring: 38 92% 50%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 48 96% 10%;
+    --sidebar-ring: 38 92% 50%;
+  }
+
+  /* 5. Rose */
+  :root[data-accent="rose"] {
+    --primary: 349 89% 60%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 349 89% 60%;
+    --sidebar-primary: 349 89% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-ring: 349 89% 60%;
+  }
+  .dark[data-accent="rose"],
+  .dark [data-accent="rose"] {
+    --primary: 351 95% 71%;
+    --primary-foreground: 355 100% 10%;
+    --ring: 351 95% 71%;
+    --sidebar-primary: 351 95% 71%;
+    --sidebar-primary-foreground: 355 100% 10%;
+    --sidebar-ring: 351 95% 71%;
+  }
+
+  /* 6. Monochrome */
+  :root[data-accent="monochrome"] {
+    --primary: 240 5.9% 10%;
+    --primary-foreground: 0 0% 98%;
+    --ring: 240 5.9% 10%;
+    --sidebar-primary: 240 5.9% 10%;
+    --sidebar-primary-foreground: 0 0% 98%;
+    --sidebar-ring: 240 5.9% 10%;
+  }
+  .dark[data-accent="monochrome"],
+  .dark [data-accent="monochrome"] {
+    --primary: 0 0% 98%;
+    --primary-foreground: 240 5.9% 10%;
+    --ring: 0 0% 98%;
+    --sidebar-primary: 0 0% 98%;
+    --sidebar-primary-foreground: 240 5.9% 10%;
+    --sidebar-ring: 0 0% 98%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    user-select: none;
+    -webkit-user-select: none;
+    overflow: hidden;
+  }
+
+  button, input, select, textarea {
+    outline: none !important;
+  }
+
+  button:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 1.5px hsl(var(--ring));
+  }
+}
+
+/* Custom refined scrollbars using semantic tokens */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.25);
+  border-radius: 9999px;
+  transition: background-color 0.15s ease;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.55);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::-webkit-scrollbar-button {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Electron drag regions */
+.app-drag {
+  -webkit-app-region: drag;
+}
+
+.app-no-drag {
+  -webkit-app-region: no-drag;
+}

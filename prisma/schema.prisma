@@ -1,0 +1,64 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id        String    @id @default(cuid())
+  createdAt DateTime  @default(now())
+  spaces    Space[]
+  settings  Settings?
+}
+
+model Space {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name      String
+  color     String   @default("#6366f1")
+  icon      String   @default("Layers")
+  order     Int      @default(0)
+  isActive  Boolean  @default(false)
+  tabs      Tab[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+}
+
+model Tab {
+  id          String   @id @default(cuid())
+  spaceId     String
+  space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  url         String
+  title       String   @default("New Tab")
+  favicon     String?
+  isPinned    Boolean  @default(false)
+  order       Int      @default(0)
+  lastVisited DateTime @default(now())
+  createdAt   DateTime @default(now())
+
+  @@index([spaceId])
+}
+
+model Bookmark {
+  id        String   @id @default(cuid())
+  url       String
+  title     String
+  favicon   String?
+  createdAt DateTime @default(now())
+}
+
+model Settings {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultSearchEngine String   @default("duckduckgo") // duckduckgo | google | bing
+  theme               String   @default("dark")
+  sidebarCollapsed    Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
+}

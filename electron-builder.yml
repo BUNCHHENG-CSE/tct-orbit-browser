@@ -1,0 +1,144 @@
+appId: com.tctorbit.browser
+productName: TCT Orbit
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**/*
+  - resources/**/*
+
+asar: true
+asarUnpack:
+  - resources/**
+
+publish:
+  provider: generic
+  url: https://updates.tctorbit.com
+
+# ==============================================================================
+# Windows Configuration (Windows 10, Windows 11, x64, ARM64 Copilot+ PCs)
+# ==============================================================================
+win:
+  executableName: tct-orbit
+  icon: build/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+        - arm64
+    - target: portable
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: tct-orbit-${version}-setup.${ext}
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+
+portable:
+  artifactName: tct-orbit-${version}-portable.${ext}
+
+# ==============================================================================
+# macOS Configuration (Apple Silicon M1/M2/M3/M4 & Apple Intel x64)
+# ==============================================================================
+mac:
+  category: public.app-category.productivity
+  icon: build/icon.icns
+  minimumSystemVersion: 10.15.0
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+        - universal
+    - target: zip
+      arch:
+        - arm64
+        - x64
+        - universal
+  extendInfo:
+    - NSCameraUsageDescription: TCT Orbit needs access to your camera for video calls and web conferencing.
+    - NSMicrophoneUsageDescription: TCT Orbit needs access to your microphone for audio recording and voice calls.
+    - NSDocumentsFolderUsageDescription: TCT Orbit needs access to your Documents folder for saving files.
+    - NSDownloadsFolderUsageDescription: TCT Orbit needs access to your Downloads folder for saving downloaded web files.
+  notarize: false
+
+dmg:
+  artifactName: tct-orbit-${version}.${ext}
+  title: ${productName} ${version}
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ==============================================================================
+# Linux Configuration (All Distros: Ubuntu, Debian, Fedora, Arch, openSUSE, etc.)
+# ==============================================================================
+linux:
+  executableName: tct-orbit
+  maintainer: TCT Orbit Team <support@tctorbit.com>
+  category: Network;WebBrowser;
+  icon: build/icon.png
+  synopsis: Fast, Clean, and Modern Desktop Web Browser
+  description: TCT Orbit is a fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.
+  desktop:
+    StartupWMClass: tct-orbit
+    MimeType: x-scheme-handler/http;x-scheme-handler/https;text/html;text/xml;application/xhtml+xml;
+    Terminal: false
+    Categories: Network;WebBrowser;
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+    - target: pacman
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+        - arm64
+
+appImage:
+  artifactName: tct-orbit-${version}.${ext}
+
+deb:
+  artifactName: tct-orbit-${version}.${ext}
+  depends:
+    - gconf2
+    - gconf-service
+    - libnotify4
+    - libappindicator1
+    - libxtst6
+    - libnss3
+    - libasound2
+
+rpm:
+  artifactName: tct-orbit-${version}.${ext}
+
+pacman:
+  artifactName: tct-orbit-${version}.${ext}
