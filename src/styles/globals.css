@@ -13,7 +13,8 @@
     --card: 0 0% 100%;
     --card-foreground: 240 10% 3.9%;
 
-    --popover: 0 0% 100%;
+    /* Popover slightly elevated surface for menus, CommandBar, tooltips */
+    --popover: 0 0% 99%;
     --popover-foreground: 240 10% 3.9%;
 
     /* Interactive & States (Default: Orbit Blue) */
@@ -66,31 +67,34 @@
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
 
-    --card: 240 10% 5%;
+    --card: 240 10% 6%;
     --card-foreground: 0 0% 98%;
 
-    --popover: 240 10% 5%;
-    --popover-foreground: 0 0% 98%;
+    /* Popover is slightly elevated above card — used by CommandBar, menus, tooltips */
+    --popover: 240 9% 8%;
+    --popover-foreground: 0 0% 97%;
 
     /* Interactive & States (Default: Orbit Blue) */
     --primary: 217.2 91.2% 59.8%;
     --primary-foreground: 222.2 47.4% 11.2%;
 
-    --secondary: 240 3.7% 15.9%;
+    --secondary: 240 4% 18%;
     --secondary-foreground: 0 0% 98%;
 
-    --muted: 240 3.7% 15.9%;
-    --muted-foreground: 240 5% 64.9%;
+    /* Muted: subtle fill for chips, kbd, inactive areas */
+    --muted: 240 4% 14%;
+    --muted-foreground: 240 5% 60%;
 
-    --accent: 240 3.7% 15.9%;
+    /* Accent: hover/focus surface — must be visibly distinct from muted */
+    --accent: 240 5% 20%;
     --accent-foreground: 0 0% 98%;
 
     --destructive: 0 62.8% 30.6%;
     --destructive-foreground: 0 0% 98%;
 
-    /* Borders & Focus */
-    --border: 240 3.7% 15.9%;
-    --input: 240 3.7% 15.9%;
+    /* Borders & Focus — slightly lighter than muted for legibility */
+    --border: 240 4% 18%;
+    --input: 240 4% 18%;
     --ring: 217.2 91.2% 59.8%;
 
     --radius: 0.75rem;
@@ -100,19 +104,19 @@
     --sidebar-foreground: 240 5% 90%;
     --sidebar-primary: 217.2 91.2% 59.8%;
     --sidebar-primary-foreground: 222.2 47.4% 11.2%;
-    --sidebar-accent: 240 6% 12%;
+    --sidebar-accent: 240 5% 13%;
     --sidebar-accent-foreground: 240 5% 95%;
-    --sidebar-border: 240 6% 12%;
+    --sidebar-border: 240 5% 13%;
     --sidebar-ring: 217.2 91.2% 59.8%;
 
     /* Browser Chrome Tokens */
     --chrome-bg: 240 10% 5.5%;
-    --chrome-border: 240 6% 12%;
+    --chrome-border: 240 5% 13%;
     --tab-active: 240 6% 13%;
     --tab-inactive: 0 0% 0% / 0;
     --tab-hover: 240 6% 10%;
     --omnibox-bg: 240 8% 9%;
-    --omnibox-border: 240 6% 16%;
+    --omnibox-border: 240 5% 18%;
   }
 
   /* ------------------------------------------------------------- */

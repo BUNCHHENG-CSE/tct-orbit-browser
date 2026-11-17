@@ -28,7 +28,7 @@ const CommandDialog = ({ children, className, ...props }: CommandDialogProps) =>
   return (
     <Dialog {...props}>
       <DialogContent className={cn("overflow-hidden p-0 shadow-2xl w-[92vw] max-w-2xl bg-transparent border-none top-[18%] translate-y-0 [&>button:last-child]:hidden", className)}>
-        <Command className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-1 [&_[cmdk-group]]:px-2 border border-border rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5),0_0_1px_1px_rgba(255,255,255,0.08)] backdrop-blur-2xl bg-popover/95">
+        <Command className="[&_[cmdk-group-heading]]:px-3 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:font-semibold [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-1 [&_[cmdk-group]]:px-2 border dark:border-white/[0.1] border-slate-200/80 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.5),0_0_1px_1px_rgba(255,255,255,0.06)] backdrop-blur-2xl dark:bg-[#13151e]/95 bg-white/95">
           {children}
         </Command>
       </DialogContent>
@@ -40,7 +40,7 @@ const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
 >(({ className, ...props }, ref) => (
-  <div className="flex items-center border-b border-border px-4" cmdk-input-wrapper="">
+  <div className="flex items-center border-b dark:border-white/[0.08] border-slate-200/80 px-4" cmdk-input-wrapper="">
     <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
     <CommandPrimitive.Input
       ref={ref}
