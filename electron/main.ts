@@ -127,6 +127,9 @@ nativeTheme.on('updated', () => {
   const script = getWebviewThemeScript(isDark)
   for (const wc of activeWebviewContents) {
     if (!wc.isDestroyed()) {
+      if (typeof (wc as any).setBackgroundColor === 'function') {
+        ;(wc as any).setBackgroundColor(isDark ? '#09090b' : '#ffffff')
+      }
       wc.executeJavaScript(script).catch(() => {})
     }
   }
@@ -209,6 +212,12 @@ if (!gotSingleInstanceLock) {
       if (contents.getType() === 'webview') {
         activeWebviewContents.add(contents)
         contents.on('destroyed', () => activeWebviewContents.delete(contents))
+
+        // Set matching background color to eliminate white flashes on new webview creation / navigation
+        const isDark = nativeTheme.shouldUseDarkColors
+        if (typeof (contents as any).setBackgroundColor === 'function') {
+          ;(contents as any).setBackgroundColor(isDark ? '#09090b' : '#ffffff')
+        }
 
         const customScrollbarCss = `
           ::-webkit-scrollbar {
