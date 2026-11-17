@@ -94,7 +94,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                 <span className="font-semibold text-foreground text-sm">
                   Open New Tab ({engine.name})
                 </span>
-                <span className="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+                <span className="text-[11px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
                   Default
                 </span>
               </div>
@@ -102,7 +102,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                 {engine.homeUrl}
               </p>
             </div>
-            <kbd className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
+            <kbd className="flex items-center gap-1 text-xs font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
               ↵ Enter
             </kbd>
           </CommandItem>
@@ -125,7 +125,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                   <span className="font-semibold text-foreground text-sm">
                     {mode === 'new-tab' ? 'Open in New Tab' : 'Open URL'}
                   </span>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25">
+                  <span className="text-[11px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-300 border border-blue-500/25">
                     {mode === 'new-tab' ? 'New Tab' : 'Direct'}
                   </span>
                 </div>
@@ -133,7 +133,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                   {normalizeUrl(trimmed)}
                 </p>
               </div>
-              <kbd className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
+              <kbd className="flex items-center gap-1 text-xs font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
                 ↵ Enter
               </kbd>
             </CommandItem>
@@ -150,7 +150,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                   <span className="font-semibold text-foreground text-sm">
                     {mode === 'new-tab' ? `Search in New Tab (${engine.name})` : `Search with ${engine.name}`}
                   </span>
-                  <span className="text-[10px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
+                  <span className="text-[11px] uppercase font-semibold tracking-wider px-2 py-0.5 rounded-full bg-primary/20 text-primary border border-primary/30">
                     {mode === 'new-tab' ? 'New Tab' : 'Web'}
                   </span>
                 </div>
@@ -158,7 +158,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                   &ldquo;{trimmed}&rdquo;
                 </p>
               </div>
-              <kbd className="flex items-center gap-1 text-[11px] font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
+              <kbd className="flex items-center gap-1 text-xs font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
                 ↵ Enter
               </kbd>
             </CommandItem>
@@ -189,14 +189,14 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                     <TabFavicon tab={tab} />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold text-foreground truncate">
+                    <p className="text-sm font-semibold text-foreground truncate">
                       {tab.title || 'New Tab'}
                     </p>
-                    <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">
+                    <p className="text-xs text-muted-foreground truncate font-mono mt-0.5">
                       {hostname}
                     </p>
                   </div>
-                  <span className="text-[10px] font-medium text-emerald-600 dark:text-emerald-400/90 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
+                  <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400/90 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full flex items-center gap-1 shrink-0">
                     <ArrowRight className="w-2.5 h-2.5" /> Switch tab
                   </span>
                 </CommandItem>
@@ -229,11 +229,11 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                     <p className="text-xs font-medium text-foreground">{space.name}</p>
                   </div>
                   {isCurrent ? (
-                    <span className="text-[10px] text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
+                    <span className="text-[11px] text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
                       Current space
                     </span>
                   ) : (
-                    <span className="text-[10px] text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
+                    <span className="text-[11px] text-muted-foreground bg-muted border border-border px-2 py-0.5 rounded-full">
                       Switch space
                     </span>
                   )}

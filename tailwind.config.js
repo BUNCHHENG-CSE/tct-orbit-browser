@@ -18,6 +18,15 @@ module.exports = {
       fontFamily: {
         sans: ["Inter", "-apple-system", "BlinkMacSystemFont", "Segoe UI", "Roboto", "sans-serif"],
       },
+      fontSize: {
+        '2xs': ['0.6875rem', { lineHeight: '0.9rem' }],
+        xs: ['0.8125rem', { lineHeight: '1.15rem' }],     // 13px (was 12px)
+        sm: ['0.925rem', { lineHeight: '1.35rem' }],      // 14.8px (was 14px)
+        base: ['1.05rem', { lineHeight: '1.55rem' }],     // 16.8px (was 16px)
+        lg: ['1.175rem', { lineHeight: '1.75rem' }],      // 18.8px (was 18px)
+        xl: ['1.3rem', { lineHeight: '1.875rem' }],       // 20.8px (was 20px)
+        '2xl': ['1.6rem', { lineHeight: '2.125rem' }],    // 25.6px
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",

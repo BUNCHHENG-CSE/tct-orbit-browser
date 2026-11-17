@@ -208,7 +208,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             alt="TCT Orbit"
             className="w-4 h-4 rounded-md object-contain shadow-xs"
           />
-          <span className="tracking-wide hidden xl:inline text-xs font-semibold">TCT Orbit</span>
+          <span className="tracking-wide hidden xl:inline text-[13px] font-semibold">TCT Orbit</span>
           {appInfo?.channel && appInfo.channel !== 'stable' && (
             <span
               className={`h-3.5 px-1.5 rounded-full text-[8px] font-semibold uppercase tracking-wider inline-flex items-center justify-center leading-none shrink-0 ${
@@ -230,7 +230,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             className="w-1.5 h-1.5 rounded-full shrink-0"
             style={{ backgroundColor: spaceColor }}
           />
-          <span className="text-[11px] font-medium text-foreground truncate">{spaceName}</span>
+          <span className="text-xs font-medium text-foreground truncate">{spaceName}</span>
         </div>
 
         {/* Divider */}
@@ -311,7 +311,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             placeholder={`Search with ${engineMeta.name} or enter address...`}
             spellCheck={false}
             autoComplete="off"
-            className="w-full h-full bg-transparent border-none outline-none text-foreground text-xs font-normal placeholder:text-muted-foreground select-text truncate"
+            className="w-full h-full bg-transparent border-none outline-none text-foreground text-[13.5px] font-normal placeholder:text-muted-foreground select-text truncate"
           />
 
           {/* Clear button when editing */}
@@ -331,14 +331,14 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
 
           {/* Search Engine Badge when showing search query */}
           {!isFocused && urlInfo.isSearch && urlInfo.searchEngineName && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium ml-2 shrink-0 hidden lg:inline-block select-none">
+            <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-muted text-muted-foreground font-medium ml-2 shrink-0 hidden lg:inline-block select-none">
               {urlInfo.searchEngineName}
             </span>
           )}
 
           {/* Shortcut hint */}
           {!isFocused && (
-            <span className="text-[10px] text-muted-foreground/70 ml-2 font-mono group-hover:text-muted-foreground hidden md:inline-block shrink-0 select-none">
+            <span className="text-[11px] text-muted-foreground/70 ml-2 font-mono group-hover:text-muted-foreground hidden md:inline-block shrink-0 select-none">
               {modKey}+L
             </span>
           )}
@@ -359,7 +359,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               <span className="truncate flex-1">
                 Search with {engineMeta.name} for <strong className="font-semibold text-primary">{inputValue.trim()}</strong>
               </span>
-              <span className="text-[10px] text-muted-foreground shrink-0">Press Enter</span>
+              <span className="text-[11.5px] text-muted-foreground shrink-0">Press Enter</span>
             </div>
 
             {/* Suggestion 2: Direct URL if formatted like one */}

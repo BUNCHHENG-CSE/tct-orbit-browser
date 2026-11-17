@@ -66,11 +66,11 @@ export const Sidebar: React.FC = () => {
                 className="w-2 h-2 rounded-full shrink-0 shadow-xs"
                 style={{ backgroundColor: activeSpace.color }}
               />
-              <span className="truncate text-[11px] text-sidebar-foreground font-semibold tracking-tight">
+              <span className="truncate text-xs text-sidebar-foreground font-semibold tracking-tight">
                 {activeSpace.name}
               </span>
             </div>
-            <span className="text-[10px] tracking-normal font-medium text-muted-foreground shrink-0">
+            <span className="text-[11px] tracking-normal font-medium text-muted-foreground shrink-0">
               {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
             </span>
           </div>
@@ -100,7 +100,7 @@ export const Sidebar: React.FC = () => {
                 className={
                   isCollapsed
                     ? 'w-9 h-9 rounded-xl flex items-center justify-center bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 hover:border-primary/50 shadow-sm transition-all hover:scale-105 active:scale-95'
-                    : 'w-full flex items-center gap-2 py-2 px-3 rounded-xl bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground transition-colors text-xs font-semibold border border-sidebar-border shadow-2xs'
+                    : 'w-full flex items-center gap-2 py-2 px-3 rounded-xl bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground transition-colors text-[13.5px] font-semibold border border-sidebar-border shadow-2xs'
                 }
               >
                 <Plus className="w-4 h-4 shrink-0 text-primary" />
@@ -122,7 +122,7 @@ export const Sidebar: React.FC = () => {
                 className={
                   isCollapsed
                     ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
-                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-xs font-medium'
+                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
                 }
               >
                 <Settings className="w-4 h-4 shrink-0" />

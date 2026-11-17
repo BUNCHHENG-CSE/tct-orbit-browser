@@ -332,12 +332,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           <span className="text-xs font-semibold text-foreground">Light</span>
                         </div>
                         {themeMode === 'light' && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                          <span className="flex items-center gap-0.5 text-[11.5px] text-primary font-semibold">
                             <Check className="w-3 h-3" />
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Clean porcelain bright</p>
+                      <p className="text-[11.5px] text-muted-foreground mt-0.5">Clean porcelain bright</p>
                     </button>
 
                     {/* Dark Mode Preview Card */}
@@ -377,12 +377,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           <span className="text-xs font-semibold text-foreground">Dark</span>
                         </div>
                         {themeMode === 'dark' && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                          <span className="flex items-center gap-0.5 text-[11.5px] text-primary font-semibold">
                             <Check className="w-3 h-3" />
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Midnight dark aesthetic</p>
+                      <p className="text-[11.5px] text-muted-foreground mt-0.5">Midnight dark aesthetic</p>
                     </button>
 
                     {/* System Mode Split Preview Card */}
@@ -428,12 +428,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           <span className="text-xs font-semibold text-foreground">System</span>
                         </div>
                         {themeMode === 'system' && (
-                          <span className="flex items-center gap-0.5 text-[10px] text-primary font-semibold">
+                          <span className="flex items-center gap-0.5 text-[11.5px] text-primary font-semibold">
                             <Check className="w-3 h-3" />
                           </span>
                         )}
                       </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                      <p className="text-[11.5px] text-muted-foreground mt-0.5">
                         Follows OS ({resolvedTheme === 'dark' ? 'Dark' : 'Light'})
                       </p>
                     </button>
@@ -478,7 +478,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Website Original Color Scheme
                     </h4>
-                    <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
+                    <span className="text-[11.5px] text-emerald-600 dark:text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded-full">
                       Native CSS Engine
                     </span>
                   </div>
@@ -512,7 +512,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                               <Check className="w-3.5 h-3.5 text-primary" />
                             ) : null}
                           </div>
-                          <p className="text-[10px] text-muted-foreground leading-relaxed">{opt.desc}</p>
+                          <p className="text-[11.5px] text-muted-foreground leading-relaxed">{opt.desc}</p>
                         </button>
                       )
                     })}
@@ -681,7 +681,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       }`}
                     >
                       <p className="font-bold">Expanded (260px)</p>
-                      <p className="text-[10px] opacity-70">Shows full tab titles and controls</p>
+                      <p className="text-[11.5px] opacity-70">Shows full tab titles and controls</p>
                     </button>
                     <button
                       onClick={() => setSidebarCollapsed(true)}
@@ -692,7 +692,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       }`}
                     >
                       <p className="font-bold">Compact Rail (60px)</p>
-                      <p className="text-[10px] opacity-70">Icon-only minimalist layout</p>
+                      <p className="text-[11.5px] opacity-70">Icon-only minimalist layout</p>
                     </button>
                   </div>
                 </div>
@@ -752,7 +752,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       </p>
                     </div>
                   </div>
-                  <Badge variant="default" className="text-[10px] px-2 py-0.5 font-bold">
+                  <Badge variant="default" className="text-[11.5px] px-2 py-0.5 font-bold">
                     ACTIVE
                   </Badge>
                 </div>
@@ -921,7 +921,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                         {sc.keys.map((k, j) => (
                           <kbd
                             key={j}
-                            className="px-2 py-0.5 rounded-md text-[10px] font-mono font-semibold bg-muted text-foreground border border-border shadow-xs"
+                            className="px-2 py-0.5 rounded-md text-[11.5px] font-mono font-semibold bg-muted text-foreground border border-border shadow-xs"
                           >
                             {k}
                           </kbd>
@@ -957,12 +957,12 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       variant="subtle"
                       className={
                         appInfo?.channel === 'nova'
-                          ? 'text-[10px] px-2 py-0.5 font-semibold text-purple-400 bg-purple-500/10 border-purple-500/20'
+                          ? 'text-[11.5px] px-2 py-0.5 font-semibold text-purple-400 bg-purple-500/10 border-purple-500/20'
                           : appInfo?.channel === 'deep'
-                          ? 'text-[10px] px-2 py-0.5 font-semibold text-cyan-400 bg-cyan-500/10 border-cyan-500/20'
+                          ? 'text-[11.5px] px-2 py-0.5 font-semibold text-cyan-400 bg-cyan-500/10 border-cyan-500/20'
                           : appInfo?.channel === 'canary'
-                          ? 'text-[10px] px-2 py-0.5 font-semibold text-amber-400 bg-amber-500/10 border-amber-500/20'
-                          : 'text-[10px] px-2 py-0.5 font-semibold text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
+                          ? 'text-[11.5px] px-2 py-0.5 font-semibold text-amber-400 bg-amber-500/10 border-amber-500/20'
+                          : 'text-[11.5px] px-2 py-0.5 font-semibold text-emerald-500 bg-emerald-500/10 border-emerald-500/20'
                       }
                     >
                       {appInfo?.channel === 'nova'

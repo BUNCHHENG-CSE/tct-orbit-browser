@@ -244,28 +244,28 @@ export const CommandBar: React.FC = () => {
       </CommandList>
 
       {/* Bottom Keyboard Hints & Space Indicator */}
-      <div className="h-9 px-4 flex items-center justify-between border-t border-border bg-muted/40 text-[11px] text-muted-foreground font-medium select-none">
+      <div className="h-9 px-4 flex items-center justify-between border-t border-border bg-muted/40 text-xs text-muted-foreground font-medium select-none">
         <div className="flex items-center gap-3">
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">↵</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[11px] text-foreground shadow-xs">↵</kbd>
             <span>Open</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">↑↓</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[11px] text-foreground shadow-xs">↑↓</kbd>
             <span>Navigate</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">Tab</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[11px] text-foreground shadow-xs">Tab</kbd>
             <span>Engine</span>
           </span>
           <span className="flex items-center gap-1">
-            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[10px] text-foreground shadow-xs">Esc</kbd>
+            <kbd className="px-1.5 py-0.5 rounded bg-background border border-border font-mono text-[11px] text-foreground shadow-xs">Esc</kbd>
             <span>Close</span>
           </span>
         </div>
 
         {activeSpace && (
-          <div className="flex items-center gap-1.5 text-foreground text-[11px]">
+          <div className="flex items-center gap-1.5 text-foreground text-xs">
             <span
               className="w-1.5 h-1.5 rounded-full"
               style={{ backgroundColor: activeSpace.color }}

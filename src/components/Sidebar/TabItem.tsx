@@ -145,7 +145,7 @@ export const TabItem: React.FC<TabItemProps> = ({
       </div>
 
       {/* Tab Title */}
-      <span className="flex-1 min-w-0 truncate tracking-tight text-[12px] font-medium leading-none">
+      <span className="flex-1 min-w-0 truncate tracking-tight text-[13.5px] font-medium leading-none">
         {tab.title || 'New Tab'}
       </span>
 
@@ -194,9 +194,9 @@ export const TabItem: React.FC<TabItemProps> = ({
                     {tab.title || 'New Tab'}
                   </p>
                   {tabHostname && (
-                    <p className="text-[10px] text-muted-foreground truncate font-mono">{tabHostname}</p>
+                    <p className="text-[11.5px] text-muted-foreground truncate font-mono">{tabHostname}</p>
                   )}
-                  <div className="flex items-center gap-2 pt-1 text-[9px] text-muted-foreground border-t border-border">
+                  <div className="flex items-center gap-2 pt-1 text-[10.5px] text-muted-foreground border-t border-border">
                     <span>Middle-click to close</span>
                     {tab.isPinned && <span className="text-amber-500">• Pinned</span>}
                   </div>
