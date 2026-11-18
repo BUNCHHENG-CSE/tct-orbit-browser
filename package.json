@@ -87,5 +87,8 @@
   "overrides": {
     "minimatch": "^11.0.9",
     "chokidar": "^4.0.3"
+  },
+  "allowScripts": {
+    "electron@45.3.4": true
   }
 }
