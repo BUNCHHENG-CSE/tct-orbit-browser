@@ -1,6 +1,7 @@
 import 'dotenv/config'
 import { app, BrowserWindow, ipcMain, session, nativeTheme, Menu, clipboard, dialog, shell, powerSaveBlocker } from 'electron'
 import { createMainWindow } from './windows/mainWindow'
+import { setupWindowsTaskbar } from './windows/taskbar'
 import { registerAllIpc } from './ipc'
 import { localStorageService } from './storage/localStorage'
 import { applyNativeTheme } from './ipc/settings'
@@ -412,6 +413,15 @@ if (!gotSingleInstanceLock) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
 
+      // Handle Windows JumpList tasks or CLI flags
+      const hasIncognito = commandLine.includes('--incognito')
+      const hasNewWindow = commandLine.includes('--new-window')
+      if (hasIncognito) {
+        mainWindow.webContents.send('tab:create', { incognito: true })
+      } else if (hasNewWindow) {
+        mainWindow.webContents.send('tab:create', {})
+      }
+
       // Forward any URL passed via CLI argument (e.g. tct-orbit https://example.com)
       const urlArg = commandLine.find(
         (arg) => arg.startsWith('http://') || arg.startsWith('https://')
@@ -433,6 +443,9 @@ if (!gotSingleInstanceLock) {
   })
 
   app.whenReady().then(async () => {
+    // Initialize Windows Taskbar identity, Start Menu shortcut, and JumpList
+    setupWindowsTaskbar(appPaths.channelMeta.appId, appPaths.channelMeta.displayName)
+
     // Initialize dedicated isolated browsing partition ('persist:browser-tabs')
     const tabSession = setupIsolatedTabSession('persist:browser-tabs')
     tabSession.setUserAgent(customUserAgent)

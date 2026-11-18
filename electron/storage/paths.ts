@@ -28,14 +28,13 @@ export function initAppPaths(): AppPaths {
   const activeChannel = process.env.APP_CHANNEL || process.env.VITE_APP_CHANNEL
   const channelMeta = resolveChannel(activeChannel)
 
-  // 1. Set app name to channel slug (e.g., 'tct-orbit', 'tct-orbit-nova', 'tct-orbit-deep', 'tct-orbit-canary')
-  // This ensures Electron's app.getPath('userData') resolves cleanly to:
-  // Windows: %APPDATA%\[channel]
-  // macOS: ~/Library/Application Support/[channel]
-  // Linux: ~/.config/[channel]
-  app.setName(channelMeta.userDataDirName)
+  // 1. Set formal display name for OS-level integration (Taskbar, Dock, Window manager, About dialog)
+  app.setName(channelMeta.displayName)
 
-  // 2. Check for explicit userData directory overrides
+  // 2. Configure userData path to clean channel slug directory (%APPDATA%\[channel], ~/.config/[channel], etc.)
+  app.setPath('userData', path.join(app.getPath('appData'), channelMeta.userDataDirName))
+
+  // 3. Check for explicit userData directory overrides
   // Priority: CLI switch --user-data-dir > environment variable TCT_ORBIT_DATA_DIR
   const cliUserDataDir = app.commandLine.getSwitchValue('user-data-dir')
   const envUserDataDir = process.env.TCT_ORBIT_DATA_DIR

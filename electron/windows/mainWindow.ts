@@ -3,7 +3,7 @@ import { join } from 'path'
 import { existsSync } from 'fs'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
-import { getBrowserLogoPath } from '../resources'
+import { getAppNativeIcon, getBrowserLogoPath } from '../resources'
 import { setupMainWindowSecurity } from '../security'
 
 export function createMainWindow(): BrowserWindow {
@@ -15,14 +15,11 @@ export function createMainWindow(): BrowserWindow {
     ? join(__dirname, '../preload/index.js')
     : join(__dirname, '../preload/preload.js')
 
-  const browserLogoPath = getBrowserLogoPath()
-  const winIcon = process.platform === 'win32' && existsSync(join(process.cwd(), 'build/icon.ico'))
-    ? join(process.cwd(), 'build/icon.ico')
-    : browserLogoPath
+  const appIcon = getAppNativeIcon()
 
   const mainWindow = new BrowserWindow({
     title: paths.channelMeta.displayName,
-    icon: winIcon || browserLogoPath,
+    icon: appIcon,
     width: 1280,
     height: 850,
     minWidth: 480,
@@ -46,6 +43,11 @@ export function createMainWindow(): BrowserWindow {
       backgroundThrottling: true
     }
   })
+
+  // Explicitly apply native icon to window handle for Windows Taskbar & Alt-Tab
+  if (process.platform === 'win32') {
+    mainWindow.setIcon(appIcon)
+  }
 
   // Attach strict security controls (WebRTC leak prevention, navigation blockers, anti-tampering)
   setupMainWindowSecurity(mainWindow)

@@ -8,6 +8,7 @@ directories:
 files:
   - out/**/*
   - resources/browser-logo.png
+  - resources/icon.ico
   - package.json
   - "!node_modules/**/*"
 
