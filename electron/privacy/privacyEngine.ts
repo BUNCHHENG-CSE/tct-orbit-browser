@@ -545,7 +545,7 @@ export class PrivacyEngine {
       const tabSession = session.fromPartition('persist:browser-tabs')
       for (const ses of [tabSession, session.defaultSession]) {
         await ses.clearStorageData({
-          storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+          storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'serviceworkers', 'cachestorage']
         })
         await ses.clearCache()
         await ses.clearAuthCache()

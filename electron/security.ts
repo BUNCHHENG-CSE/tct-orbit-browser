@@ -690,7 +690,6 @@ export async function panicWipeBrowsingData(
           'indexdb',
           'localstorage',
           'shadercache',
-          'websql',
           'serviceworkers',
           'cachestorage'
         ]

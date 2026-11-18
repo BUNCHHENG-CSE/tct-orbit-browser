@@ -177,7 +177,17 @@ export function registerAllIpc(
     if (wc && !wc.isDestroyed()) {
       try {
         const img = await wc.capturePage()
-        clipboard.writeImage(img)
+        const clip = clipboard as any
+        if (typeof clip.writeImage === 'function') {
+          clip.writeImage(img)
+        } else if (typeof clip.write === 'function') {
+          const pngBuffer = new Uint8Array(img.toPNG())
+          const blob = new Blob([pngBuffer], { type: 'image/png' })
+          const ItemClass = clip.ClipboardItem || (globalThis as any).ClipboardItem
+          if (ItemClass) {
+            await clip.write([new ItemClass({ 'image/png': blob })])
+          }
+        }
         return true
       } catch (err) {
         console.error('[IPC page:capture-screenshot] Error capturing page:', err)

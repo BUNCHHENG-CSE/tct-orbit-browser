@@ -28,8 +28,6 @@ publish:
 win:
   executableName: tct-orbit
   icon: build/icon.ico
-  publisherName:
-    - TCT
   legalTrademarks: TCT
   target:
     - target: nsis
@@ -105,10 +103,11 @@ linux:
   synopsis: Fast, Clean, and Modern Desktop Web Browser
   description: TCT Orbit is a fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.
   desktop:
-    StartupWMClass: tct-orbit
-    MimeType: x-scheme-handler/http;x-scheme-handler/https;text/html;text/xml;application/xhtml+xml;
-    Terminal: false
-    Categories: Network;WebBrowser;
+    entry:
+      StartupWMClass: tct-orbit
+      MimeType: x-scheme-handler/http;x-scheme-handler/https;text/html;text/xml;application/xhtml+xml;
+      Terminal: false
+      Categories: Network;WebBrowser;
   target:
     - target: AppImage
       arch:
