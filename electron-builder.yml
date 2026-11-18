@@ -23,6 +23,9 @@ publish:
 win:
   executableName: tct-orbit
   icon: build/icon.ico
+  publisherName:
+    - TCT
+  legalTrademarks: TCT
   target:
     - target: nsis
       arch:
@@ -92,7 +95,7 @@ dmg:
 # ==============================================================================
 linux:
   executableName: tct-orbit
-  maintainer: TCT Orbit Team <support@tctorbit.com>
+  maintainer: TCT <support@tctorbit.com>
   category: Network;WebBrowser;
   icon: resources/browser-logo.png
   synopsis: Fast, Clean, and Modern Desktop Web Browser
@@ -128,6 +131,7 @@ appImage:
 
 deb:
   artifactName: tct-orbit-${version}.${ext}
+  packageName: tct-orbit
   depends:
     - gconf2
     - gconf-service
@@ -139,8 +143,10 @@ deb:
 
 rpm:
   artifactName: tct-orbit-${version}.${ext}
+  packageName: tct-orbit
   fpm:
     - --iteration=1
+    - --rpm-rpmbuild-define=_build_id_links none
 
 pacman:
   artifactName: tct-orbit-${version}.${ext}

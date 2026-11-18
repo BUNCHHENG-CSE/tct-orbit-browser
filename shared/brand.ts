@@ -18,7 +18,7 @@ export const BRAND = {
   homepage: 'https://tctorbit.com',
   updateUrl: 'https://updates.tctorbit.com',
   repository: 'https://github.com/tctorbit/tct-orbit',
-  author: 'TCT Orbit Team <support@tctorbit.com>',
+  author: 'TCT <support@tctorbit.com>',
   defaultChannel: 'stable' as ReleaseChannel
 } as const
 
