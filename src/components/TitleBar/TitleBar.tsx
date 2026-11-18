@@ -87,24 +87,47 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   // Listen for Ctrl+L to focus address bar
   useEffect(() => {
     const handleFocusBar = () => {
-      if (inputRef.current) {
-        inputRef.current.focus()
-        inputRef.current.select()
-      }
+      setIsFocused(true)
+      window.focus()
+      setTimeout(() => {
+        if (inputRef.current) {
+          inputRef.current.focus()
+          inputRef.current.select()
+        }
+      }, 15)
     }
     window.addEventListener('tct:focus-address-bar', handleFocusBar)
     return () => window.removeEventListener('tct:focus-address-bar', handleFocusBar)
   }, [])
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside, clicking the webview site, pressing Esc, or window blur
   useEffect(() => {
+    const handleCloseOmnibox = () => {
+      setIsFocused(false)
+      inputRef.current?.blur()
+    }
+
     const handleOutsideClick = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setIsFocused(false)
+        handleCloseOmnibox()
       }
     }
+
     window.addEventListener('mousedown', handleOutsideClick)
-    return () => window.removeEventListener('mousedown', handleOutsideClick)
+    window.addEventListener('pointerdown', handleOutsideClick)
+    window.addEventListener('tct:close-omnibox', handleCloseOmnibox)
+    window.addEventListener('blur', handleCloseOmnibox)
+
+    // Listen to IPC event from main process when webview gains focus or receives clicks
+    const unsubscribeOmnibox = api.omnibox?.onClose ? api.omnibox.onClose(handleCloseOmnibox) : undefined
+
+    return () => {
+      window.removeEventListener('mousedown', handleOutsideClick)
+      window.removeEventListener('pointerdown', handleOutsideClick)
+      window.removeEventListener('tct:close-omnibox', handleCloseOmnibox)
+      window.removeEventListener('blur', handleCloseOmnibox)
+      if (unsubscribeOmnibox) unsubscribeOmnibox()
+    }
   }, [])
 
   const handleMinimize = () => api.window.minimize()
@@ -127,6 +150,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     if (inputRef.current) inputRef.current.blur()
 
     if (activeTab) {
+      window.dispatchEvent(
+        new CustomEvent('tct:webview-navigate', {
+          detail: { tabId: activeTab.id, url: targetUrl }
+        })
+      )
+
       useBrowserStore.getState().updateTabInStore(activeTab.id, {
         url: targetUrl,
         title: title || targetUrl
@@ -308,6 +337,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               setInputValue(activeTab?.url || '')
               setTimeout(() => inputRef.current?.select(), 10)
             }}
+            onBlur={(e) => {
+              // Only blur if not clicking inside container or suggestions
+              if (containerRef.current && containerRef.current.contains(e.relatedTarget as Node)) {
+                return
+              }
+              setIsFocused(false)
+            }}
             onKeyDown={handleKeyDown}
             placeholder={`Search with ${engineMeta.name} or enter address...`}
             spellCheck={false}
@@ -353,7 +389,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           <div className="absolute top-full left-1 right-1 mt-1.5 py-1.5 rounded-2xl bg-popover text-popover-foreground border border-border shadow-2xl z-50 overflow-hidden text-xs">
             {/* Suggestion 1: Search */}
             <div
-              onMouseDown={() => {
+              onMouseDown={(e) => {
+                e.preventDefault()
                 const isDark = resolveIsDark(settings?.theme)
                 handleNavigateTo(buildSearchUrl(inputValue.trim(), currentEngine, isDark), inputValue.trim())
               }}
@@ -369,7 +406,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             {/* Suggestion 2: Direct URL if formatted like one */}
             {isUrl(inputValue.trim()) && (
               <div
-                onMouseDown={() => {
+                onMouseDown={(e) => {
+                  e.preventDefault()
                   handleNavigateTo(normalizeUrl(inputValue.trim()), inputValue.trim())
                 }}
                 className="flex items-center gap-2.5 px-3.5 py-2 cursor-pointer hover:bg-accent transition-colors border-t border-border"

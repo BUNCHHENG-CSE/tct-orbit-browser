@@ -60,6 +60,10 @@ export function useTabs(spaceId: string | null) {
     try {
       updateTabInStore(id, data)
       const updated = await api.tabs.update(id, data)
+      // If the update payload did not specify a URL change, never allow stale disk state to overwrite the live URL
+      if (data.url === undefined) {
+        delete (updated as Partial<Tab>).url
+      }
       updateTabInStore(id, updated)
       return updated
     } catch (err) {

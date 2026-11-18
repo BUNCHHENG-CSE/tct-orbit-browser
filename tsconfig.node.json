@@ -16,6 +16,8 @@
   "include": [
     "electron.vite.config.*",
     "electron/**/*",
+    "src/main/**/*",
+    "src/preload/**/*",
     "prisma/**/*",
     "shared/**/*",
     "src/types/**/*"

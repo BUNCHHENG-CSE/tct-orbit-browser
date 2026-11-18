@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -15,11 +15,12 @@ import { useSpaces } from '@/hooks/useSpaces'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { ACCENT_PRESETS } from '@/lib/theme'
-import type { ThemeMode, AccentPreset, WebColorScheme } from '@/types/api'
+import type { ThemeMode, AccentPreset, WebColorScheme, StartupBehavior, AutoArchiveDuration } from '@/types/api'
 import { SEARCH_ENGINES, type SearchEngineId } from '@/lib/searchEngines'
 import { modKey, getPlatformDescription } from '@/lib/platform'
 import browserLogo from '@/assets/logo.png'
 import { usePrivacyShield } from '@/hooks/usePrivacyShield'
+import { api } from '@/lib/ipc'
 import {
   Palette,
   Search,
@@ -40,7 +41,15 @@ import {
   Trash2,
   RefreshCw,
   Globe,
-  RotateCcw
+  RotateCcw,
+  Home,
+  Pin,
+  Plus,
+  X,
+  Download,
+  FolderDown,
+  FolderOpen,
+  ZoomIn
 } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -51,8 +60,10 @@ interface SettingsDialogProps {
 
 type SettingsTab =
   | 'appearance'
+  | 'startup'
   | 'search'
   | 'tabs'
+  | 'downloads'
   | 'privacy'
   | 'performance'
   | 'shortcuts'
@@ -92,11 +103,23 @@ const WEB_COLOR_SCHEME_OPTIONS: {
 const KEYBOARD_SHORTCUTS = [
   { keys: [modKey, 'T'], description: 'Open new tab' },
   { keys: [modKey, 'W'], description: 'Close active tab' },
-  { keys: [modKey, 'L'], description: 'Open Spotlight / URL search' },
-  { keys: [modKey, 'S'], description: 'Toggle sidebar rail' },
+  { keys: [modKey, 'Shift', 'T'], description: 'Reopen closed tab' },
   { keys: [modKey, 'Tab'], description: 'Switch to next tab' },
   { keys: [modKey, 'Shift', 'Tab'], description: 'Switch to previous tab' },
-  { keys: [modKey, 'Shift', 'T'], description: 'Reopen closed tab' },
+  { keys: [modKey, '1-8'], description: 'Switch to tab 1 through 8' },
+  { keys: [modKey, '9'], description: 'Switch to last tab' },
+  { keys: [modKey, 'L'], description: 'Focus address bar / URL' },
+  { keys: [modKey, 'K'], description: 'Open command bar' },
+  { keys: [modKey, 'R'], description: 'Reload webpage' },
+  { keys: [modKey, 'Shift', 'R'], description: 'Hard reload (bypass cache)' },
+  { keys: ['Alt', '←'], description: 'Back in history' },
+  { keys: ['Alt', '→'], description: 'Forward in history' },
+  { keys: [modKey, 'S'], description: 'Toggle sidebar rail' },
+  { keys: [modKey, '+'], description: 'Zoom in' },
+  { keys: [modKey, '-'], description: 'Zoom out' },
+  { keys: [modKey, '0'], description: 'Reset zoom' },
+  { keys: [modKey, 'Shift', 'S'], description: 'Capture tab screenshot' },
+  { keys: ['F12'], description: 'Toggle Developer Tools' },
   { keys: [modKey, ','], description: 'Open browser settings' }
 ]
 
@@ -125,12 +148,25 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setTheme,
     setSidebarCollapsed,
     setAccentPreset,
-    setWebColorScheme: persistWebColorScheme
+    setWebColorScheme: persistWebColorScheme,
+    setStartupBehavior,
+    setStartupCustomUrls,
+    setDownloadPath,
+    setAskWhereToSave,
+    setOpenFolderOnDownload,
+    setDefaultZoom,
+    setAutoArchiveDuration
   } = useSettings()
 
   const { activeSpace, updateSpace } = useSpaces()
   const appInfo = useBrowserStore((s) => s.appInfo)
+  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
+  const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+  const [newCustomUrl, setNewCustomUrl] = useState('')
+
+  const startupBehavior: StartupBehavior = settings?.startupBehavior || 'previous-session'
+  const customUrls: string[] = settings?.startupCustomUrls || []
 
   // Theme Store
   const themeMode = useThemeStore((s) => s.mode)
@@ -143,6 +179,59 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
   const currentEngine = (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
   const isSidebarCollapsed = settings?.sidebarCollapsed ?? false
+
+  // Downloads and Zoom state
+  const [defaultOsDownloadPath, setDefaultOsDownloadPath] = useState('')
+  useEffect(() => {
+    if (api.downloads?.getDefaultPath) {
+      api.downloads.getDefaultPath().then(setDefaultOsDownloadPath).catch(() => {})
+    }
+  }, [])
+
+  const currentDownloadPath = settings?.downloadPath || defaultOsDownloadPath
+  const askWhereToSave = settings?.askWhereToSave ?? false
+  const openFolderOnDownload = settings?.openFolderOnDownload ?? true
+  const currentZoom = settings?.defaultZoom || 100
+  const currentAutoArchive: AutoArchiveDuration = settings?.autoArchiveDuration || 'off'
+
+  const handleSelectDownloadDir = async () => {
+    try {
+      const selected = await api.downloads?.selectDirectory()
+      if (selected) {
+        await setDownloadPath(selected)
+        toast.success(`Download folder updated: ${selected}`)
+      }
+    } catch {
+      toast.error('Failed to change download directory')
+    }
+  }
+
+  const handleResetDownloadDir = async () => {
+    await setDownloadPath('')
+    toast.success('Download directory reset to system default')
+  }
+
+  const handleOpenDownloadFolder = async () => {
+    try {
+      await api.downloads?.openFolder(currentDownloadPath)
+    } catch {
+      toast.error('Could not open downloads folder')
+    }
+  }
+
+  const handleZoomChange = async (zoom: number) => {
+    await setDefaultZoom(zoom)
+    toast.success(`Default page zoom set to ${zoom}%`)
+  }
+
+  const handleAutoArchiveChange = async (duration: AutoArchiveDuration) => {
+    await setAutoArchiveDuration(duration)
+    toast.success(
+      duration === 'off'
+        ? 'Auto-archive tabs disabled'
+        : `Inactive tabs will auto-archive after ${duration === '12h' ? '12 hours' : duration === '24h' ? '24 hours' : duration === '3d' ? '3 days' : '7 days'}`
+    )
+  }
 
   // Local preferences state
   const [selectedAccent, setSelectedAccent] = useState(() => ACCENT_PRESETS.find((p) => p.id === currentAccent)?.hex || '#3b82f6')
@@ -221,7 +310,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setIsCheckingUpdates(true)
     setTimeout(() => {
       setIsCheckingUpdates(false)
-      toast.success('TCT Orbit is up to date! (v0.1.0)')
+      toast.success(`TCT Orbit is up to date! (v${appInfo?.version || '0.1.1'})`)
     }, 900)
   }
 
@@ -246,10 +335,59 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     toast.success('All settings reset to defaults')
   }
 
+  const handleStartupBehaviorChange = async (behavior: StartupBehavior) => {
+    await setStartupBehavior(behavior)
+    if (behavior === 'previous-session') {
+      toast.success('On startup: Open tabs from previous session')
+    } else if (behavior === 'new-tab') {
+      toast.success('On startup: Open the new tab page (pinned tabs preserved)')
+    } else {
+      toast.success('On startup: Open custom sites')
+    }
+  }
+
+  const handleAddCustomUrl = async () => {
+    let trimmed = newCustomUrl.trim()
+    if (!trimmed) return
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      trimmed = `https://${trimmed}`
+    }
+    const current = settings?.startupCustomUrls || []
+    if (current.includes(trimmed)) {
+      toast.error('This URL is already added')
+      return
+    }
+    const next = [...current, trimmed]
+    await setStartupCustomUrls(next)
+    setNewCustomUrl('')
+    toast.success('Added startup page')
+  }
+
+  const handleRemoveCustomUrl = async (index: number) => {
+    const current = settings?.startupCustomUrls || []
+    const next = current.filter((_, i) => i !== index)
+    await setStartupCustomUrls(next)
+    toast.success('Removed startup page')
+  }
+
+  const handleUseCurrentTabsAsStartup = async () => {
+    const spaceId = activeSpaceId || 'default-personal-space'
+    const openTabs = tabsBySpace[spaceId] || []
+    const validUrls = openTabs.map((t) => t.url).filter((u) => u && !u.startsWith('about:'))
+    if (validUrls.length === 0) {
+      toast.error('No valid open tabs found in current space')
+      return
+    }
+    await setStartupCustomUrls(validUrls)
+    toast.success(`Saved ${validUrls.length} current tab(s) as startup pages`)
+  }
+
   const navItems = [
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'startup', label: 'Start & New Tab', icon: Home },
     { id: 'search', label: 'Search Engine', icon: Search },
     { id: 'tabs', label: 'Spaces & Dock', icon: Layers },
+    { id: 'downloads', label: 'Downloads', icon: Download },
     { id: 'privacy', label: 'Privacy & Shield', icon: Shield },
     { id: 'performance', label: 'Performance', icon: Zap },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
@@ -539,6 +677,41 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                 </div>
 
+                {/* Default Page Zoom Level */}
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                      <ZoomIn className="w-3.5 h-3.5 text-primary" />
+                      Default Page Zoom Level
+                    </h4>
+                    <span className="text-[11.5px] font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-full">
+                      {currentZoom}%
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mb-2.5">
+                    Scale web content across all tabs and spaces to your preferred reading comfort.
+                  </p>
+                  <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                    {[80, 90, 100, 110, 125, 150].map((zoom) => {
+                      const isSelected = currentZoom === zoom
+                      return (
+                        <button
+                          key={zoom}
+                          type="button"
+                          onClick={() => handleZoomChange(zoom)}
+                          className={`flex items-center justify-center py-2 px-2.5 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
+                            isSelected
+                              ? 'border-primary ring-2 ring-primary/40 bg-primary/10 text-foreground font-semibold shadow-xs'
+                              : 'border-border bg-card text-muted-foreground hover:text-foreground hover:bg-muted/60'
+                          }`}
+                        >
+                          {zoom}%
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 {/* Visual Customizations Switches */}
                 <div className="space-y-3.5 pt-1 border-t border-border">
                   <div className="flex items-center justify-between">
@@ -575,6 +748,180 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                         setLocalPref('smooth_transitions', val)
                       }}
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* STARTUP TAB: Start, home, and new tab page */}
+            {activeTab === 'startup' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">
+                    Start, home, and new tab page
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Customize what pages appear when you open TCT Orbit or start a new browsing session.
+                  </p>
+                </div>
+
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    On startup
+                  </h4>
+
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3 space-y-2">
+                    {/* Option 1: Open the new tab page */}
+                    <div
+                      onClick={() => handleStartupBehaviorChange('new-tab')}
+                      className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                        startupBehavior === 'new-tab'
+                          ? 'bg-card border border-primary/40 shadow-xs'
+                          : 'border border-transparent hover:bg-muted/40'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="startup-behavior"
+                        checked={startupBehavior === 'new-tab'}
+                        onChange={() => handleStartupBehaviorChange('new-tab')}
+                        className="mt-0.5 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                      />
+                      <div className="flex-1 select-none">
+                        <div className="text-xs font-medium text-foreground">Open the new tab page</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          Starts clean with a fresh search page. Pinned tabs remain safely preserved.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Option 2: Open tabs from the previous session */}
+                    <div
+                      onClick={() => handleStartupBehaviorChange('previous-session')}
+                      className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                        startupBehavior === 'previous-session'
+                          ? 'bg-card border border-primary/40 shadow-xs'
+                          : 'border border-transparent hover:bg-muted/40'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="startup-behavior"
+                        checked={startupBehavior === 'previous-session'}
+                        onChange={() => handleStartupBehaviorChange('previous-session')}
+                        className="mt-0.5 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                      />
+                      <div className="flex-1 select-none">
+                        <div className="text-xs font-medium text-foreground">Open tabs from the previous session</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          Continue seamlessly with all open tabs and active spaces restored.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Option 3: Open custom sites */}
+                    <div
+                      onClick={() => handleStartupBehaviorChange('custom-urls')}
+                      className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                        startupBehavior === 'custom-urls'
+                          ? 'bg-card border border-primary/40 shadow-xs'
+                          : 'border border-transparent hover:bg-muted/40'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="startup-behavior"
+                        checked={startupBehavior === 'custom-urls'}
+                        onChange={() => handleStartupBehaviorChange('custom-urls')}
+                        className="mt-0.5 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                      />
+                      <div className="flex-1 select-none">
+                        <div className="text-xs font-medium text-foreground">Open custom sites</div>
+                        <div className="text-[11px] text-muted-foreground mt-0.5">
+                          Open specific websites every time the browser starts, plus any pinned tabs.
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Custom URLs Sub-panel when 'custom-urls' is selected */}
+                    {startupBehavior === 'custom-urls' && (
+                      <div className="pt-3 px-2 pb-1 space-y-3 border-t border-border">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-foreground">Custom Startup Sites</span>
+                          <button
+                            type="button"
+                            onClick={handleUseCurrentTabsAsStartup}
+                            className="text-[11px] text-primary hover:underline font-medium"
+                          >
+                            Use current open tabs
+                          </button>
+                        </div>
+
+                        {customUrls.length === 0 ? (
+                          <div className="p-3 rounded-xl border border-dashed border-border text-center text-xs text-muted-foreground">
+                            No custom sites configured yet. Add one below.
+                          </div>
+                        ) : (
+                          <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                            {customUrls.map((url, idx) => (
+                              <div
+                                key={idx}
+                                className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-card border border-border text-xs"
+                              >
+                                <span className="truncate max-w-[340px] text-foreground font-mono text-[11px]">
+                                  {url}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveCustomUrl(idx)}
+                                  className="text-muted-foreground hover:text-destructive p-1 rounded transition-colors cursor-pointer"
+                                  title="Remove site"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="url"
+                            value={newCustomUrl}
+                            onChange={(e) => setNewCustomUrl(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.preventDefault()
+                                handleAddCustomUrl()
+                              }
+                            }}
+                            placeholder="https://example.com"
+                            className="flex-1 px-3 py-1.5 rounded-xl bg-card border border-border text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-primary/40 outline-none"
+                          />
+                          <button
+                            type="button"
+                            onClick={handleAddCustomUrl}
+                            className="px-3.5 py-1.5 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+                          >
+                            <Plus className="w-3.5 h-3.5" />
+                            <span>Add</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Explanatory callout for Pinned Tabs */}
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                    <Pin className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="text-xs text-foreground space-y-0.5">
+                    <span className="font-semibold">Pinned Tabs are always saved</span>
+                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                      Right-click any tab in the sidebar and choose <strong>Pin Tab</strong> to dock it at the top rail. Pinned tabs remain safely preserved across all browser sessions regardless of startup mode.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -717,6 +1064,46 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                 </div>
 
+                {/* Auto-Archive Inactive Tabs */}
+                <div>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      Auto-Archive Inactive Tabs
+                    </h4>
+                    <span className="text-[11.5px] font-medium text-muted-foreground">
+                      {currentAutoArchive === 'off' ? 'Disabled' : `After ${currentAutoArchive}`}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mb-2.5">
+                    Automatically declutter your sidebar on startup by archiving unpinned tabs that have been idle. Pinned tabs are always kept.
+                  </p>
+                  <div className="grid grid-cols-5 gap-2">
+                    {[
+                      { id: 'off', label: 'Off' },
+                      { id: '12h', label: '12 Hours' },
+                      { id: '24h', label: '24 Hours' },
+                      { id: '3d', label: '3 Days' },
+                      { id: '7d', label: '7 Days' }
+                    ].map((opt) => {
+                      const isSelected = currentAutoArchive === opt.id
+                      return (
+                        <button
+                          key={opt.id}
+                          type="button"
+                          onClick={() => handleAutoArchiveChange(opt.id as AutoArchiveDuration)}
+                          className={`py-2 px-1.5 rounded-xl border text-xs font-medium transition-all cursor-pointer text-center ${
+                            isSelected
+                              ? 'bg-primary/15 border-primary text-primary font-bold shadow-xs ring-1 ring-primary/40'
+                              : 'bg-card border-border text-muted-foreground hover:bg-muted hover:text-foreground'
+                          }`}
+                        >
+                          {opt.label}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 <div className="space-y-3.5 pt-1 border-t border-border">
                   <div className="flex items-center justify-between">
                     <div>
@@ -728,10 +1115,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       </p>
                     </div>
                     <Switch
-                      checked={restoreTabsOnStartup}
+                      checked={startupBehavior === 'previous-session'}
                       onCheckedChange={(val) => {
-                        setRestoreTabsOnStartup(val)
-                        setLocalPref('restore_tabs', val)
+                        handleStartupBehaviorChange(val ? 'previous-session' : 'new-tab')
                       }}
                     />
                   </div>
@@ -752,6 +1138,151 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                         setLocalPref('confirm_close_space', val)
                       }}
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DOWNLOADS TAB */}
+            {activeTab === 'downloads' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-sm font-bold text-foreground">
+                    Downloads & File Management
+                  </h3>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Choose where downloaded files are saved and customize native system download behaviors.
+                  </p>
+                </div>
+
+                {/* Default Download Folder Card */}
+                <div className="rounded-2xl border border-border bg-card p-4 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                        <Download className="w-4 h-4" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs font-semibold text-foreground">
+                          Default Download Location
+                        </h4>
+                        <p className="text-[11px] text-muted-foreground">
+                          Directory where incoming files and downloads are automatically routed
+                        </p>
+                      </div>
+                    </div>
+                    {settings?.downloadPath ? (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20">
+                        Custom
+                      </span>
+                    ) : (
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded-md bg-muted text-muted-foreground border border-border">
+                        Default
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Folder Path Box */}
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-muted/40 border border-border font-mono text-[11.5px] text-foreground">
+                    <FolderOpen className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="truncate flex-1 select-all" title={currentDownloadPath || 'System Downloads'}>
+                      {currentDownloadPath || defaultOsDownloadPath || 'Resolving download folder...'}
+                    </span>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleSelectDownloadDir}
+                      className="text-xs h-8 rounded-xl gap-1.5 cursor-pointer"
+                    >
+                      <FolderDown className="w-3.5 h-3.5" />
+                      Change Folder...
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={handleOpenDownloadFolder}
+                      className="text-xs h-8 rounded-xl gap-1.5 cursor-pointer text-muted-foreground hover:text-foreground"
+                    >
+                      <FolderOpen className="w-3.5 h-3.5" />
+                      Open in Explorer
+                    </Button>
+
+                    {settings?.downloadPath && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={handleResetDownloadDir}
+                        className="text-xs h-8 rounded-xl gap-1.5 cursor-pointer text-muted-foreground hover:text-destructive ml-auto"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        Reset to Default
+                      </Button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Behavioral Switches */}
+                <div className="space-y-3.5 pt-1 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">
+                        Always Ask Where to Save Each File
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Open the native system file dialog before starting any download
+                      </p>
+                    </div>
+                    <Switch
+                      checked={askWhereToSave}
+                      onCheckedChange={async (val) => {
+                        await setAskWhereToSave(val)
+                        toast.success(
+                          val
+                            ? 'Prompt enabled: Will ask where to save each file'
+                            : 'Files will download automatically to default location'
+                        )
+                      }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">
+                        Show Downloaded Files in Folder Upon Completion
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        Automatically highlight newly finished files in your operating system's file manager
+                      </p>
+                    </div>
+                    <Switch
+                      checked={openFolderOnDownload}
+                      onCheckedChange={async (val) => {
+                        await setOpenFolderOnDownload(val)
+                        toast.success(
+                          val
+                            ? 'Will reveal completed downloads in file manager'
+                            : 'Quiet downloads enabled (notifications only)'
+                        )
+                      }}
+                    />
+                  </div>
+                </div>
+
+                {/* Collision Protection Callout */}
+                <div className="rounded-2xl border border-primary/20 bg-primary/5 p-3.5 flex items-start gap-3">
+                  <div className="w-7 h-7 rounded-xl bg-primary/10 text-primary flex items-center justify-center shrink-0 mt-0.5">
+                    <ShieldCheck className="w-4 h-4" />
+                  </div>
+                  <div className="text-xs text-foreground space-y-0.5">
+                    <span className="font-semibold">Automatic Collision Protection</span>
+                    <p className="text-muted-foreground text-[11px] leading-relaxed">
+                      Files with identical names are never overwritten silently. TCT Orbit automatically appends numbered suffixes (e.g. <code className="px-1 py-0.5 bg-background rounded border border-border font-mono text-[10px]">document (1).pdf</code>) to protect your local data integrity.
+                    </p>
                   </div>
                 </div>
               </div>
@@ -919,7 +1450,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                     {privacyPrefs.dnsOverHttps && (
                       <div className="flex items-center gap-1.5 pl-0.5">
                         <span className="text-[10px] text-muted-foreground shrink-0 font-medium">Resolver:</span>
-                        {(['mullvad', 'cloudflare', 'quad9', 'adguard'] as const).map((prov) => (
+                        {(['cloudflare', 'mullvad', 'quad9', 'adguard'] as const).map((prov) => (
                           <button
                             key={prov}
                             onClick={() => setDohProvider(prov)}
@@ -929,7 +1460,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                                 : 'bg-muted hover:bg-muted/80 text-muted-foreground hover:text-foreground'
                             }`}
                           >
-                            {prov === 'mullvad' ? 'Mullvad (DoH)' : prov}
+                            {prov === 'cloudflare' ? 'Cloudflare (Fast)' : prov === 'mullvad' ? 'Mullvad' : prov}
                           </button>
                         ))}
                       </div>
@@ -1176,7 +1707,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           {appInfo?.name || 'TCT Orbit'}
                         </h3>
                         <p className="text-xs text-muted-foreground">
-                          Version {appInfo?.version || '0.1.0'} ({getPlatformDescription()})
+                          Version {appInfo?.version || '0.1.1'} ({getPlatformDescription()})
                         </p>
                       </div>
                     </div>

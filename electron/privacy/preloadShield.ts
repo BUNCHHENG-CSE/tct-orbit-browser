@@ -100,7 +100,7 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
           const origWebGLGetParam = WebGLRenderingContext.prototype.getParameter;
           WebGLRenderingContext.prototype.getParameter = function(param) {
             // UNMASKED_VENDOR_WEBGL
-            if (param === 0x9245) return 'Google Inc. (TCT Orbit Engine)';
+            if (param === 0x9245) return 'Google Inc.';
             // UNMASKED_RENDERER_WEBGL
             if (param === 0x9246) return 'ANGLE (Generic Direct3D11 vs_5_0 ps_5_0)';
             return origWebGLGetParam.apply(this, arguments);
@@ -109,7 +109,7 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
           if (typeof WebGL2RenderingContext !== 'undefined') {
             const origWebGL2GetParam = WebGL2RenderingContext.prototype.getParameter;
             WebGL2RenderingContext.prototype.getParameter = function(param) {
-              if (param === 0x9245) return 'Google Inc. (TCT Orbit Engine)';
+              if (param === 0x9245) return 'Google Inc.';
               if (param === 0x9246) return 'ANGLE (Generic Direct3D11 vs_5_0 ps_5_0)';
               return origWebGL2GetParam.apply(this, arguments);
             };
@@ -140,13 +140,37 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
         } catch(e) {}
         ` : ''}
 
+        // Safe style appender helper that guarantees styles attach even if document.head is null at early parse
+        const safeAppendStyle = (styleEl) => {
+          if (document.head) {
+            document.head.appendChild(styleEl);
+          } else if (document.documentElement) {
+            document.documentElement.appendChild(styleEl);
+          } else {
+            document.addEventListener('DOMContentLoaded', () => {
+              (document.head || document.documentElement || document.body)?.appendChild(styleEl);
+            }, { once: true });
+          }
+        };
+
         // --- 3. YOUTUBE AD SUPPRESSION & AUTO-SKIPPER ---
         const isYouTube = window.location.hostname.includes('youtube.com');
         if (isYouTube) {
-          // Hide promotional banners and sidebar ad cards safely without breaking player controls
+          // Permanently suppress overlay ads, sponsored cards, bottom banners, and companion ads
           const ytStyle = document.createElement('style');
           ytStyle.id = 'tct-yt-adblock';
           ytStyle.textContent = \`
+            .ytp-ad-overlay-slot,
+            .ytp-ad-overlay-container,
+            .ytp-ad-module,
+            .ytp-ad-player-overlay,
+            .ytp-ad-player-overlay-layout,
+            .ytp-ad-player-overlay-flyout-cta,
+            .ytp-ad-action-interstitial,
+            .ytp-ad-hover-text-container,
+            .ytp-ad-text,
+            .ytp-suggested-action,
+            .ytp-paid-content-overlay,
             ytd-ad-slot-renderer,
             ytd-banner-promo-renderer,
             ytd-statement-banner-renderer,
@@ -155,7 +179,9 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
             #player-ads,
             ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
             ytd-merch-shelf-renderer,
-            .ytp-ad-overlay-container,
+            ytd-action-companion-ad-renderer,
+            ytd-promoted-sparkles-web-renderer,
+            ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
             .ytp-ad-message-container {
               display: none !important;
               visibility: hidden !important;
@@ -165,11 +191,14 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
               pointer-events: none !important;
             }
           \`;
-          (document.head || document.documentElement).appendChild(ytStyle);
+          safeAppendStyle(ytStyle);
 
           // Auto-skip video ads ONLY when movie_player is actively in ad-showing mode
           const handleYouTubeAds = () => {
             try {
+              // Never manipulate video playback on Shorts reels
+              if (window.location.pathname.startsWith('/shorts')) return;
+
               const moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
               const isAdShowing = Boolean(
                 moviePlayer && (
@@ -191,8 +220,12 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
                 if (adVideo && !isNaN(adVideo.duration) && adVideo.duration > 0) {
                   adVideo.playbackRate = 16.0;
                   adVideo.muted = true;
-                  adVideo.currentTime = adVideo.duration - 0.1;
+                  adVideo.currentTime = adVideo.duration - 0.05;
                 }
+
+                // Strip the ad-showing class so player controls and screen brighten immediately
+                moviePlayer.classList.remove('ad-showing');
+                moviePlayer.classList.remove('ad-interrupting');
               } else {
                 // Normal video playback: ensure playback rate is normalized
                 const mainVideo = document.querySelector('video.html5-main-video') || document.querySelector('video');
@@ -228,7 +261,48 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
             display: none !important;
           }
         \`;
-        (document.head || document.documentElement).appendChild(generalAdStyle);
+        safeAppendStyle(generalAdStyle);
+
+        // --- 5. MODERN SLIM OVERLAY SCROLLBAR ---
+        const modernScrollbarStyle = document.createElement('style');
+        modernScrollbarStyle.id = 'tct-orbit-modern-scrollbar';
+        modernScrollbarStyle.textContent = \`
+          :root, html, body, * {
+            scrollbar-width: thin !important;
+            scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
+          }
+
+          ::-webkit-scrollbar {
+            width: 6px !important;
+            height: 6px !important;
+          }
+
+          ::-webkit-scrollbar-track {
+            background: transparent !important;
+          }
+
+          ::-webkit-scrollbar-thumb {
+            background: rgba(130, 130, 150, 0.4) !important;
+            border-radius: 9999px !important;
+            border: 1px solid transparent !important;
+            background-clip: padding-box !important;
+          }
+
+          ::-webkit-scrollbar-thumb:hover {
+            background: rgba(150, 150, 180, 0.7) !important;
+          }
+
+          ::-webkit-scrollbar-corner {
+            background: transparent !important;
+          }
+
+          ::-webkit-scrollbar-button {
+            display: none !important;
+            width: 0 !important;
+            height: 0 !important;
+          }
+        \`;
+        safeAppendStyle(modernScrollbarStyle);
 
       } catch(err) {
         console.warn('[TCT Orbit Shield] Preload initialization warning:', err);

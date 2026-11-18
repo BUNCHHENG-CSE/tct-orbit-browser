@@ -38,14 +38,11 @@ const TRACKING_QUERY_PARAMS = new Set([
   's_kwcid'
 ])
 
-// Hardcoded network patterns for high-frequency ad & tracker networks (fallback & YouTube ad-break blocking)
+// Hardcoded network patterns for high-frequency ad & tracker networks (fallback blocking)
 const AD_URL_PATTERNS = [
   'doubleclick.net',
   'googleadservices.com',
   'googlesyndication.com',
-  'youtube.com/pagead',
-  'youtube.com/api/stats/ads',
-  'youtube.com/youtubei/v1/player/ad_break',
   'scorecardresearch.com',
   'criteo.com',
   'adnxs.com',
@@ -57,6 +54,40 @@ const AD_URL_PATTERNS = [
   'openx.net',
   'casalemedia.com'
 ]
+
+function getRootDomain(hostname: string): string {
+  if (!hostname) return ''
+  const parts = hostname.toLowerCase().split('.')
+  if (parts.length <= 2) return hostname.toLowerCase()
+  const commonSecondLevel = new Set(['co', 'com', 'org', 'net', 'edu', 'gov', 'ac'])
+  if (parts.length >= 3 && commonSecondLevel.has(parts[parts.length - 2])) {
+    return parts.slice(-3).join('.')
+  }
+  return parts.slice(-2).join('.')
+}
+
+// First-party infrastructure domain clusters that share state legitimately (CDNs, auth, media, APIs)
+const FIRST_PARTY_ECOSYSTEMS: Array<Set<string>> = [
+  new Set(['youtube.com', 'youtu.be', 'ytimg.com', 'googlevideo.com', 'googleapis.com', 'google.com', 'gstatic.com', 'googleusercontent.com']),
+  new Set(['github.com', 'githubassets.com', 'githubusercontent.com']),
+  new Set(['microsoft.com', 'live.com', 'office.com', 'microsoftonline.com', 'msftauth.net']),
+  new Set(['twitter.com', 'x.com', 'twimg.com']),
+  new Set(['amazon.com', 'media-amazon.com', 'ssl-images-amazon.com', 'a2z.com'])
+]
+
+function isSameSiteOrRelated(targetHostname: string, topHostname: string): boolean {
+  if (!targetHostname || !topHostname) return true
+  const rootTarget = getRootDomain(targetHostname)
+  const rootTop = getRootDomain(topHostname)
+  if (rootTarget === rootTop) return true
+
+  for (const cluster of FIRST_PARTY_ECOSYSTEMS) {
+    if (cluster.has(rootTarget) && cluster.has(rootTop)) {
+      return true
+    }
+  }
+  return false
+}
 
 export class PrivacyEngine {
   private prefs: PrivacyShieldPrefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS }
@@ -81,8 +112,11 @@ export class PrivacyEngine {
 
     this.loadPrefs()
     await this.initAdBlocker()
+    const tabSession = session.fromPartition('persist:browser-tabs')
     this.setupNetworkFilters(session.defaultSession)
     this.setupPermissionsHandler(session.defaultSession)
+    this.setupNetworkFilters(tabSession)
+    this.setupPermissionsHandler(tabSession)
 
     // Handle clear on exit if enabled
     app.on('before-quit', async () => {
@@ -97,6 +131,9 @@ export class PrivacyEngine {
       if (fs.existsSync(this.prefsPath)) {
         const raw = fs.readFileSync(this.prefsPath, 'utf8')
         const loaded = JSON.parse(raw)
+        if (loaded.dohProvider === 'mullvad') {
+          loaded.dohProvider = 'cloudflare'
+        }
         this.prefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS, ...loaded }
       }
     } catch (err) {
@@ -168,8 +205,35 @@ export class PrivacyEngine {
         return callback({})
       }
 
-      // A. Ghostery / EasyList / AdGuard engine matching
-      if ((this.prefs.adBlockerEnabled || this.prefs.trackerProtection) && this.blocker) {
+      const isFirstPartyYouTube = parsed.hostname.endsWith('youtube.com') || parsed.hostname.endsWith('youtu.be')
+
+      // Never block top-level navigations or core internal SPA endpoints for YouTube
+      // Doing so breaks internal SPA routing for Shorts, Subscriptions, Channels, and Videos
+      if (isFirstPartyYouTube && details.resourceType === 'mainFrame') {
+        return callback({})
+      }
+
+      const isYouTubeCoreSpaApi = isFirstPartyYouTube && (
+        parsed.pathname.startsWith('/youtubei/') ||
+        parsed.pathname.startsWith('/s/desktop/') ||
+        parsed.pathname.startsWith('/shorts') ||
+        parsed.pathname.startsWith('/feed') ||
+        parsed.pathname.startsWith('/api/stats/') ||
+        parsed.pathname.startsWith('/watch') ||
+        parsed.pathname.startsWith('/channel/') ||
+        parsed.pathname.startsWith('/c/') ||
+        parsed.pathname.startsWith('/@') ||
+        parsed.pathname.startsWith('/results') ||
+        parsed.pathname.startsWith('/playlist') ||
+        parsed.pathname.startsWith('/live')
+      )
+
+      if (isYouTubeCoreSpaApi) {
+        return callback({})
+      }
+
+      // A. Ghostery / EasyList / AdGuard engine matching (subresources only - NEVER cancel mainFrame navigations)
+      if (details.resourceType !== 'mainFrame' && (this.prefs.adBlockerEnabled || this.prefs.trackerProtection) && this.blocker) {
         try {
           const req = Request.fromRawDetails(details)
           const match = this.blocker.match(req)
@@ -184,8 +248,8 @@ export class PrivacyEngine {
         } catch {}
       }
 
-      // B. Fast hardcoded ad & tracker network blocking fallback (including YouTube adbreaks)
-      if (this.prefs.adBlockerEnabled || this.prefs.trackerProtection) {
+      // B. Fast hardcoded ad & tracker network blocking fallback (subresources only)
+      if (details.resourceType !== 'mainFrame' && !isFirstPartyYouTube && (this.prefs.adBlockerEnabled || this.prefs.trackerProtection)) {
         const hostname = parsed.hostname.toLowerCase()
         const pathname = parsed.pathname.toLowerCase()
         const fullPath = hostname + pathname
@@ -198,7 +262,7 @@ export class PrivacyEngine {
         }
       }
 
-      // C. HTTPS-Only Mode Upgrade
+      // C. HTTPS-Only Mode Upgrade (mainFrame or subFrame)
       if (this.prefs.httpsOnlyMode && parsed.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
         this.stats.httpsUpgradesTotal++
         parsed.protocol = 'https:'
@@ -206,7 +270,9 @@ export class PrivacyEngine {
       }
 
       // D. Query Parameter Stripping (e.g. utm_*, fbclid, gclid)
-      if (this.prefs.stripTrackingParams && parsed.search) {
+      // CRITICAL: ONLY strip query parameters on top-level mainFrame document navigations!
+      // NEVER return redirectURL for fetch/XHR subresources, as doing so breaks same-origin CORS & POST payloads
+      if (details.resourceType === 'mainFrame' && this.prefs.stripTrackingParams && parsed.search) {
         let stripped = false
         const searchParams = parsed.searchParams
         for (const param of Array.from(searchParams.keys())) {
@@ -225,7 +291,7 @@ export class PrivacyEngine {
       return callback({})
     })
 
-    // 2. onBeforeSendHeaders: GPC, DNT, and Referrer origin trimming
+    // 2. onBeforeSendHeaders: GPC, DNT, Referrer origin trimming, and targeted cross-site tracker cookie blocking
     ses.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
       const requestHeaders = { ...details.requestHeaders }
 
@@ -240,21 +306,25 @@ export class PrivacyEngine {
             requestHeaders['Sec-GPC'] = '1'
           }
 
-          // Referrer Trimming: trim referrer to origin-only
+          // Referrer Trimming: trim referrer to origin-only for cross-origin requests
           if (details.referrer && details.referrer.startsWith('http')) {
             try {
               const refUrl = new URL(details.referrer)
-              requestHeaders['Referer'] = refUrl.origin + '/'
+              if (refUrl.origin !== parsed.origin) {
+                requestHeaders['Referer'] = refUrl.origin + '/'
+              }
             } catch {}
           }
 
-          // Third-party cookie blocking (exempt media streams like googlevideo.com)
-          if (this.prefs.blockThirdPartyCookies && details.webContents && !parsed.hostname.includes('googlevideo.com')) {
+          // Third-party cookie blocking: only block cookies on subresource requests to external third-party tracking origins
+          // Never block cookies on document frame navigations or within same-site/related first-party ecosystems
+          const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
+          if (this.prefs.blockThirdPartyCookies && !isFrameNav && !parsed.hostname.includes('googlevideo.com')) {
             try {
-              const topUrl = details.webContents.getURL()
+              const topUrl = details.webContents?.getURL() || details.referrer || ''
               if (topUrl && topUrl.startsWith('http')) {
-                const topOrigin = new URL(topUrl).origin
-                if (parsed.origin !== topOrigin && !parsed.hostname.endsWith(new URL(topUrl).hostname)) {
+                const topHostname = new URL(topUrl).hostname
+                if (!isSameSiteOrRelated(parsed.hostname, topHostname)) {
                   delete requestHeaders['Cookie']
                 }
               }
@@ -266,20 +336,21 @@ export class PrivacyEngine {
       return callback({ requestHeaders })
     })
 
-    // 3. onHeadersReceived: Block third-party Set-Cookie
+    // 3. onHeadersReceived: Block third-party tracker Set-Cookie
     ses.webRequest.onHeadersReceived({ urls: ['*://*/*'] }, (details, callback) => {
       const responseHeaders = { ...details.responseHeaders }
 
-      if (this.prefs.blockThirdPartyCookies && details.webContents) {
+      const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
+      if (this.prefs.blockThirdPartyCookies && !isFrameNav) {
         try {
           const parsed = new URL(details.url)
           const isWhitelisted = this.prefs.whitelistedOrigins.includes(parsed.origin)
 
-          if (!isWhitelisted) {
-            const topUrl = details.webContents.getURL()
+          if (!isWhitelisted && !parsed.hostname.includes('googlevideo.com')) {
+            const topUrl = details.webContents?.getURL() || details.referrer || ''
             if (topUrl && topUrl.startsWith('http')) {
-              const topOrigin = new URL(topUrl).origin
-              if (parsed.origin !== topOrigin && !parsed.hostname.endsWith(new URL(topUrl).hostname)) {
+              const topHostname = new URL(topUrl).hostname
+              if (!isSameSiteOrRelated(parsed.hostname, topHostname)) {
                 delete responseHeaders['Set-Cookie']
                 delete responseHeaders['set-cookie']
               }
@@ -294,6 +365,7 @@ export class PrivacyEngine {
 
   /**
    * Default-deny sensitive browser permissions (camera, microphone, geolocation, notifications, etc.)
+   * while allowing standard non-invasive browser features (fullscreen, pointerLock, DRM/mediaKeySystem)
    */
   public setupPermissionsHandler(ses: Session): void {
     ses.setPermissionRequestHandler((webContents, permission, callback) => {
@@ -308,7 +380,7 @@ export class PrivacyEngine {
         return callback(true)
       }
 
-      // Deny sensitive hardware & fingerprinting permissions by default (Mullvad Standard)
+      // Deny sensitive hardware & tracking permissions by default
       const sensitivePermissions = [
         'camera',
         'microphone',
@@ -316,8 +388,6 @@ export class PrivacyEngine {
         'notifications',
         'clipboard-read',
         'midi',
-        'pointerLock',
-        'openExternal',
         'sensors',
         'accessibility-events'
       ]
@@ -327,14 +397,25 @@ export class PrivacyEngine {
         return callback(false)
       }
 
-      return callback(false)
+      // Allow standard browser permissions (fullscreen, pointerLock, openExternal, mediaKeySystem / DRM, clipboard-sanitized-write)
+      return callback(true)
     })
 
     ses.setPermissionCheckHandler((_webContents, permission) => {
-      if (['camera', 'microphone', 'geolocation', 'notifications'].includes(permission)) {
+      const sensitivePermissions = [
+        'camera',
+        'microphone',
+        'geolocation',
+        'notifications',
+        'clipboard-read',
+        'midi',
+        'sensors',
+        'accessibility-events'
+      ]
+      if (sensitivePermissions.includes(permission)) {
         return false
       }
-      return false
+      return true
     })
   }
 
@@ -461,11 +542,15 @@ export class PrivacyEngine {
    */
   public async clearBrowsingData(): Promise<{ success: boolean }> {
     try {
-      await session.defaultSession.clearStorageData({
-        storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
-      })
-      await session.defaultSession.clearCache()
-      await session.defaultSession.clearAuthCache()
+      const tabSession = session.fromPartition('persist:browser-tabs')
+      for (const ses of [tabSession, session.defaultSession]) {
+        await ses.clearStorageData({
+          storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'websql', 'serviceworkers', 'cachestorage']
+        })
+        await ses.clearCache()
+        await ses.clearAuthCache()
+        await ses.clearHostResolverCache()
+      }
       return { success: true }
     } catch (err) {
       console.error('[PrivacyEngine] Failed to clear browsing session data:', err)

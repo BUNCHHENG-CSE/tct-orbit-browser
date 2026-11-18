@@ -2,6 +2,7 @@ import { nativeTheme, session, type IpcMain } from 'electron'
 import type { UpdateSettingsData } from '../../src/types/api'
 import { localStorageService } from '../storage/localStorage'
 import { themeManager } from '../theme/themeManager'
+import { secureHandle, Schemas } from '../security'
 
 export async function syncSearchEngineCookies(_isDark: boolean): Promise<void> {
   const ses = session.defaultSession
@@ -37,12 +38,12 @@ export function applyNativeTheme(theme: string | undefined): void {
 
 export function register(ipcMain: IpcMain): void {
   // Get settings
-  ipcMain.handle('settings:get', async () => {
+  secureHandle(ipcMain, 'settings:get', null, async () => {
     return localStorageService.getSettings()
   })
 
   // Update settings
-  ipcMain.handle('settings:update', async (_, data: UpdateSettingsData) => {
+  secureHandle(ipcMain, 'settings:update', Schemas.settingsUpdate, async (_, data: UpdateSettingsData) => {
     if (data.theme || data.accentPreset || data.webColorScheme) {
       themeManager.setTheme({
         ...(data.theme ? { mode: data.theme as any } : {}),
@@ -55,4 +56,3 @@ export function register(ipcMain: IpcMain): void {
     return localStorageService.updateSettings(data)
   })
 }
-

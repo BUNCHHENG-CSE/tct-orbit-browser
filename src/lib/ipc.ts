@@ -13,9 +13,9 @@ export const api = {
   },
   get appInfo(): AppInfo {
     try {
-      return getApi().appInfo || { name: 'TCT Orbit', version: '0.1.0', channel: 'stable' }
+      return getApi().appInfo || { name: 'TCT Orbit', version: '0.1.1', channel: 'stable' }
     } catch {
-      return { name: 'TCT Orbit', version: '0.1.0', channel: 'stable' }
+      return { name: 'TCT Orbit', version: '0.1.1', channel: 'stable' }
     }
   },
   get tabs() {
@@ -42,8 +42,17 @@ export const api = {
   get contextMenu() {
     return getApi().contextMenu
   },
+  get omnibox() {
+    return getApi().omnibox
+  },
+  get shortcuts() {
+    return getApi().shortcuts
+  },
   get privacy() {
     return getApi().privacy
+  },
+  get downloads() {
+    return getApi().downloads
   },
   onOpenUrl(callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) {
     if (typeof window !== 'undefined' && window.api?.onOpenUrl) {

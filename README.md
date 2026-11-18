@@ -1,4 +1,4 @@
-# TCT Orbit (`v0.1.0`)
+# TCT Orbit (`v0.1.1`)
 
 A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, Prisma, and 100% private local machine storage.
 
@@ -107,13 +107,13 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 
 Configured in `electron-builder.yml` with update feed at `https://updates.tctorbit.com`:
 
-| Platform | Format | Output Artifact Name (`v0.1.0`) |
+| Platform | Format | Output Artifact Name (`v0.1.1`) |
 |---|---|---|
-| **Windows** | NSIS Installer | `tct-orbit-0.1.0-setup.exe` |
-| **Windows** | Portable Executable | `tct-orbit-0.1.0-portable.exe` |
-| **macOS** | Apple Disk Image | `tct-orbit-0.1.0.dmg` |
-| **Linux** | AppImage | `tct-orbit-0.1.0.AppImage` |
-| **Linux** | Debian Package | `tct-orbit-0.1.0.deb` |
+| **Windows** | NSIS Installer | `tct-orbit-0.1.1-setup.exe` |
+| **Windows** | Portable Executable | `tct-orbit-0.1.1-portable.exe` |
+| **macOS** | Apple Disk Image | `tct-orbit-0.1.1.dmg` |
+| **Linux** | AppImage | `tct-orbit-0.1.1.AppImage` |
+| **Linux** | Debian Package | `tct-orbit-0.1.1.deb` |
 
 ---
 

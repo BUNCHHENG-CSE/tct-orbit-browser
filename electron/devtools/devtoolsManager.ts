@@ -75,7 +75,16 @@ export class DevToolsManager {
 
   private ensureDevToolsView(): WebContentsView {
     if (!this.devToolsView) {
-      this.devToolsView = new WebContentsView()
+      this.devToolsView = new WebContentsView({
+        webPreferences: {
+          contextIsolation: true,
+          nodeIntegration: false,
+          nodeIntegrationInWorker: false,
+          sandbox: true,
+          webSecurity: true,
+          allowRunningInsecureContent: false
+        }
+      })
       if (this.mainWindow && !this.mainWindow.isDestroyed()) {
         this.mainWindow.contentView.addChildView(this.devToolsView)
       }
@@ -97,6 +106,12 @@ export class DevToolsManager {
    */
   public openDocked(targetWebContents: WebContents, bounds?: Rectangle): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    // In production, forbid opening DevTools on the internal UI window
+    if (app.isPackaged && targetWebContents === this.mainWindow.webContents) {
+      console.warn('[Security] Blocked DevTools inspection on internal browser UI')
+      return
+    }
 
     // If already open in a detached window, focus that window
     if (this.detachedWindow && !this.detachedWindow.isDestroyed()) {
@@ -134,6 +149,12 @@ export class DevToolsManager {
    */
   public inspectElement(targetWebContents: WebContents, x: number, y: number, bounds?: Rectangle): void {
     if (!this.mainWindow || this.mainWindow.isDestroyed()) return
+
+    // In production, forbid inspecting elements on the internal UI window
+    if (app.isPackaged && targetWebContents === this.mainWindow.webContents) {
+      console.warn('[Security] Blocked inspect element on internal browser UI')
+      return
+    }
 
     // If detached window is active
     if (this.detachedWindow && !this.detachedWindow.isDestroyed()) {

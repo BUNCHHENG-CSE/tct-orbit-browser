@@ -23,7 +23,7 @@ export const DEFAULT_PRIVACY_SHIELD_PREFS: PrivacyShieldPrefs = {
   fingerprintResistance: true,
   httpsOnlyMode: true,
   dnsOverHttps: true,
-  dohProvider: 'mullvad',
+  dohProvider: 'cloudflare',
   webrtcProtection: false, // Default off for smooth video-calling compatibility, optional toggle
   globalPrivacyControl: true,
   stripTrackingParams: true,

@@ -93,6 +93,11 @@ export const CommandBar: React.FC = () => {
       }
     } else {
       // In 'navigate' mode (user clicked address bar / Ctrl+L), UPDATE current active tab
+      window.dispatchEvent(
+        new CustomEvent('tct:webview-navigate', {
+          detail: { tabId: activeTab.id, url: targetUrl }
+        })
+      )
       await updateTab(activeTab.id, {
         url: targetUrl,
         title: tabTitle

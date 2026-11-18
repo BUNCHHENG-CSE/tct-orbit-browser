@@ -46,6 +46,9 @@ export interface SetThemeData {
   webColorScheme?: WebColorScheme;
 }
 
+export type StartupBehavior = 'previous-session' | 'new-tab' | 'custom-urls';
+export type AutoArchiveDuration = 'off' | '12h' | '24h' | '3d' | '7d';
+
 export interface Settings {
   id: string;
   userId: string;
@@ -56,6 +59,13 @@ export interface Settings {
   accentPreset?: AccentPreset;
   webColorScheme?: WebColorScheme;
   smoothScrolling?: boolean;
+  startupBehavior?: StartupBehavior;
+  startupCustomUrls?: string[];
+  downloadPath?: string;
+  askWhereToSave?: boolean;
+  openFolderOnDownload?: boolean;
+  defaultZoom?: number;
+  autoArchiveDuration?: AutoArchiveDuration;
   updatedAt: string | Date;
 }
 
@@ -102,6 +112,13 @@ export interface UpdateSettingsData {
   accentPreset?: AccentPreset;
   webColorScheme?: WebColorScheme;
   smoothScrolling?: boolean;
+  startupBehavior?: StartupBehavior;
+  startupCustomUrls?: string[];
+  downloadPath?: string;
+  askWhereToSave?: boolean;
+  openFolderOnDownload?: boolean;
+  defaultZoom?: number;
+  autoArchiveDuration?: AutoArchiveDuration;
 }
 
 export type ReleaseChannel = 'stable' | 'nova' | 'deep' | 'canary';
@@ -189,6 +206,23 @@ export interface PrivacyEngineState {
   stats: PrivacyStats;
 }
 
+export interface DownloadProgress {
+  id: string;
+  filename: string;
+  receivedBytes: number;
+  totalBytes: number;
+  progress: number;
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted';
+  savePath: string;
+}
+
+export interface DownloadCompleted {
+  id: string;
+  filename: string;
+  savePath: string;
+  totalBytes: number;
+}
+
 export interface ElectronAPI {
   app: {
     getInfo: () => Promise<AppInfo>;
@@ -250,6 +284,12 @@ export interface ElectronAPI {
     onOpen: (callback: (data: ContextMenuEventData) => void) => () => void;
     onClose: (callback: () => void) => () => void;
   };
+  omnibox?: {
+    onClose: (callback: () => void) => () => void;
+  };
+  shortcuts?: {
+    onTrigger: (callback: (action: string) => void) => () => void;
+  };
   privacy: {
     getState: () => Promise<PrivacyEngineState>;
     updatePrefs: (updates: Partial<PrivacyShieldPrefs>) => Promise<PrivacyEngineState>;
@@ -258,6 +298,14 @@ export interface ElectronAPI {
     getStats: () => Promise<PrivacyStats>;
     clearBrowsingData: () => Promise<{ success: boolean }>;
     onStateChanged: (callback: (state: PrivacyEngineState) => void) => () => void;
+  };
+  downloads: {
+    selectDirectory: () => Promise<string | null>;
+    getDefaultPath: () => Promise<string>;
+    openFolder: (dirPath?: string) => Promise<boolean>;
+    showInFolder: (filePath: string) => Promise<boolean>;
+    onProgress?: (callback: (data: DownloadProgress) => void) => () => void;
+    onCompleted?: (callback: (data: DownloadCompleted) => void) => () => void;
   };
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;

@@ -9,6 +9,7 @@ import { useTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { toast } from 'sonner'
 import { modKey } from '@/lib/platform'
 import type { Tab } from '@/types/api'
 
@@ -38,7 +39,9 @@ export const Sidebar: React.FC = () => {
   }, [])
 
   const handleTogglePin = async (tab: Tab) => {
-    await updateTab(tab.id, { isPinned: !tab.isPinned })
+    const nextPinned = !tab.isPinned
+    await updateTab(tab.id, { isPinned: nextPinned })
+    toast.success(nextPinned ? 'Tab pinned (always saved across restarts)' : 'Tab unpinned')
   }
 
   const handleDuplicateTab = async (tab: Tab) => {

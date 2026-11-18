@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { api } from '@/lib/ipc'
-import type { Settings, UpdateSettingsData, ThemeMode, AccentPreset, WebColorScheme } from '@/types/api'
+import type { Settings, UpdateSettingsData, ThemeMode, AccentPreset, WebColorScheme, StartupBehavior, AutoArchiveDuration } from '@/types/api'
 
 export function useSettings() {
   const [loading, setLoading] = useState(true)
@@ -73,6 +73,34 @@ export function useSettings() {
     return updateSettings({ webColorScheme })
   }
 
+  const setStartupBehavior = (startupBehavior: StartupBehavior) => {
+    return updateSettings({ startupBehavior })
+  }
+
+  const setStartupCustomUrls = (startupCustomUrls: string[]) => {
+    return updateSettings({ startupCustomUrls })
+  }
+
+  const setDownloadPath = (downloadPath: string) => {
+    return updateSettings({ downloadPath })
+  }
+
+  const setAskWhereToSave = (askWhereToSave: boolean) => {
+    return updateSettings({ askWhereToSave })
+  }
+
+  const setOpenFolderOnDownload = (openFolderOnDownload: boolean) => {
+    return updateSettings({ openFolderOnDownload })
+  }
+
+  const setDefaultZoom = (defaultZoom: number) => {
+    return updateSettings({ defaultZoom })
+  }
+
+  const setAutoArchiveDuration = (autoArchiveDuration: AutoArchiveDuration) => {
+    return updateSettings({ autoArchiveDuration })
+  }
+
   return {
     settings,
     loading,
@@ -84,6 +112,13 @@ export function useSettings() {
     setAccentColor,
     setAccentPreset,
     setWebColorScheme,
+    setStartupBehavior,
+    setStartupCustomUrls,
+    setDownloadPath,
+    setAskWhereToSave,
+    setOpenFolderOnDownload,
+    setDefaultZoom,
+    setAutoArchiveDuration,
     reloadSettings: loadSettings
   }
 }

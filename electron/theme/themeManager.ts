@@ -3,6 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import { getAppPaths } from '../storage/paths'
 import { localStorageService } from '../storage/localStorage'
+import { secureHandle, Schemas } from '../security'
 import type {
   ThemeMode,
   ResolvedTheme,
@@ -308,11 +309,11 @@ class ThemeManager {
     })
 
     // 2. Register IPC handlers: theme:get and theme:set
-    ipcMain.handle('theme:get', () => {
+    secureHandle(ipcMain, 'theme:get', null, () => {
       return this.getState()
     })
 
-    ipcMain.handle('theme:set', (_, data: SetThemeData) => {
+    secureHandle(ipcMain, 'theme:set', Schemas.themeSet, (_, data: SetThemeData) => {
       return this.setTheme(data)
     })
   }

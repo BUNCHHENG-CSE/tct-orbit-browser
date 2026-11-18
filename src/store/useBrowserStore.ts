@@ -50,7 +50,7 @@ interface BrowserState {
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   appInfo: typeof window !== 'undefined' && window.api?.appInfo
     ? window.api.appInfo
-    : { name: 'TCT Orbit', version: '0.1.0', channel: 'stable' },
+    : { name: 'TCT Orbit', version: '0.1.1', channel: 'stable' },
   setAppInfo: (appInfo) => set({ appInfo }),
   spaces: [],
   activeSpaceId: null,

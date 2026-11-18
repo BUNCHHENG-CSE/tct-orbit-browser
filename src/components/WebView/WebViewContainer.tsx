@@ -17,6 +17,7 @@ interface SingleWebViewProps {
   tab: Tab
   isActive: boolean
   isDark: boolean
+  defaultZoom?: number
   spaceId: string
   onUpdateTab: (id: string, data: { url?: string; title?: string; favicon?: string | null }) => void
   onOpenNewTab: (url: string) => void
@@ -28,6 +29,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   tab,
   isActive,
   isDark,
+  defaultZoom = 100,
   spaceId,
   onUpdateTab,
   onOpenNewTab,
@@ -40,20 +42,58 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   const [isLoading, setIsLoading] = useState(false)
   const initialUrlRef = useRef(tab.url)
   const currentNavUrlRef = useRef(tab.url)
+  const lastNavigatedFromWebviewUrlRef = useRef<string>('')
 
   // Programmatic external navigation listener (from omnibox, history, etc.)
   useEffect(() => {
     const el = webviewRef.current
-    if (!el) return
-    if (tab.url && tab.url !== currentNavUrlRef.current) {
-      currentNavUrlRef.current = tab.url
-      try {
-        const live = typeof el.getURL === 'function' ? el.getURL() : null
-        if (live !== tab.url && typeof el.loadURL === 'function') {
-          el.loadURL(tab.url).catch(() => {})
-        }
-      } catch {}
+    if (!el || !tab.url || tab.url === 'about:blank') return
+
+    // 1. If this exact URL was already set by the webview itself, skip loadURL
+    if (lastNavigatedFromWebviewUrlRef.current === tab.url) {
+      return
     }
+
+    // 2. If currentNavUrlRef already matches tab.url, skip loadURL
+    if (currentNavUrlRef.current === tab.url) {
+      return
+    }
+
+    try {
+      const live = typeof el.getURL === 'function' ? el.getURL() : null
+      if (live && live !== 'about:blank') {
+        const liveNorm = live.replace(/\/+$/, '')
+        const targetNorm = tab.url.replace(/\/+$/, '')
+
+        // 3. Webview is already on target URL (ignoring trailing slash)
+        if (liveNorm === targetNorm) {
+          currentNavUrlRef.current = tab.url
+          return
+        }
+
+        // 4. SPA Route Protection:
+        // If webview is already navigating or present on a subpath of the same origin
+        // (e.g. live is 'https://www.youtube.com/shorts' and target is 'https://www.youtube.com'),
+        // NEVER force loadURL to root origin due to a stale prop!
+        try {
+          const liveUrlObj = new URL(live)
+          const targetUrlObj = new URL(tab.url)
+          if (
+            liveUrlObj.origin === targetUrlObj.origin &&
+            targetUrlObj.pathname === '/' &&
+            liveUrlObj.pathname.length > 1
+          ) {
+            currentNavUrlRef.current = live
+            return
+          }
+        } catch {}
+      }
+
+      currentNavUrlRef.current = tab.url
+      if (typeof el.loadURL === 'function') {
+        el.loadURL(tab.url).catch(() => {})
+      }
+    } catch {}
   }, [tab.url])
 
   // Reactive theme and DevTools active tab synchronizer
@@ -74,6 +114,29 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       // ignore
     }
   }, [isDark, isActive])
+
+  // Apply default page zoom level
+  useEffect(() => {
+    const el = webviewRef.current
+    if (!el) return
+    try {
+      const factor = (defaultZoom || 100) / 100
+      if (typeof el.setZoomFactor === 'function') {
+        el.setZoomFactor(factor)
+      }
+    } catch {
+      // ignore
+    }
+  }, [defaultZoom])
+
+  // Automatically focus active webview when switched so keyboard input goes directly to the tab
+  useEffect(() => {
+    if (isActive && webviewRef.current) {
+      try {
+        webviewRef.current.focus()
+      } catch {}
+    }
+  }, [isActive])
 
   useEffect(() => {
     const el = webviewRef.current
@@ -110,6 +173,12 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       setHasError(false)
       syncTheme()
       try {
+        const factor = (defaultZoom || 100) / 100
+        if (typeof el.setZoomFactor === 'function') {
+          el.setZoomFactor(factor)
+        }
+      } catch {}
+      try {
         const currentUrl = el.getURL()
         const currentTitle = el.getTitle() || tab.title
         let favicon: string | null = null
@@ -121,6 +190,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         }
 
         if (currentUrl && currentUrl !== 'about:blank') {
+          lastNavigatedFromWebviewUrlRef.current = currentUrl
+          currentNavUrlRef.current = currentUrl
           onUpdateTab(tab.id, {
             url: currentUrl,
             title: currentTitle,
@@ -140,7 +211,14 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
     const handleTitleUpdated = (e: any) => {
       if (e.title) {
-        onUpdateTab(tab.id, { title: e.title })
+        const live = typeof el.getURL === 'function' ? el.getURL() : undefined
+        if (live && live !== 'about:blank') {
+          lastNavigatedFromWebviewUrlRef.current = live
+          currentNavUrlRef.current = live
+          onUpdateTab(tab.id, { title: e.title, url: live })
+        } else {
+          onUpdateTab(tab.id, { title: e.title })
+        }
       }
     }
 
@@ -161,8 +239,14 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     }
 
     const handleNavigation = (e: any) => {
-      const navUrl = e.url || (typeof el.getURL === 'function' ? el.getURL() : null)
+      // Ignore subframe navigations (e.g. ad frames, widgets)
+      if (e && e.isMainFrame === false) {
+        return
+      }
+
+      const navUrl = e?.url || (typeof el.getURL === 'function' ? el.getURL() : null)
       if (navUrl && navUrl !== 'about:blank') {
+        lastNavigatedFromWebviewUrlRef.current = navUrl
         currentNavUrlRef.current = navUrl
         const navTitle = typeof el.getTitle === 'function' ? el.getTitle() : tab.title
         useBrowserStore.getState().updateTabInStore(tab.id, {
@@ -179,36 +263,6 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     const handleDomReady = () => {
       syncTheme()
       try {
-        // Watch for in-page dynamic scroll and SPA hash changes (e.g. TradingView #forex, #futures)
-        el.executeJavaScript(`
-          (function() {
-            try {
-              if (window.__tct_url_synced) return;
-              window.__tct_url_synced = true;
-              var lastUrl = window.location.href;
-              function checkUrl() {
-                if (window.location.href !== lastUrl) {
-                  lastUrl = window.location.href;
-                  window.dispatchEvent(new Event('hashchange'));
-                }
-              }
-              var wrap = function(type) {
-                var orig = history[type];
-                return function() {
-                  var r = orig.apply(this, arguments);
-                  checkUrl();
-                  return r;
-                };
-              };
-              history.pushState = wrap('pushState');
-              history.replaceState = wrap('replaceState');
-              window.addEventListener('hashchange', checkUrl, { passive: true });
-              window.addEventListener('popstate', checkUrl, { passive: true });
-              window.addEventListener('scroll', checkUrl, { passive: true });
-            } catch(e) {}
-          })();
-        `).catch(() => {})
-
         // Link click interceptor in capture phase to guarantee target="_blank", Ctrl+click, and middle-click open tabs reliably
         el.executeJavaScript(`
           (function() {
@@ -247,19 +301,25 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         `).catch(() => {})
 
         el.insertCSS(`
+          :root, html, body, * {
+            scrollbar-width: thin !important;
+            scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
+          }
           ::-webkit-scrollbar {
-            width: 5px !important;
-            height: 5px !important;
+            width: 6px !important;
+            height: 6px !important;
           }
           ::-webkit-scrollbar-track {
             background: transparent !important;
           }
           ::-webkit-scrollbar-thumb {
-            background: rgba(120, 120, 140, 0.35) !important;
+            background: rgba(130, 130, 150, 0.4) !important;
             border-radius: 9999px !important;
+            border: 1px solid transparent !important;
+            background-clip: padding-box !important;
           }
           ::-webkit-scrollbar-thumb:hover {
-            background: rgba(120, 120, 140, 0.6) !important;
+            background: rgba(150, 150, 180, 0.7) !important;
           }
           ::-webkit-scrollbar-corner {
             background: transparent !important;
@@ -269,22 +329,18 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
             width: 0 !important;
             height: 0 !important;
           }
-          /* Eliminate double vertical scrollbar on responsive SPAs (DuckDuckGo, Next.js, etc.) */
-          html {
-            overflow-y: auto !important;
-            overflow-x: hidden !important;
-          }
-          body {
-            overflow-y: visible !important;
-            overflow-x: hidden !important;
-          }
         `).catch(() => {})
       } catch {
         // ignore
       }
     }
 
+    const handleWebviewFocus = () => {
+      window.dispatchEvent(new CustomEvent('tct:close-omnibox'))
+    }
+
     el.addEventListener('dom-ready', handleDomReady)
+    el.addEventListener('focus', handleWebviewFocus)
     el.addEventListener('did-start-loading', handleStartLoading)
     el.addEventListener('did-stop-loading', handleStopLoading)
     el.addEventListener('did-finish-load', handleDidFinishLoad)
@@ -298,6 +354,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     return () => {
       unregisterWebviewRef(tab.id)
       el.removeEventListener('dom-ready', handleDomReady)
+      el.removeEventListener('focus', handleWebviewFocus)
       el.removeEventListener('did-start-loading', handleStartLoading)
       el.removeEventListener('did-stop-loading', handleStopLoading)
       el.removeEventListener('did-finish-load', handleDidFinishLoad)
@@ -319,15 +376,19 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
   return (
     <div
-      className="w-full h-full relative bg-background overflow-hidden"
+      className="w-full h-full relative bg-background overflow-hidden flex flex-col"
       style={{ display: isActive ? 'flex' : 'none' }}
+      onMouseDown={() => {
+        window.dispatchEvent(new CustomEvent('tct:close-omnibox'))
+      }}
     >
       <webview
         ref={webviewRef}
         src={initialUrlRef.current}
-        className="w-full h-full bg-background"
+        partition="persist:browser-tabs"
+        className="w-full h-full flex-1 bg-background border-none outline-none flex"
         {...({ allowpopups: 'true' } as any)}
-        webpreferences="contextIsolation=yes, javascript=yes"
+        webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes, spellcheck=no"
       />
 
       {/* Loading bar */}
@@ -384,6 +445,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const webviewsRef = useRef<Map<string, any>>(new Map())
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
+  const activeTabRef = useRef(activeTab)
+  activeTabRef.current = activeTab
 
   // Whenever the theme changes (e.g. user toggles dark/light in Settings), synchronize all open webviews live seamlessly
   const prevIsDarkRef = useRef(isDark)
@@ -431,15 +494,18 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         // Live URL synchronization (e.g. user submitted search, dynamic scroll hash, pushState, replaceState)
         if (typeof activeEl.getURL === 'function') {
           const liveUrl = activeEl.getURL()
-          if (liveUrl && liveUrl !== 'about:blank' && activeTab && liveUrl !== activeTab.url) {
-            const liveTitle = typeof activeEl.getTitle === 'function' ? activeEl.getTitle() : activeTab.title
-            useBrowserStore.getState().updateTabInStore(activeTab.id, {
+          const currentTab = activeTabRef.current
+          if (liveUrl && liveUrl !== 'about:blank' && currentTab && liveUrl !== currentTab.url) {
+            // Immediately update ref to avoid re-triggering and hammering state on subsequent ticks
+            activeTabRef.current = { ...currentTab, url: liveUrl }
+            const liveTitle = typeof activeEl.getTitle === 'function' ? activeEl.getTitle() : currentTab.title
+            useBrowserStore.getState().updateTabInStore(currentTab.id, {
               url: liveUrl,
-              title: liveTitle || activeTab.title
+              title: liveTitle || currentTab.title
             })
-            updateTab(activeTab.id, {
+            updateTab(currentTab.id, {
               url: liveUrl,
-              title: liveTitle || activeTab.title
+              title: liveTitle || currentTab.title
             })
           }
         }
@@ -449,9 +515,9 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
 
     updateNavState()
-    const interval = setInterval(updateNavState, 150)
+    const interval = setInterval(updateNavState, 200)
     return () => clearInterval(interval)
-  }, [activeTabId])
+  }, [activeTabId, updateTab])
 
   const handleBack = useCallback(() => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
@@ -474,20 +540,79 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }, [activeTabId])
 
-  // Listen to navigation events from top unified TitleBar
+  const handleHardReload = useCallback(() => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.reloadIgnoringCache === 'function') {
+      el.reloadIgnoringCache()
+    } else if (el && typeof el.reload === 'function') {
+      el.reload()
+    }
+  }, [activeTabId])
+
+  const handleZoomIn = useCallback(() => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.getZoomLevel === 'function' && typeof el.setZoomLevel === 'function') {
+      el.getZoomLevel((level: number) => {
+        el.setZoomLevel(Math.min(level + 0.5, 9.0))
+      })
+    }
+  }, [activeTabId])
+
+  const handleZoomOut = useCallback(() => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.getZoomLevel === 'function' && typeof el.setZoomLevel === 'function') {
+      el.getZoomLevel((level: number) => {
+        el.setZoomLevel(Math.max(level - 0.5, -8.0))
+      })
+    }
+  }, [activeTabId])
+
+  const handleZoomReset = useCallback(() => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.setZoomLevel === 'function') {
+      el.setZoomLevel(0)
+    }
+  }, [activeTabId])
+
+  // Listen to navigation and zoom events from top unified TitleBar and global shortcuts
   useEffect(() => {
     const onBack = () => handleBack()
     const onForward = () => handleForward()
     const onReload = () => handleReload()
+    const onHardReload = () => handleHardReload()
+    const onZoomIn = () => handleZoomIn()
+    const onZoomOut = () => handleZoomOut()
+    const onZoomReset = () => handleZoomReset()
+
+    const onNavigate = (e: any) => {
+      const { tabId, url } = e.detail || {}
+      const targetId = tabId || activeTabId
+      const targetEl = targetId ? webviewsRef.current.get(targetId) : null
+      if (targetEl && url && typeof targetEl.loadURL === 'function') {
+        targetEl.loadURL(url).catch(() => {})
+      }
+    }
+
     window.addEventListener('tct:webview-back', onBack)
     window.addEventListener('tct:webview-forward', onForward)
     window.addEventListener('tct:webview-reload', onReload)
+    window.addEventListener('tct:webview-hard-reload', onHardReload)
+    window.addEventListener('tct:webview-zoom-in', onZoomIn)
+    window.addEventListener('tct:webview-zoom-out', onZoomOut)
+    window.addEventListener('tct:webview-zoom-reset', onZoomReset)
+    window.addEventListener('tct:webview-navigate', onNavigate)
+
     return () => {
       window.removeEventListener('tct:webview-back', onBack)
       window.removeEventListener('tct:webview-forward', onForward)
       window.removeEventListener('tct:webview-reload', onReload)
+      window.removeEventListener('tct:webview-hard-reload', onHardReload)
+      window.removeEventListener('tct:webview-zoom-in', onZoomIn)
+      window.removeEventListener('tct:webview-zoom-out', onZoomOut)
+      window.removeEventListener('tct:webview-zoom-reset', onZoomReset)
+      window.removeEventListener('tct:webview-navigate', onNavigate)
     }
-  }, [handleBack, handleForward, handleReload])
+  }, [handleBack, handleForward, handleReload, handleHardReload, handleZoomIn, handleZoomOut, handleZoomReset])
 
   const lastOpenedUrlRef = useRef<{ url: string; time: number }>({ url: '', time: 0 })
 
@@ -544,6 +669,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
               tab={tab}
               isActive={tab.id === activeTabId}
               isDark={isDark}
+              defaultZoom={settings?.defaultZoom || 100}
               spaceId={spaceId || tab.spaceId}
               onUpdateTab={updateTab}
               onOpenNewTab={handleNewTabFromUrl}

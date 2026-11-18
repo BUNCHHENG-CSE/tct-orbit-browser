@@ -1,9 +1,10 @@
-import { app, BrowserWindow, shell, nativeTheme } from 'electron'
+import { app, BrowserWindow, nativeTheme } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { getBrowserLogoPath } from '../resources'
+import { setupMainWindowSecurity } from '../security'
 
 export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -36,11 +37,18 @@ export function createMainWindow(): BrowserWindow {
       preload: preloadPath,
       contextIsolation: true,
       nodeIntegration: false,
+      nodeIntegrationInWorker: false,
+      sandbox: true,
       webviewTag: true,
       webSecurity: true,
-      spellcheck: true
+      allowRunningInsecureContent: false,
+      spellcheck: false,
+      backgroundThrottling: true
     }
   })
+
+  // Attach strict security controls (WebRTC leak prevention, navigation blockers, anti-tampering)
+  setupMainWindowSecurity(mainWindow)
 
   // Apply initial chrome & titleBarOverlay styling if supported
   themeManager.updateWindowChrome(mainWindow, startupTheme.resolved)
@@ -57,22 +65,7 @@ export function createMainWindow(): BrowserWindow {
     mainWindow.show()
   })
 
-  // Prevent renderer from navigating away or opening unwanted native windows directly
-  mainWindow.webContents.setWindowOpenHandler((details) => {
-    try {
-      const parsed = new URL(details.url)
-      if (['http:', 'https:'].includes(parsed.protocol)) {
-        shell.openExternal(details.url)
-      } else {
-        console.warn(`[Security] Blocked opening external URL with protocol: ${parsed.protocol}`)
-      }
-    } catch {
-      // Ignore malformed or invalid URLs
-    }
-    return { action: 'deny' }
-  })
-
-  // In development mode, provide Inspect UI Element context menu for browser chrome
+  // In development mode only, provide Inspect UI Element context menu for browser chrome
   if (!app.isPackaged) {
     mainWindow.webContents.on('context-menu', (_event, params) => {
       const { Menu, MenuItem } = require('electron')

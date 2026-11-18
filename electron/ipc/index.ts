@@ -3,9 +3,11 @@ import { register as registerTabs } from './tabs'
 import { register as registerSpaces } from './spaces'
 import { register as registerSettings } from './settings'
 import { register as registerPrivacy } from './privacy'
+import { register as registerDownloads } from './downloads'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
+import { secureHandle, secureOn, Schemas } from '../security'
 
 export function registerAllIpc(
   ipcMain: IpcMain,
@@ -16,10 +18,11 @@ export function registerAllIpc(
   registerSpaces(ipcMain)
   registerSettings(ipcMain)
   registerPrivacy(ipcMain)
+  registerDownloads(ipcMain, getMainWindow)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning
-  ipcMain.handle('app:getInfo', () => {
+  secureHandle(ipcMain, 'app:getInfo', null, () => {
     const paths = getAppPaths()
     return {
       name: paths.channelMeta.displayName,
@@ -28,7 +31,7 @@ export function registerAllIpc(
     }
   })
 
-  ipcMain.on('app:getInfoSync', (event) => {
+  secureOn(ipcMain, 'app:getInfoSync', null, (event) => {
     const paths = getAppPaths()
     event.returnValue = {
       name: paths.channelMeta.displayName,
@@ -38,14 +41,14 @@ export function registerAllIpc(
   })
 
   // Window controls
-  ipcMain.handle('window:minimize', () => {
+  secureHandle(ipcMain, 'window:minimize', null, () => {
     const win = getMainWindow()
-    if (win) win.minimize()
+    if (win && !win.isDestroyed()) win.minimize()
   })
 
-  ipcMain.handle('window:maximize', () => {
+  secureHandle(ipcMain, 'window:maximize', null, () => {
     const win = getMainWindow()
-    if (win) {
+    if (win && !win.isDestroyed()) {
       if (win.isMaximized()) {
         win.unmaximize()
       } else {
@@ -54,85 +57,97 @@ export function registerAllIpc(
     }
   })
 
-  ipcMain.handle('window:close', () => {
+  secureHandle(ipcMain, 'window:close', null, () => {
     const win = getMainWindow()
-    if (win) win.close()
+    if (win && !win.isDestroyed()) win.close()
   })
 
-  ipcMain.handle('window:isMaximized', () => {
+  secureHandle(ipcMain, 'window:isMaximized', null, () => {
     const win = getMainWindow()
-    return win ? win.isMaximized() : false
+    return win && !win.isDestroyed() ? win.isMaximized() : false
   })
 
-  ipcMain.handle('window:setTitle', (_, title: string) => {
+  secureHandle(ipcMain, 'window:setTitle', Schemas.windowSetTitle, (_, title: string) => {
     const win = getMainWindow()
-    if (win && typeof title === 'string') {
+    if (win && !win.isDestroyed() && typeof title === 'string') {
       win.setTitle(title)
     }
   })
 
   // External navigation
-  ipcMain.handle('navigation:openExternal', async (_, url: string) => {
+  secureHandle(ipcMain, 'navigation:openExternal', Schemas.navigationOpenExternal, async (_, url: string) => {
     if (url && (url.startsWith('http://') || url.startsWith('https://'))) {
       await shell.openExternal(url)
     }
   })
 
   // DevTools docked and inspect controls
-  ipcMain.handle('devtools:open', async (_, { webContentsId, bounds }: { webContentsId?: number; bounds?: Rectangle }) => {
+  secureHandle(ipcMain, 'devtools:open', Schemas.devtoolsOpen, async (_, { webContentsId, bounds }: { webContentsId?: number; bounds?: Rectangle }) => {
     if (webContentsId) {
       const wc = webContents.fromId(webContentsId)
-      if (wc) devtoolsManager.openDocked(wc, bounds)
+      if (wc && !wc.isDestroyed()) devtoolsManager.openDocked(wc, bounds)
     }
   })
 
-  ipcMain.handle('devtools:inspect', async (_, { webContentsId, x, y, bounds }: { webContentsId: number; x: number; y: number; bounds?: Rectangle }) => {
+  secureHandle(ipcMain, 'devtools:inspect', Schemas.devtoolsInspect, async (_, { webContentsId, x, y, bounds }: { webContentsId: number; x: number; y: number; bounds?: Rectangle }) => {
     const wc = webContents.fromId(webContentsId)
-    if (wc) {
+    if (wc && !wc.isDestroyed()) {
       devtoolsManager.inspectElement(wc, x, y, bounds)
     }
   })
 
-  ipcMain.handle('devtools:update-bounds', async (_, bounds: Rectangle) => {
+  secureHandle(ipcMain, 'devtools:update-bounds', Schemas.devtoolsBounds, async (_, bounds: Rectangle) => {
     devtoolsManager.updateBounds(bounds)
   })
 
-  ipcMain.handle('devtools:detach', async () => {
+  secureHandle(ipcMain, 'devtools:detach', null, async () => {
     devtoolsManager.detach()
   })
 
-  ipcMain.handle('devtools:close', async () => {
+  secureHandle(ipcMain, 'devtools:close', null, async () => {
     devtoolsManager.closeDocked()
   })
 
-  ipcMain.handle('devtools:getState', async () => {
+  secureHandle(ipcMain, 'devtools:getState', null, async () => {
     return devtoolsManager.getState()
   })
 
-  ipcMain.handle('devtools:sync-active-tab', async (_, { webContentsId }: { webContentsId: number }) => {
+  secureHandle(ipcMain, 'devtools:sync-active-tab', Schemas.devtoolsSyncTab, async (_, { webContentsId }: { webContentsId: number }) => {
     const wc = webContents.fromId(webContentsId)
-    if (wc) {
+    if (wc && !wc.isDestroyed()) {
       devtoolsManager.syncActiveTab(wc)
     }
   })
 
-  // Webview Context-Menu Action Proxy
-  ipcMain.handle('webview:call', async (_, { webContentsId, method, args = [] }: { webContentsId: number; method: string; args?: any[] }) => {
-    const wc = webContents.fromId(webContentsId)
-    if (!wc || wc.isDestroyed()) return false
-    if (typeof (wc as any)[method] === 'function') {
-      try {
-        return (wc as any)[method](...args)
-      } catch (err) {
-        console.error(`[IPC webview:call] Error calling ${method}:`, err)
+  // Webview Whitelisted Context-Menu Action Proxy
+  secureHandle(
+    ipcMain,
+    'webview:call',
+    Schemas.webviewCall,
+    async (_, { webContentsId, method, args = [] }: { webContentsId: number; method: string; args?: any[] }) => {
+      const wc = webContents.fromId(webContentsId)
+      if (!wc || wc.isDestroyed()) return false
+
+      // Guard: only allow calling on webview contexts, never UI window or external frames
+      if (wc.getType() !== 'webview') {
+        console.warn(`[Security] Rejected webview:call on non-webview contents id ${webContentsId}`)
         return false
       }
+
+      if (typeof (wc as any)[method] === 'function') {
+        try {
+          return (wc as any)[method](...args)
+        } catch (err) {
+          console.error(`[IPC webview:call] Error calling ${method}:`, err)
+          return false
+        }
+      }
+      return false
     }
-    return false
-  })
+  )
 
   // Save webpage as HTML complete
-  ipcMain.handle('page:save-as', async (_, { webContentsId }: { webContentsId: number }) => {
+  secureHandle(ipcMain, 'page:save-as', Schemas.webContentsTarget, async (_, { webContentsId }: { webContentsId: number }) => {
     const wc = webContents.fromId(webContentsId)
     const win = getMainWindow()
     if (wc && win && !wc.isDestroyed() && !win.isDestroyed()) {
@@ -157,7 +172,7 @@ export function registerAllIpc(
   })
 
   // Capture screenshot of webContents and write to clipboard
-  ipcMain.handle('page:capture-screenshot', async (_, { webContentsId }: { webContentsId: number }) => {
+  secureHandle(ipcMain, 'page:capture-screenshot', Schemas.webContentsTarget, async (_, { webContentsId }: { webContentsId: number }) => {
     const wc = webContents.fromId(webContentsId)
     if (wc && !wc.isDestroyed()) {
       try {

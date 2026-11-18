@@ -4,7 +4,12 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ['dotenv'] })],
+    // Bundle and tree-shake all lightweight pure-JS dependencies into out/main/index.js
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: ['@ghostery/adblocker-electron', 'cross-fetch', 'dotenv', 'zod']
+      })
+    ],
     resolve: {
       alias: {
         '@': resolve('src'),
@@ -13,6 +18,8 @@ export default defineConfig({
       }
     },
     build: {
+      minify: 'esbuild',
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve('electron/main.ts')
@@ -21,6 +28,7 @@ export default defineConfig({
     }
   },
   preload: {
+    // Bundle lightweight helpers into out/preload/index.js without external dependencies
     plugins: [externalizeDepsPlugin()],
     resolve: {
       alias: {
@@ -30,6 +38,8 @@ export default defineConfig({
       }
     },
     build: {
+      minify: 'esbuild',
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve('electron/preload.ts')
@@ -40,6 +50,8 @@ export default defineConfig({
   renderer: {
     root: resolve('src'),
     build: {
+      minify: 'esbuild',
+      sourcemap: false,
       rollupOptions: {
         input: {
           index: resolve('src/index.html')

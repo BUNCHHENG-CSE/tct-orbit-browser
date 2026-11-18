@@ -1,9 +1,10 @@
 import type { IpcMain } from 'electron'
 import { privacyEngine } from '../privacy/privacyEngine'
 import type { PrivacyShieldPrefs } from '../privacy/types'
+import { secureHandle, Schemas } from '../security'
 
 export function register(ipcMain: IpcMain): void {
-  ipcMain.handle('privacy:get-state', async () => {
+  secureHandle(ipcMain, 'privacy:get-state', null, async () => {
     return {
       prefs: privacyEngine.getPrefs(),
       masterStatus: privacyEngine.getMasterStatus(),
@@ -11,7 +12,7 @@ export function register(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('privacy:update-prefs', async (_, updates: Partial<PrivacyShieldPrefs>) => {
+  secureHandle(ipcMain, 'privacy:update-prefs', Schemas.privacyUpdatePrefs, async (_, updates: Partial<PrivacyShieldPrefs>) => {
     const prefs = privacyEngine.updatePrefs(updates)
     return {
       prefs,
@@ -20,19 +21,19 @@ export function register(ipcMain: IpcMain): void {
     }
   })
 
-  ipcMain.handle('privacy:get-site-status', async (_, url: string) => {
+  secureHandle(ipcMain, 'privacy:get-site-status', Schemas.privacyTargetUrl, async (_, url: string) => {
     return privacyEngine.getSiteStatus(url)
   })
 
-  ipcMain.handle('privacy:toggle-site-shield', async (_, origin: string) => {
+  secureHandle(ipcMain, 'privacy:toggle-site-shield', Schemas.privacyToggleOrigin, async (_, origin: string) => {
     return privacyEngine.toggleSiteShield(origin)
   })
 
-  ipcMain.handle('privacy:get-stats', async () => {
+  secureHandle(ipcMain, 'privacy:get-stats', null, async () => {
     return privacyEngine.getStats()
   })
 
-  ipcMain.handle('privacy:clear-browsing-data', async () => {
+  secureHandle(ipcMain, 'privacy:clear-browsing-data', null, async () => {
     return privacyEngine.clearBrowsingData()
   })
 }

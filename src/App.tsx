@@ -7,6 +7,7 @@ import { DockedDevToolsPane } from '@/components/DevTools/DockedDevToolsPane'
 import { BrowserContextMenu, QrCodeModal } from '@/components/ContextMenu/BrowserContextMenu'
 import { SmoothScroll } from '@/components/SmoothScroll'
 import { Toaster } from '@/components/ui/sonner'
+import { toast } from 'sonner'
 import { useSpaces } from '@/hooks/useSpaces'
 import { useTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
@@ -151,146 +152,345 @@ export const App: React.FC = () => {
     }
   }, [activeTab?.title, tabs.length, appInfo?.name])
 
+  // Download notifications listener
+  useEffect(() => {
+    if (!api.downloads?.onCompleted) return
+    const unsub = api.downloads.onCompleted((data) => {
+      toast.success(`Download complete: ${data.filename}`, {
+        description: data.savePath ? `Saved to ${data.savePath}` : undefined,
+        action: data.savePath
+          ? {
+              label: 'Show in Folder',
+              onClick: () => {
+                api.downloads?.showInFolder(data.savePath)
+              }
+            }
+          : undefined,
+        duration: 5000
+      })
+    })
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+  }, [])
+
   // Initialize and synchronize unified theme engine
   useEffect(() => {
     useThemeStore.getState().initTheme()
   }, [])
 
-  // Keyboard shortcuts listener
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // F12 or Ctrl+Shift+I → toggle DevTools
-      if (e.key === 'F12' || ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'i')) {
-        e.preventDefault()
-        const nextState = !devtoolsOpen
-        setDevToolsOpen(nextState)
-        if (nextState) {
+  // Synchronized refs for fresh state in shortcut handlers without rebinding listeners
+  const tabsRef = React.useRef(tabs)
+  tabsRef.current = tabs
+  const activeTabIdRef = React.useRef(activeTabId)
+  activeTabIdRef.current = activeTabId
+  const settingsRef = React.useRef(settings)
+  settingsRef.current = settings
+
+  // Unified shortcut executor shared by renderer DOM keydown and main-process webview before-input-event
+  const executeShortcutAction = React.useCallback(
+    (action: string) => {
+      switch (action) {
+        case 'new-tab':
+          setCommandBarOpen(true, '', 'new-tab')
+          break
+        case 'close-tab': {
+          const store = useBrowserStore.getState()
+          const targetId = store.activeTabId || activeTabIdRef.current
+          if (targetId) {
+            removeTab(targetId)
+          }
+          break
+        }
+        case 'reopen-tab':
+          reopenLastClosedTab()
+          break
+        case 'next-tab': {
+          const store = useBrowserStore.getState()
+          const spaceId = store.activeSpaceId
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          if (currentTabs.length > 1) {
+            const activeId = store.activeTabId || activeTabIdRef.current
+            const curIdx = currentTabs.findIndex((t) => t.id === activeId)
+            const nextIdx = (curIdx + 1) % currentTabs.length
+            setActiveTab(currentTabs[nextIdx].id)
+          }
+          break
+        }
+        case 'prev-tab': {
+          const store = useBrowserStore.getState()
+          const spaceId = store.activeSpaceId
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          if (currentTabs.length > 1) {
+            const activeId = store.activeTabId || activeTabIdRef.current
+            const curIdx = currentTabs.findIndex((t) => t.id === activeId)
+            const prevIdx = (curIdx - 1 + currentTabs.length) % currentTabs.length
+            setActiveTab(currentTabs[prevIdx].id)
+          }
+          break
+        }
+        case 'switch-tab-1':
+        case 'switch-tab-2':
+        case 'switch-tab-3':
+        case 'switch-tab-4':
+        case 'switch-tab-5':
+        case 'switch-tab-6':
+        case 'switch-tab-7':
+        case 'switch-tab-8': {
+          const store = useBrowserStore.getState()
+          const spaceId = store.activeSpaceId
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          const targetIndex = parseInt(action.replace('switch-tab-', ''), 10) - 1
+          if (currentTabs[targetIndex]) {
+            setActiveTab(currentTabs[targetIndex].id)
+          }
+          break
+        }
+        case 'switch-tab-last': {
+          const store = useBrowserStore.getState()
+          const spaceId = store.activeSpaceId
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          if (currentTabs.length > 0) {
+            setActiveTab(currentTabs[currentTabs.length - 1].id)
+          }
+          break
+        }
+        case 'focus-address-bar':
+          window.dispatchEvent(new CustomEvent('tct:focus-address-bar'))
+          break
+        case 'open-command-bar':
+          setCommandBarOpen(true, '', 'navigate')
+          break
+        case 'toggle-sidebar': {
+          const cur = settingsRef.current
+          if (cur) {
+            setSidebarCollapsed(!cur.sidebarCollapsed)
+          }
+          break
+        }
+        case 'open-settings':
+          window.dispatchEvent(new CustomEvent('open-settings'))
+          break
+        case 'reload':
+          window.dispatchEvent(new CustomEvent('tct:webview-reload'))
+          break
+        case 'hard-reload':
+          window.dispatchEvent(new CustomEvent('tct:webview-hard-reload'))
+          break
+        case 'back':
+          window.dispatchEvent(new CustomEvent('tct:webview-back'))
+          break
+        case 'forward':
+          window.dispatchEvent(new CustomEvent('tct:webview-forward'))
+          break
+        case 'zoom-in':
+          window.dispatchEvent(new CustomEvent('tct:webview-zoom-in'))
+          break
+        case 'zoom-out':
+          window.dispatchEvent(new CustomEvent('tct:webview-zoom-out'))
+          break
+        case 'zoom-reset':
+          window.dispatchEvent(new CustomEvent('tct:webview-zoom-reset'))
+          break
+        case 'toggle-devtools': {
+          const nextState = !useBrowserStore.getState().devtoolsOpen
+          setDevToolsOpen(nextState)
+          if (nextState) {
+            const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
+            const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
+            api.devtools?.open(wcId)
+          } else {
+            api.devtools?.close()
+          }
+          break
+        }
+        case 'take-screenshot': {
           const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
           const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
-          api.devtools?.open(wcId)
-        } else {
-          api.devtools?.close()
+          if (wcId && api.webview?.captureScreenshot) {
+            api.webview.captureScreenshot(wcId)
+          }
+          break
         }
-        return
       }
+    },
+    [removeTab, setActiveTab, reopenLastClosedTab, setCommandBarOpen, setSidebarCollapsed, setDevToolsOpen]
+  )
 
-      // Ctrl+Shift+S → screenshot
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 's') {
-        e.preventDefault()
-        const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
-        const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
-        if (wcId && api.webview?.captureScreenshot) {
-          api.webview.captureScreenshot(wcId)
-        }
-        return
-      }
+  // Listen to shortcuts forwarded from webview before-input-event via IPC
+  useEffect(() => {
+    if (!api.shortcuts?.onTrigger) return
+    const unsub = api.shortcuts.onTrigger((action) => {
+      executeShortcutAction(action)
+    })
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+  }, [executeShortcutAction])
 
+  // Keyboard shortcuts listener when focus is on browser chrome
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       const isCmdOrCtrl = e.metaKey || e.ctrlKey
-      if (!isCmdOrCtrl) return
+      const key = (e.key || '').toLowerCase()
+      const code = e.code || ''
+      const shift = e.shiftKey
+      const alt = e.altKey
 
-      const key = e.key.toLowerCase()
-
-      // Cmd/Ctrl + Shift + T → reopen last closed tab
-      if (key === 't' && e.shiftKey) {
+      // 1. DevTools: F12 or Ctrl+Shift+I
+      if (key === 'f12' || (isCmdOrCtrl && shift && !alt && key === 'i')) {
         e.preventDefault()
-        reopenLastClosedTab()
+        executeShortcutAction('toggle-devtools')
         return
       }
 
-      // Cmd/Ctrl + T → new tab + open CommandBar
-      if (key === 't' && !e.shiftKey) {
+      // 2. Screenshot: Ctrl+Shift+S
+      if (isCmdOrCtrl && shift && !alt && key === 's') {
         e.preventDefault()
-        setCommandBarOpen(true, '', 'new-tab')
+        executeShortcutAction('take-screenshot')
         return
       }
 
-      // Cmd/Ctrl + W → close active tab
-      if (key === 'w') {
+      // 3. Reopen closed tab: Ctrl+Shift+T
+      if (isCmdOrCtrl && shift && !alt && key === 't') {
         e.preventDefault()
-        if (activeTabId) {
-          removeTab(activeTabId)
-        }
+        executeShortcutAction('reopen-tab')
         return
       }
 
-      // Cmd/Ctrl + L → focus top Edge-style Address Bar Omnibox
-      if (key === 'l') {
+      // 4. Hard reload (ignore cache): Ctrl+Shift+R or Ctrl+F5
+      if ((isCmdOrCtrl && shift && key === 'r') || (isCmdOrCtrl && (key === 'f5' || code === 'F5'))) {
         e.preventDefault()
-        window.dispatchEvent(new CustomEvent('tct:focus-address-bar'))
+        executeShortcutAction('hard-reload')
         return
       }
 
-      // Cmd/Ctrl + S → toggle sidebar collapsed
-      if (key === 's') {
+      // 5. Normal reload: Ctrl+R or F5
+      if ((isCmdOrCtrl && !shift && !alt && key === 'r') || (!isCmdOrCtrl && !shift && !alt && (key === 'f5' || code === 'F5'))) {
         e.preventDefault()
-        if (settings) {
-          setSidebarCollapsed(!settings.sidebarCollapsed)
-        }
+        executeShortcutAction('reload')
         return
       }
 
-      // Cmd/Ctrl + 1..9 → switch to tab N
-      if (/^[1-9]$/.test(e.key)) {
+      // 6. Next tab: Ctrl+Tab or Ctrl+PageDown
+      if (isCmdOrCtrl && !shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pagedown' || code === 'PageDown')) {
         e.preventDefault()
-        const index = parseInt(e.key, 10) - 1
-        if (tabs[index]) {
-          setActiveTab(tabs[index].id)
-        }
+        executeShortcutAction('next-tab')
         return
       }
 
-      // Cmd/Ctrl + R → reload active webview
-      if (key === 'r') {
+      // 7. Previous tab: Ctrl+Shift+Tab or Ctrl+PageUp
+      if (isCmdOrCtrl && shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pageup' || code === 'PageUp')) {
         e.preventDefault()
-        const activeWebview = document.querySelector('webview[style*="display: flex"]') as any
-        if (activeWebview && typeof activeWebview.reload === 'function') {
-          activeWebview.reload()
-        }
+        executeShortcutAction('prev-tab')
         return
       }
 
-      // Cmd/Ctrl + , → open browser settings
-      if (key === ',') {
+      // 8. New tab: Ctrl+T or Ctrl+N
+      if (isCmdOrCtrl && !shift && !alt && (key === 't' || key === 'n')) {
         e.preventDefault()
-        window.dispatchEvent(new CustomEvent('open-settings'))
+        executeShortcutAction('new-tab')
         return
       }
 
-      // Cmd/Ctrl + [ / ] → back / forward
-      if (e.key === '[') {
+      // 9. Close tab: Ctrl+W or Ctrl+F4
+      if ((isCmdOrCtrl && !shift && !alt && key === 'w') || (isCmdOrCtrl && (key === 'f4' || code === 'F4'))) {
         e.preventDefault()
-        const activeWebview = document.querySelector('webview[style*="display: flex"]') as any
-        if (activeWebview && typeof activeWebview.goBack === 'function' && activeWebview.canGoBack()) {
-          activeWebview.goBack()
-        }
+        executeShortcutAction('close-tab')
         return
       }
 
-      if (e.key === ']') {
+      // 10. Focus Address Bar / Omnibox: Ctrl+L, Alt+D, or F6
+      if (
+        (isCmdOrCtrl && !shift && !alt && key === 'l') ||
+        (alt && !isCmdOrCtrl && !shift && key === 'd') ||
+        (!isCmdOrCtrl && !shift && !alt && (key === 'f6' || code === 'F6'))
+      ) {
         e.preventDefault()
-        const activeWebview = document.querySelector('webview[style*="display: flex"]') as any
-        if (activeWebview && typeof activeWebview.goForward === 'function' && activeWebview.canGoForward()) {
-          activeWebview.goForward()
-        }
+        executeShortcutAction('focus-address-bar')
+        return
+      }
+
+      // 11. Open Command Bar: Ctrl+K
+      if (isCmdOrCtrl && !shift && !alt && key === 'k') {
+        e.preventDefault()
+        executeShortcutAction('open-command-bar')
+        return
+      }
+
+      // 12. Toggle Sidebar: Ctrl+S or Ctrl+B
+      if (isCmdOrCtrl && !shift && !alt && (key === 's' || key === 'b')) {
+        e.preventDefault()
+        executeShortcutAction('toggle-sidebar')
+        return
+      }
+
+      // 13. Open Settings: Ctrl+,
+      if (isCmdOrCtrl && !shift && !alt && (key === ',' || code === 'Comma')) {
+        e.preventDefault()
+        executeShortcutAction('open-settings')
+        return
+      }
+
+      // 14. Switch to tab 1..8: Ctrl+1..8
+      if (isCmdOrCtrl && !shift && !alt && /^[1-8]$/.test(e.key)) {
+        e.preventDefault()
+        executeShortcutAction(`switch-tab-${e.key}`)
+        return
+      }
+
+      // 15. Switch to last tab: Ctrl+9
+      if (isCmdOrCtrl && !shift && !alt && e.key === '9') {
+        e.preventDefault()
+        executeShortcutAction('switch-tab-last')
+        return
+      }
+
+      // 16. Back: Alt+Left or Ctrl+[
+      if (
+        (alt && !isCmdOrCtrl && !shift && (key === 'arrowleft' || code === 'ArrowLeft')) ||
+        (isCmdOrCtrl && !shift && !alt && (key === '[' || code === 'BracketLeft'))
+      ) {
+        e.preventDefault()
+        executeShortcutAction('back')
+        return
+      }
+
+      // 17. Forward: Alt+Right or Ctrl+]
+      if (
+        (alt && !isCmdOrCtrl && !shift && (key === 'arrowright' || code === 'ArrowRight')) ||
+        (isCmdOrCtrl && !shift && !alt && (key === ']' || code === 'BracketRight'))
+      ) {
+        e.preventDefault()
+        executeShortcutAction('forward')
+        return
+      }
+
+      // 18. Zoom In: Ctrl+=, Ctrl++, or Ctrl+NumpadAdd
+      if (isCmdOrCtrl && !alt && (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd')) {
+        e.preventDefault()
+        executeShortcutAction('zoom-in')
+        return
+      }
+
+      // 19. Zoom Out: Ctrl+- or Ctrl+NumpadSubtract
+      if (isCmdOrCtrl && !alt && (key === '-' || code === 'Minus' || code === 'NumpadSubtract')) {
+        e.preventDefault()
+        executeShortcutAction('zoom-out')
+        return
+      }
+
+      // 20. Zoom Reset: Ctrl+0 or Ctrl+Numpad0
+      if (isCmdOrCtrl && !alt && (key === '0' || code === 'Digit0' || code === 'Numpad0')) {
+        e.preventDefault()
+        executeShortcutAction('zoom-reset')
         return
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [
-    activeTab,
-    activeTabId,
-    tabs,
-    settings,
-    devtoolsOpen,
-    reopenLastClosedTab,
-    removeTab,
-    setActiveTab,
-    setCommandBarOpen,
-    setSidebarCollapsed,
-    setDevToolsOpen
-  ])
+    window.addEventListener('keydown', handleKeyDown, true)
+    return () => window.removeEventListener('keydown', handleKeyDown, true)
+  }, [executeShortcutAction])
 
   const resolvedTheme = useThemeStore((s) => s.resolved)
 
