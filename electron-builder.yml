@@ -58,7 +58,7 @@ fileAssociations:
     icon: build/icon.ico
 
 # ==============================================================================
-# Windows Configuration (Windows 10, Windows 11 - x64 & ARM64 Copilot+ PCs)
+# Windows Configuration (Windows 10, Windows 11)
 # ==============================================================================
 win:
   executableName: tct-orbit
@@ -68,18 +68,13 @@ win:
     - target: nsis
       arch:
         - x64
-        - arm64
-    - target: portable
-      arch:
-        - x64
-        - arm64
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
   deleteAppDataOnUninstall: false
-  differentialPackage: true
+  differentialPackage: false
   artifactName: tct-orbit-${version}-${arch}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
