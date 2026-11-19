@@ -782,10 +782,11 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       }
     }
 
-    const handleToggleSplit = (e: any) => {
+    const handleToggleSplit = async (e: any) => {
       const store = useBrowserStore.getState()
       if (store.splitTabId) {
         store.closeSplitView()
+        toast.info('Split View closed')
         return
       }
       const targetTabId = e.detail?.targetTabId
@@ -793,13 +794,24 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         store.setSplitTabId(targetTabId)
         return
       }
-      const curTabs = store.activeSpaceId ? store.tabsBySpace[store.activeSpaceId] || [] : []
+      const spaceIdToUse = store.activeSpaceId || spaceId
+      const curTabs = spaceIdToUse ? store.tabsBySpace[spaceIdToUse] || [] : []
       const other = curTabs.find((t) => t.id !== store.activeTabId)
       if (other) {
         store.setSplitTabId(other.id)
         toast.info(`Split with "${other.title || 'Tab'}"`)
-      } else {
-        toast.info('Open another tab in this space to use Split View.')
+      } else if (spaceIdToUse) {
+        try {
+          const newTab = await createTab({
+            spaceId: spaceIdToUse,
+            url: 'https://duckduckgo.com',
+            title: 'New Tab'
+          })
+          store.setSplitTabId(newTab.id)
+          toast.success('Split View active with new tab')
+        } catch (err) {
+          console.error('[SplitView] Failed to create secondary tab:', err)
+        }
       }
     }
 

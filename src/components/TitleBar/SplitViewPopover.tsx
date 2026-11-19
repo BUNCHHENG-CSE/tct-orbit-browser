@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/popover'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { modKey } from '@/lib/platform'
+import { api } from '@/lib/ipc'
 
 export const SplitViewPopover: React.FC = () => {
   const [open, setOpen] = useState(false)
@@ -148,9 +149,25 @@ export const SplitViewPopover: React.FC = () => {
                 <p className="text-xs text-muted-foreground">
                   No other open tabs in this space.
                 </p>
-                <p className="text-[11px] text-muted-foreground/75 mt-1">
-                  Open another tab to use dual-pane view.
-                </p>
+                <button
+                  onClick={async () => {
+                    const space = activeSpaceId || useBrowserStore.getState().spaces[0]?.id
+                    if (space && api.tabs?.create) {
+                      const newTab = await api.tabs.create({
+                        spaceId: space,
+                        url: 'https://duckduckgo.com',
+                        title: 'New Tab'
+                      })
+                      useBrowserStore.getState().addTabToStore(space, newTab)
+                      setSplitTabId(newTab.id)
+                      setOpen(false)
+                    }
+                  }}
+                  className="mt-2 px-3 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 transition-colors inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Open New Tab in Split</span>
+                </button>
               </div>
             ) : (
               <div className="max-h-48 overflow-y-auto space-y-1 pr-1">

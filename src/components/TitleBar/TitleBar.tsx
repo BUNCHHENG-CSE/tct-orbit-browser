@@ -31,6 +31,7 @@ import browserLogo from '@/assets/logo-sm.png'
 import { SiteShieldPopover } from './SiteShieldPopover'
 import { SiteInfoPopover } from './SiteInfoPopover'
 import { BookmarkPopover } from './BookmarkPopover'
+import { SplitViewPopover } from './SplitViewPopover'
 import { ToolsMenu } from './ToolsMenu'
 import { getDomainZoom, setDomainZoom } from '@/lib/domainZoom'
 
@@ -498,6 +499,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           <Plus className="w-3.5 h-3.5" />
         </button>
 
+        <SplitViewPopover />
         <ToolsMenu hasActiveDownload={hasActiveDownload} />
 
         {!isMac && (
