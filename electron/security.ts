@@ -222,6 +222,11 @@ export const Schemas = {
   // Downloads
   downloadsOpenFolder: z.string().optional(),
   downloadsShowInFolder: z.string().min(1),
+  downloadsOpenFile: z.string().min(1),
+  downloadsDeleteFile: z.object({
+    id: z.string().min(1),
+    deleteDiskFile: z.boolean().optional()
+  }),
 
   // Backup & Restore
   backupExport: z.object({
@@ -234,6 +239,54 @@ export const Schemas = {
     rawContent: z.string().min(1),
     mode: z.enum(['merge', 'replace'])
   }),
+
+  // History
+  historyRecord: z.object({
+    url: z.string().min(1),
+    title: z.string().optional(),
+    favicon: z.string().nullable().optional(),
+    spaceId: z.string().optional()
+  }),
+  historyGet: z.object({
+    query: z.string().optional(),
+    spaceId: z.string().optional(),
+    limit: z.number().int().positive().optional(),
+    offset: z.number().int().nonnegative().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional()
+  }).optional(),
+  historySearch: z.object({
+    query: z.string(),
+    limit: z.number().int().positive().optional()
+  }),
+  historyDelete: z.string().min(1),
+  historyDeleteByUrl: z.string().min(1),
+  historyClear: z.enum(['last-hour', 'today', 'last-7-days', 'all']).optional(),
+
+  // Notes
+  notesGet: z.string().min(1),
+  notesSave: z.object({
+    spaceId: z.string().min(1),
+    content: z.string()
+  }),
+
+  // Bookmarks
+  bookmarksAdd: z.object({
+    url: z.string().min(1),
+    title: z.string(),
+    favicon: z.string().nullable().optional(),
+    spaceId: z.string().optional(),
+    folder: z.string().optional(),
+    isReadingList: z.boolean().optional()
+  }),
+  bookmarksDelete: z.string().min(1),
+  bookmarksDeleteByUrl: z.string().min(1),
+  bookmarksToggleRead: z.string().min(1),
+  bookmarksIsBookmarked: z.string().min(1),
+
+  // Site Info & Permissions
+  siteGetInfo: z.string().min(1),
+  siteClearData: z.string().min(1),
 
   // Theme
   themeSet: z.object({
@@ -250,6 +303,13 @@ export const Schemas = {
 
   // Window
   windowSetTitle: z.string().max(300),
+  windowSetFullScreen: z.boolean(),
+
+  // Process / Task Manager
+  processKill: z.object({
+    pid: z.number().int().positive().optional(),
+    webContentsId: z.number().int().positive().optional()
+  }),
 
   // DevTools
   devtoolsOpen: z.object({
@@ -300,7 +360,11 @@ export const Schemas = {
       'selectAll',
       'zoomIn',
       'zoomOut',
-      'resetZoom'
+      'resetZoom',
+      'setAudioMuted',
+      'isAudioMuted',
+      'findInPage',
+      'stopFindInPage'
     ]),
     args: z.array(z.any()).optional().default([])
   }),
@@ -424,6 +488,9 @@ export function lockDownSessionPermissions(ses: Session): void {
  */
 export function setupIsolatedTabSession(partition = 'persist:browser-tabs'): Session {
   const tabSession = session.fromPartition(partition)
+  try {
+    tabSession.setSpellCheckerEnabled(false)
+  } catch {}
   lockDownSessionPermissions(tabSession)
   setupWebRequestHardening(tabSession)
   return tabSession

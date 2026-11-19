@@ -11,6 +11,10 @@ files:
   - resources/icon.ico
   - package.json
   - "!node_modules/**/*"
+  - "!**/*.tsbuildinfo"
+  - "!**/*.map"
+  - "!**/*.md"
+  - "!**/tsconfig*.json"
 
 asar: true
 compression: maximum
@@ -23,8 +27,38 @@ publish:
   provider: generic
   url: https://updates.tctorbit.com
 
+# System-wide URL scheme registration
+protocols:
+  - name: Hypertext Transfer Protocol
+    schemes:
+      - http
+  - name: Hypertext Transfer Protocol Secure
+    schemes:
+      - https
+  - name: TCT Orbit Protocol
+    schemes:
+      - tct-orbit
+
+# System-wide File Associations (Default Browser integration)
+fileAssociations:
+  - ext: html
+    name: HTML Document
+    description: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: htm
+    name: HTML Document
+    description: HTML Document
+    role: Viewer
+    icon: build/icon.ico
+  - ext: xhtml
+    name: XHTML Document
+    description: XHTML Document
+    role: Viewer
+    icon: build/icon.ico
+
 # ==============================================================================
-# Windows Configuration (Windows 10, Windows 11, x64)
+# Windows Configuration (Windows 10, Windows 11 - x64 & ARM64 Copilot+ PCs)
 # ==============================================================================
 win:
   executableName: tct-orbit
@@ -34,14 +68,18 @@ win:
     - target: nsis
       arch:
         - x64
+        - arm64
     - target: portable
       arch:
         - x64
+        - arm64
 
 nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  differentialPackage: true
   artifactName: tct-orbit-${version}-${arch}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
@@ -49,12 +87,13 @@ nsis:
   createStartMenuShortcut: true
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
+  displayLanguageSelector: false
 
 portable:
   artifactName: tct-orbit-${version}-${arch}-portable.${ext}
 
 # ==============================================================================
-# macOS Configuration (Apple Silicon M1/M2/M3/M4 & Apple Intel x64)
+# macOS Configuration (Apple Silicon M1-M4, Universal & Intel x64)
 # ==============================================================================
 mac:
   category: public.app-category.productivity
@@ -69,20 +108,36 @@ mac:
       arch:
         - arm64
         - x64
+        - universal
     - target: zip
       arch:
         - arm64
         - x64
+        - universal
   extendInfo:
-    - NSCameraUsageDescription: TCT Orbit needs access to your camera for video calls and web conferencing.
-    - NSMicrophoneUsageDescription: TCT Orbit needs access to your microphone for audio recording and voice calls.
-    - NSDocumentsFolderUsageDescription: TCT Orbit needs access to your Documents folder for saving files.
-    - NSDownloadsFolderUsageDescription: TCT Orbit needs access to your Downloads folder for saving downloaded web files.
+    NSCameraUsageDescription: TCT Orbit needs access to your camera for video calls and web conferencing.
+    NSMicrophoneUsageDescription: TCT Orbit needs access to your microphone for audio recording and voice calls.
+    NSDocumentsFolderUsageDescription: TCT Orbit needs access to your Documents folder for saving files.
+    NSDownloadsFolderUsageDescription: TCT Orbit needs access to your Downloads folder for saving downloaded web files.
+    CFBundleDocumentTypes:
+      - CFBundleTypeName: HTML Document
+        CFBundleTypeRole: Viewer
+        LSHandlerRank: Default
+        LSItemContentTypes:
+          - public.html
+          - public.xhtml
+    CFBundleURLTypes:
+      - CFBundleURLName: Web Site URL
+        CFBundleURLSchemes:
+          - http
+          - https
+          - tct-orbit
   notarize: false
 
 dmg:
   artifactName: tct-orbit-${version}-${arch}.${ext}
   title: ${productName} ${version}
+  format: ULFO
   contents:
     - x: 130
       y: 220
@@ -92,7 +147,7 @@ dmg:
       path: /Applications
 
 # ==============================================================================
-# Linux Configuration (All Distros: Ubuntu, Debian, Fedora, Arch, openSUSE, etc.)
+# Linux Configuration (Ubuntu 22.04/24.04, Debian 12, Fedora, Arch, openSUSE)
 # ==============================================================================
 linux:
   executableName: tct-orbit
@@ -104,7 +159,7 @@ linux:
   desktop:
     entry:
       StartupWMClass: tct-orbit
-      MimeType: x-scheme-handler/http;x-scheme-handler/https;text/html;text/xml;application/xhtml+xml;
+      MimeType: text/html;text/xml;application/xhtml+xml;application/xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/tct-orbit;
       Terminal: false
       Categories: Network;WebBrowser;
   target:
@@ -123,6 +178,7 @@ linux:
     - target: pacman
       arch:
         - x64
+        - arm64
     - target: tar.gz
       arch:
         - x64
@@ -135,13 +191,13 @@ deb:
   artifactName: tct-orbit-${version}-${arch}.${ext}
   packageName: tct-orbit
   depends:
-    - gconf2
-    - gconf-service
+    - libgtk-3-0
     - libnotify4
-    - libappindicator1
-    - libxtst6
     - libnss3
+    - libxss1
     - libasound2
+    - libsecret-1-0
+    - xdg-utils
 
 rpm:
   artifactName: tct-orbit-${version}-${arch}.${ext}

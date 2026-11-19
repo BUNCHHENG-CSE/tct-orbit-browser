@@ -1,5 +1,7 @@
 import React, { useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2 } from 'lucide-react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck } from 'lucide-react'
+import { cleanUrl } from '@/lib/urlCleaner'
+import { toast } from 'sonner'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -154,9 +156,40 @@ export const TabItem: React.FC<TabItemProps> = ({
       </div>
 
       {/* Tab Title */}
-      <span className="flex-1 min-w-0 truncate tracking-tight text-[13.5px] font-medium leading-none">
+      <span className={`flex-1 min-w-0 truncate tracking-tight text-[13.5px] font-medium leading-none ${
+        tab.isSleeping && !isActive ? 'opacity-60 italic' : ''
+      }`}>
         {tab.title || 'New Tab'}
       </span>
+
+      {/* Sleeping indicator */}
+      {tab.isSleeping && !isActive && (
+        <span
+          className="text-[9.5px] font-mono px-1 py-0.2 rounded bg-muted/80 text-muted-foreground border border-border/50 shrink-0 select-none flex items-center gap-0.5"
+          title="Tab is sleeping to save memory. Click to wake up."
+        >
+          <Moon className="w-2.5 h-2.5 text-indigo-400" />
+          <span>zzz</span>
+        </span>
+      )}
+
+      {/* Audio Indicator / 1-Click Mute Button */}
+      {(tab.isAudible || tab.isMuted) && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            window.dispatchEvent(new CustomEvent('tct:toggle-mute-tab', { detail: { tabId: tab.id } }))
+          }}
+          className={`w-5 h-5 rounded-md flex items-center justify-center transition-all shrink-0 cursor-pointer ${
+            tab.isMuted
+              ? 'text-destructive hover:bg-destructive/15'
+              : 'text-primary hover:bg-primary/15 animate-pulse'
+          }`}
+          title={tab.isMuted ? 'Unmute Tab' : 'Mute Tab'}
+        >
+          {tab.isMuted ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+        </button>
+      )}
 
       {/* Pin indicator badge */}
       {tab.isPinned && (
@@ -237,6 +270,35 @@ export const TabItem: React.FC<TabItemProps> = ({
             <span>Duplicate Tab</span>
           </ContextMenuItem>
         )}
+        <ContextMenuItem
+          onClick={() => {
+            window.dispatchEvent(new CustomEvent('tct:toggle-mute-tab', { detail: { tabId: tab.id } }))
+          }}
+          className="text-xs rounded-lg cursor-pointer"
+        >
+          {tab.isMuted ? (
+            <>
+              <Volume2 className="w-3.5 h-3.5 mr-2 text-primary" />
+              <span>Unmute Tab</span>
+            </>
+          ) : (
+            <>
+              <VolumeX className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
+              <span>Mute Tab</span>
+            </>
+          )}
+        </ContextMenuItem>
+        {!isActive && !tab.isPinned && !tab.isSleeping && (
+          <ContextMenuItem
+            onClick={() => {
+              useBrowserStore.getState().setTabSleeping(tab.id, true)
+            }}
+            className="text-xs rounded-lg cursor-pointer"
+          >
+            <Moon className="w-3.5 h-3.5 mr-2 text-indigo-400" />
+            <span>Snooze Tab (Save RAM)</span>
+          </ContextMenuItem>
+        )}
         <ContextMenuItem onClick={onTogglePin} className="text-xs rounded-lg cursor-pointer">
           {tab.isPinned ? (
             <>
@@ -253,6 +315,20 @@ export const TabItem: React.FC<TabItemProps> = ({
         <ContextMenuItem onClick={handleCopyUrl} className="text-xs rounded-lg cursor-pointer">
           <Copy className="w-3.5 h-3.5 mr-2" />
           <span>Copy URL</span>
+        </ContextMenuItem>
+        <ContextMenuItem
+          onClick={(e) => {
+            e.stopPropagation()
+            if (tab.url) {
+              const sanitized = cleanUrl(tab.url)
+              navigator.clipboard.writeText(sanitized)
+              toast.success('Clean URL copied (trackers stripped)')
+            }
+          }}
+          className="text-xs rounded-lg cursor-pointer"
+        >
+          <ShieldCheck className="w-3.5 h-3.5 mr-2 text-emerald-500" />
+          <span>Copy Clean Link</span>
         </ContextMenuItem>
         <ContextMenuSeparator className="my-1 bg-border" />
         <ContextMenuItem onClick={onClose} className="text-xs rounded-lg cursor-pointer text-destructive hover:bg-destructive/10">

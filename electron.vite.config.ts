@@ -52,9 +52,17 @@ export default defineConfig({
     build: {
       minify: 'esbuild',
       sourcemap: false,
+      chunkSizeWarningLimit: 1000,
       rollupOptions: {
         input: {
           index: resolve('src/index.html')
+        },
+        output: {
+          manualChunks: {
+            'vendor-react': ['react', 'react-dom'],
+            'vendor-motion': ['framer-motion'],
+            'vendor-icons': ['lucide-react']
+          }
         }
       }
     },

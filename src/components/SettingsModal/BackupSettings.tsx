@@ -13,7 +13,8 @@ import {
   RotateCcw,
   HardDriveDownload,
   HardDriveUpload,
-  Sparkles
+  Sparkles,
+  History
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
@@ -30,6 +31,7 @@ export const BackupSettings: React.FC = () => {
   const [exportPinned, setExportPinned] = useState(true)
   const [exportOpenTabs, setExportOpenTabs] = useState(true)
   const [exportPrivacy, setExportPrivacy] = useState(true)
+  const [exportHistory, setExportHistory] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
 
   // --- Import State ---
@@ -54,6 +56,7 @@ export const BackupSettings: React.FC = () => {
       if (exportSpaces) categories.push('spaces')
       if (exportPinned || exportOpenTabs) categories.push('tabs')
       if (exportPrivacy) categories.push('privacy')
+      if (exportHistory) categories.push('history')
 
       if (categories.length === 0) {
         toast.error('Please select at least one data category to export.')
@@ -284,15 +287,27 @@ export const BackupSettings: React.FC = () => {
           </div>
 
           {/* Privacy */}
-          <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border sm:col-span-2">
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border">
             <div className="flex items-center gap-2">
               <Shield className="w-3.5 h-3.5 text-muted-foreground" />
               <div>
                 <div className="text-xs font-medium text-foreground">Privacy Shield Rules</div>
-                <div className="text-[10px] text-muted-foreground">Ad-blocker toggles and whitelisted domains</div>
+                <div className="text-[10px] text-muted-foreground">Ad-blocker & whitelisted sites</div>
               </div>
             </div>
             <Switch checked={exportPrivacy} onCheckedChange={setExportPrivacy} />
+          </div>
+
+          {/* Browsing History */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border">
+            <div className="flex items-center gap-2">
+              <History className="w-3.5 h-3.5 text-muted-foreground" />
+              <div>
+                <div className="text-xs font-medium text-foreground">Browsing History</div>
+                <div className="text-[10px] text-muted-foreground">Timeline of visited pages</div>
+              </div>
+            </div>
+            <Switch checked={exportHistory} onCheckedChange={setExportHistory} />
           </div>
         </div>
 
@@ -416,6 +431,11 @@ export const BackupSettings: React.FC = () => {
               {inspectedFile.hasPrivacy && (
                 <span className="text-[11px] px-2.5 py-1 rounded-lg bg-card border border-border font-medium text-foreground">
                   🛡️ Privacy Rules Included
+                </span>
+              )}
+              {Boolean(inspectedFile.historyCount && inspectedFile.historyCount > 0) && (
+                <span className="text-[11px] px-2.5 py-1 rounded-lg bg-card border border-border font-medium text-foreground">
+                  📜 <strong>{inspectedFile.historyCount}</strong> History Visits
                 </span>
               )}
             </div>

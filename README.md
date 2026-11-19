@@ -1,4 +1,4 @@
-# TCT Orbit (`v0.1.1`)
+# TCT Orbit (`v0.1.2`)
 
 A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, Prisma, and 100% private local machine storage.
 
@@ -107,13 +107,17 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 
 Configured in `electron-builder.yml` with update feed at `https://updates.tctorbit.com`:
 
-| Platform | Format | Output Artifact Name (`v0.1.1`) |
-|---|---|---|
-| **Windows** | NSIS Installer | `tct-orbit-0.1.1-setup.exe` |
-| **Windows** | Portable Executable | `tct-orbit-0.1.1-portable.exe` |
-| **macOS** | Apple Disk Image | `tct-orbit-0.1.1.dmg` |
-| **Linux** | AppImage | `tct-orbit-0.1.1.AppImage` |
-| **Linux** | Debian Package | `tct-orbit-0.1.1.deb` |
+| Platform | Architecture | Format | Output Artifact Name (`v0.1.2`) |
+|---|---|---|---|
+| **Windows** | x64, ARM64 | NSIS Installer | `tct-orbit-0.1.2-${arch}-setup.exe` |
+| **Windows** | x64, ARM64 | Portable Executable | `tct-orbit-0.1.2-${arch}-portable.exe` |
+| **macOS** | Apple Silicon, Intel, Universal | Apple Disk Image (LZMA) | `tct-orbit-0.1.2-${arch}.dmg` |
+| **macOS** | Apple Silicon, Intel, Universal | Compressed Archive | `tct-orbit-0.1.2-${arch}.zip` |
+| **Linux** | x64, ARM64 | AppImage | `tct-orbit-0.1.2-${arch}.AppImage` |
+| **Linux** | x64, ARM64 | Debian Package (Ubuntu/Debian) | `tct-orbit-0.1.2-${arch}.deb` |
+| **Linux** | x64, ARM64 | RPM Package (Fedora/RHEL/openSUSE) | `tct-orbit-0.1.2-${arch}.rpm` |
+| **Linux** | x64, ARM64 | Pacman Package (Arch Linux) | `tct-orbit-0.1.2-${arch}.pkg.tar.zst` |
+| **Linux** | x64, ARM64 | Tarball | `tct-orbit-0.1.2-${arch}.tar.gz` |
 
 ---
 

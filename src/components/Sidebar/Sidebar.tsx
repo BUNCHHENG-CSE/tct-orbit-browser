@@ -1,8 +1,9 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Settings, ChevronLeft, ChevronRight } from 'lucide-react'
+import { Plus, Settings, ChevronLeft, ChevronRight, History, Download, Star } from 'lucide-react'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { TabList } from './TabList'
+import { TabTidyPopover } from '../TabTidy/TabTidyPopover'
 import { SettingsDialog } from '../SettingsModal/SettingsDialog'
 import { useSpaces } from '@/hooks/useSpaces'
 import { useTabs } from '@/hooks/useTabs'
@@ -83,9 +84,12 @@ export const Sidebar: React.FC = () => {
                 {activeSpace.name}
               </span>
             </div>
-            <span className="text-[11px] tracking-normal font-medium text-muted-foreground shrink-0">
-              {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
-            </span>
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[11px] tracking-normal font-medium text-muted-foreground">
+                {tabs.length} {tabs.length === 1 ? 'tab' : 'tabs'}
+              </span>
+              <TabTidyPopover collapsed={false} />
+            </div>
           </div>
         )}
 
@@ -127,6 +131,72 @@ export const Sidebar: React.FC = () => {
             {isCollapsed && (
               <TooltipContent side="right">
                 <p>New Tab ({modKey}+T)</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+
+          {/* History button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('open-history'))}
+                className={
+                  isCollapsed
+                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
+                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
+                }
+              >
+                <History className="w-4 h-4 shrink-0" />
+                {!isCollapsed && <span>History</span>}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && (
+              <TooltipContent side="right">
+                <p>History ({modKey}+H)</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+
+          {/* Downloads button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('open-downloads'))}
+                className={
+                  isCollapsed
+                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
+                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
+                }
+              >
+                <Download className="w-4 h-4 shrink-0" />
+                {!isCollapsed && <span>Downloads</span>}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && (
+              <TooltipContent side="right">
+                <p>Downloads ({modKey}+J)</p>
+              </TooltipContent>
+            )}
+          </Tooltip>
+
+          {/* Bookmarks & Reading List button */}
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                onClick={() => window.dispatchEvent(new CustomEvent('open-bookmarks'))}
+                className={
+                  isCollapsed
+                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
+                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
+                }
+              >
+                <Star className="w-4 h-4 shrink-0" />
+                {!isCollapsed && <span>Bookmarks</span>}
+              </button>
+            </TooltipTrigger>
+            {isCollapsed && (
+              <TooltipContent side="right">
+                <p>Bookmarks & Reading List</p>
               </TooltipContent>
             )}
           </Tooltip>

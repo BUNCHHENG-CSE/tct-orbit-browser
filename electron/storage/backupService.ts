@@ -2,12 +2,14 @@ import { app, dialog, type BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import { localStorageService } from './localStorage'
+import { historyService } from './historyService'
 import { privacyEngine } from '../privacy/privacyEngine'
 import { getAppPaths } from './paths'
 import type {
   Space,
   Tab,
   Settings,
+  HistoryEntry,
   ExportBackupOptions,
   ExportBackupResult,
   BackupInspectionResult,
@@ -28,6 +30,7 @@ export interface BackupV1File {
     spacesCount?: number
     tabsCount?: number
     pinnedCount?: number
+    historyCount?: number
     categoriesIncluded?: string[]
   }
   data: {
@@ -35,6 +38,7 @@ export interface BackupV1File {
     spaces?: Partial<Space>[]
     tabs?: (Partial<Tab> & { spaceName?: string })[]
     privacy?: Record<string, any>
+    history?: HistoryEntry[]
   }
 }
 
@@ -144,6 +148,15 @@ export class BackupService {
         categoriesIncluded.push('privacy')
       }
 
+      // 5. Browsing History
+      let exportedHistoryCount = 0
+      if (categories.includes('history')) {
+        const historyList = historyService.getAllEntries()
+        exportData.history = historyList
+        exportedHistoryCount = historyList.length
+        categoriesIncluded.push('history')
+      }
+
       // Construct file payload
       const backupFile: BackupV1File = {
         $schema: 'https://tctorbit.com/schemas/backup-v1.json',
@@ -158,6 +171,7 @@ export class BackupService {
           spacesCount: exportData.spaces?.length || 0,
           tabsCount: exportedTabsCount,
           pinnedCount: exportedPinnedCount,
+          historyCount: exportedHistoryCount,
           categoriesIncluded
         },
         data: exportData
@@ -187,6 +201,7 @@ export class BackupService {
           spaces: exportData.spaces?.length || 0,
           tabs: exportedTabsCount,
           pinnedTabs: exportedPinnedCount,
+          history: exportedHistoryCount,
           hasSettings: Boolean(exportData.settings),
           hasPrivacy: Boolean(exportData.privacy)
         }
@@ -235,6 +250,7 @@ export class BackupService {
 
       const spaces = Array.isArray(data.spaces) ? data.spaces : []
       const tabs = Array.isArray(data.tabs) ? data.tabs : []
+      const historyList = Array.isArray(data.history) ? data.history : []
       const pinnedCount = tabs.filter((t: any) => Boolean(t.isPinned)).length
       const hasSettings = Boolean(data.settings && typeof data.settings === 'object')
       const hasPrivacy = Boolean(data.privacy && typeof data.privacy === 'object')
@@ -244,16 +260,18 @@ export class BackupService {
       if (spaces.length > 0) categories.push('Spaces')
       if (tabs.length > 0) categories.push('Tabs & Bookmarks')
       if (hasPrivacy) categories.push('Privacy Shield')
+      if (historyList.length > 0) categories.push('Browsing History')
 
       return {
         valid: true,
         version,
         exportedAt: parsed.exportedAt || new Date().toISOString(),
         appName: parsed.app?.name || 'TCT Orbit',
-        appVersion: parsed.app?.version || '0.1.1',
+        appVersion: parsed.app?.version || '0.1.2',
         spacesCount: spaces.length,
         tabsCount: tabs.length,
         pinnedCount,
+        historyCount: historyList.length,
         hasSettings,
         hasPrivacy,
         categories,
@@ -516,6 +534,12 @@ export class BackupService {
         }
       }
 
+      // Restore / Import History if included in backup
+      let importedHistoryCount = 0
+      if (Array.isArray(data.history) && data.history.length > 0) {
+        importedHistoryCount = historyService.restoreEntries(data.history, mode)
+      }
+
       // Cleanup rollback snapshot on complete success
       if (fs.existsSync(rollbackSnapshotPath)) {
         try {
@@ -529,6 +553,7 @@ export class BackupService {
         importedCounts: {
           spaces: importedSpacesCount,
           tabs: importedTabsCount,
+          history: importedHistoryCount,
           settingsUpdated,
           privacyUpdated
         }

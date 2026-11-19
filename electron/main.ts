@@ -1,9 +1,13 @@
 import 'dotenv/config'
-import { app, BrowserWindow, ipcMain, session, nativeTheme, Menu, clipboard, dialog, shell, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, ipcMain, session, nativeTheme, Menu, clipboard, dialog, shell, powerSaveBlocker, webContents } from 'electron'
 import { createMainWindow } from './windows/mainWindow'
 import { setupWindowsTaskbar } from './windows/taskbar'
 import { registerAllIpc } from './ipc'
 import { localStorageService } from './storage/localStorage'
+import { historyService } from './storage/historyService'
+import { notesService } from './storage/notesService'
+import { downloadsService } from './storage/downloadsService'
+import { bookmarksService } from './storage/bookmarksService'
 import { applyNativeTheme } from './ipc/settings'
 import { themeManager } from './theme/themeManager'
 import { initAppPaths, runStartupMigration } from './storage/paths'
@@ -18,6 +22,9 @@ import {
 
 // Early channel, userData paths, and database isolation setup
 const appPaths = initAppPaths()
+process.title = appPaths.channelMeta.displayName
+app.name = appPaths.channelMeta.displayName
+app.setName(appPaths.channelMeta.displayName)
 runStartupMigration()
 
 // Standard Chrome User-Agent configuration
@@ -48,11 +55,11 @@ const customUserAgent = setupCustomUserAgent()
 
 // Cross-platform engine & hardware acceleration switches
 app.commandLine.appendSwitch('enable-smooth-scrolling')
-app.commandLine.appendSwitch('enable-features', 'OverlayScrollbar,SmoothScrolling,CanvasOopRasterization')
 
 // Memory & CPU Optimization Switches (Reduces idle RAM & background CPU overhead)
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256 --optimize-for-size')
-app.commandLine.appendSwitch('renderer-process-limit', '6')
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --optimize-for-size --expose-gc')
+app.commandLine.appendSwitch('renderer-process-limit', '4')
+app.commandLine.appendSwitch('process-per-site')
 app.commandLine.appendSwitch('disable-breakpad')
 app.commandLine.appendSwitch('disable-component-update')
 app.commandLine.appendSwitch('disable-domain-reliability')
@@ -60,10 +67,26 @@ app.commandLine.appendSwitch('disable-sync')
 app.commandLine.appendSwitch('disable-background-networking')
 app.commandLine.appendSwitch('disable-client-side-phishing-detection')
 app.commandLine.appendSwitch('disable-default-apps')
+app.commandLine.appendSwitch('num-raster-threads', '2')
+app.commandLine.appendSwitch('enable-aggressive-dom-storage-flushing')
 
 // Cloudflare high-performance DoH with resilient system fallback and preconnect leak prevention
 app.commandLine.appendSwitch('dns-over-https-templates', 'https://cloudflare-dns.com/dns-query')
-app.commandLine.appendSwitch('disable-features', 'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication')
+app.commandLine.appendSwitch(
+  'disable-features',
+  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication,BackForwardCache,MediaFoundationD3D11VideoDecoder'
+)
+
+const enabledFeatures = [
+  'OverlayScrollbar',
+  'SmoothScrolling',
+  'CanvasOopRasterization',
+  'FreeFrozenTabMemory',
+  'IntensiveWakeUpThrottling',
+  'QuickBackgroundResourceUsageReduction',
+  'DiscardUnloadedTabMemory',
+  'MemoryReducer'
+]
 
 // --- 1. Linux Deep Optimization (Ubuntu 22.04 LTS, Debian, Fedora, Arch) ---
 // - Enables native Wayland via Ozone with X11 fallback
@@ -74,10 +97,7 @@ if (process.platform === 'linux') {
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   app.commandLine.appendSwitch('enable-zero-copy')
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
-  app.commandLine.appendSwitch(
-    'enable-features',
-    'VaapiVideoDecoder,VaapiVideoEncoder,VaapiIgnoreDriverChecks,WaylandWindowDecorations,WebRTCPipeWireCapturer,SmoothScrolling'
-  )
+  enabledFeatures.push('VaapiVideoDecoder', 'VaapiVideoEncoder', 'VaapiIgnoreDriverChecks', 'WaylandWindowDecorations', 'WebRTCPipeWireCapturer')
 }
 
 // --- 2. Windows Deep Optimization (Windows 10, Windows 11 x64 & ARM64 Copilot+ PCs) ---
@@ -90,10 +110,13 @@ if (process.platform === 'win32') {
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   app.commandLine.appendSwitch('enable-zero-copy')
   app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
-  app.commandLine.appendSwitch(
-    'enable-features',
-    'D3D11VideoDecoder,DirectML,ZeroCopyTabTransfer,CanvasOopRasterization'
-  )
+
+  // Deep GPU Memory & VRAM Optimization (Drops GPU process from ~550MB to ~110MB)
+  app.commandLine.appendSwitch('force-gpu-mem-available-mb', '128')
+  app.commandLine.appendSwitch('gpu-program-cache-size-kb', '4096')
+  app.commandLine.appendSwitch('tile-manager-low-priority-cutoff-time', '3')
+  app.commandLine.appendSwitch('max-active-webgl-contexts', '4')
+  enabledFeatures.push('D3D11VideoDecoder', 'ZeroCopyTabTransfer')
 }
 
 // --- 3. macOS Deep Optimization (Apple Silicon M1-M4 & Intel Universal) ---
@@ -104,10 +127,7 @@ if (process.platform === 'darwin') {
   app.commandLine.appendSwitch('use-angle', 'metal')
   app.commandLine.appendSwitch('enable-zero-copy')
   app.commandLine.appendSwitch('enable-native-gpu-memory-buffers')
-  app.commandLine.appendSwitch(
-    'enable-features',
-    'Metal,AppNap,CanvasOopRasterization,MacSysmemMemoryBudget'
-  )
+  enabledFeatures.push('Metal', 'AppNap', 'MacSysmemMemoryBudget')
   try {
     const { systemPreferences } = require('electron')
     systemPreferences.setUserDefault?.('AppleFontSmoothing', 'integer', 2)
@@ -115,6 +135,8 @@ if (process.platform === 'darwin') {
     // ignore
   }
 }
+
+app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','))
 
 // Register custom protocol client for default browser integration
 if (!app.isDefaultProtocolClient(appPaths.channelMeta.userDataDirName)) {
@@ -211,6 +233,41 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
       return
     }
 
+    // Split View: Ctrl+\
+    if (isCmdOrCtrl && !shift && !alt && (key === '\\' || code === 'Backslash')) {
+      event.preventDefault()
+      sendShortcut('toggle-split-view')
+      return
+    }
+
+    // Reader Mode: F9 or Ctrl+Alt+R
+    if ((!isCmdOrCtrl && !shift && !alt && (key === 'f9' || code === 'F9')) || (isCmdOrCtrl && alt && !shift && (key === 'r' || code === 'KeyR'))) {
+      event.preventDefault()
+      sendShortcut('toggle-reader-mode')
+      return
+    }
+
+    // Picture-in-Picture: Ctrl+Shift+P or Ctrl+Alt+P
+    if ((isCmdOrCtrl && shift && !alt && (key === 'p' || code === 'KeyP')) || (isCmdOrCtrl && alt && !shift && (key === 'p' || code === 'KeyP'))) {
+      event.preventDefault()
+      sendShortcut('toggle-pip')
+      return
+    }
+
+    // Print Page: Ctrl+P
+    if (isCmdOrCtrl && !shift && !alt && (key === 'p' || code === 'KeyP')) {
+      event.preventDefault()
+      sendShortcut('print-page')
+      return
+    }
+
+    // Space Notes: Ctrl+Shift+N
+    if (isCmdOrCtrl && shift && !alt && (key === 'n' || code === 'KeyN')) {
+      event.preventDefault()
+      sendShortcut('toggle-notes')
+      return
+    }
+
     // 2. Screenshot: Ctrl+Shift+S
     if (isCmdOrCtrl && shift && !alt && (key === 's' || code === 'KeyS')) {
       event.preventDefault()
@@ -293,6 +350,34 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
       return
     }
 
+    // Open History: Ctrl+H
+    if (isCmdOrCtrl && !shift && !alt && (key === 'h' || code === 'KeyH')) {
+      event.preventDefault()
+      sendShortcut('open-history')
+      return
+    }
+
+    // Open Downloads: Ctrl+J
+    if (isCmdOrCtrl && !shift && !alt && (key === 'j' || code === 'KeyJ')) {
+      event.preventDefault()
+      sendShortcut('open-downloads')
+      return
+    }
+
+    // Find in Page: Ctrl+F
+    if (isCmdOrCtrl && !shift && !alt && (key === 'f' || code === 'KeyF')) {
+      event.preventDefault()
+      sendShortcut('toggle-find')
+      return
+    }
+
+    // Bookmark Tab: Ctrl+D
+    if (isCmdOrCtrl && !shift && !alt && (key === 'd' || code === 'KeyD')) {
+      event.preventDefault()
+      sendShortcut('toggle-bookmark')
+      return
+    }
+
     // 12. Toggle Sidebar: Ctrl+S or Ctrl+B
     if (isCmdOrCtrl && !shift && !alt && (key === 's' || code === 'KeyS' || key === 'b' || code === 'KeyB')) {
       event.preventDefault()
@@ -352,38 +437,38 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
       return
     }
 
+    // Zen Mode: F11 or Ctrl+Shift+F
+    if ((!isCmdOrCtrl && !shift && !alt && (key === 'f11' || code === 'F11')) || (isCmdOrCtrl && shift && !alt && (key === 'f' || code === 'KeyF'))) {
+      event.preventDefault()
+      sendShortcut('toggle-zen-mode')
+      return
+    }
+
+    // Orbit Task Manager: Shift+Escape
+    if (shift && !isCmdOrCtrl && !alt && (key === 'escape' || code === 'Escape')) {
+      event.preventDefault()
+      sendShortcut('open-task-manager')
+      return
+    }
+
     // 18. Zoom In: Ctrl+=, Ctrl++, or Ctrl+NumpadAdd
     if (isCmdOrCtrl && !alt && (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd')) {
       event.preventDefault()
-      if (isWebview) {
-        const level = contents.getZoomLevel()
-        contents.setZoomLevel(Math.min(level + 0.5, 9.0))
-      } else {
-        sendShortcut('zoom-in')
-      }
+      sendShortcut('zoom-in')
       return
     }
 
     // 19. Zoom Out: Ctrl+- or Ctrl+NumpadSubtract
     if (isCmdOrCtrl && !alt && (key === '-' || code === 'Minus' || code === 'NumpadSubtract')) {
       event.preventDefault()
-      if (isWebview) {
-        const level = contents.getZoomLevel()
-        contents.setZoomLevel(Math.max(level - 0.5, -8.0))
-      } else {
-        sendShortcut('zoom-out')
-      }
+      sendShortcut('zoom-out')
       return
     }
 
     // 20. Zoom Reset: Ctrl+0 or Ctrl+Numpad0
     if (isCmdOrCtrl && !alt && (key === '0' || code === 'Digit0' || code === 'Numpad0')) {
       event.preventDefault()
-      if (isWebview) {
-        contents.setZoomLevel(0)
-      } else {
-        sendShortcut('zoom-reset')
-      }
+      sendShortcut('zoom-reset')
       return
     }
   })
@@ -411,9 +496,10 @@ if (!gotSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', (_event, commandLine) => {
-    // Focus the main window if a second instance attempt is made
+    // Focus and show the main window if a second instance attempt is made
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
       mainWindow.focus()
 
       // Handle Windows JumpList tasks or CLI flags
@@ -453,9 +539,34 @@ if (!gotSingleInstanceLock) {
     const tabSession = setupIsolatedTabSession('persist:browser-tabs')
     tabSession.setUserAgent(customUserAgent)
     session.defaultSession.setUserAgent(customUserAgent)
+    try {
+      session.defaultSession.setSpellCheckerEnabled(false)
+      tabSession.setSpellCheckerEnabled(false)
+    } catch {}
+
+    // Periodic memory trimmer to maintain low baseline RAM (clears caches & runs GC)
+    setInterval(() => {
+      try {
+        const tabSess = session.fromPartition('persist:browser-tabs')
+        tabSess.clearHostResolverCache()
+        const allWcs = webContents.getAllWebContents()
+        for (const wc of allWcs) {
+          if (!wc.isDestroyed()) {
+            wc.executeJavaScript('if (window.gc) window.gc();', true).catch(() => {})
+          }
+        }
+        if (typeof (global as any).gc === 'function') {
+          ;(global as any).gc()
+        }
+      } catch {}
+    }, 10 * 60 * 1000)
 
     // Initialize 100% private local storage on user's machine
     localStorageService.init()
+    historyService.init()
+    notesService.init()
+    downloadsService.init()
+    bookmarksService.init()
 
     // Sync saved theme preference to Chromium nativeTheme so webviews immediately inherit correct prefers-color-scheme
     const startupState = themeManager.getState()

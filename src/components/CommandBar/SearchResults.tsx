@@ -1,12 +1,15 @@
-import React, { useState } from 'react'
-import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus } from 'lucide-react'
+import React, { useState, useEffect } from 'react'
+import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn } from 'lucide-react'
 import {
   CommandGroup,
   CommandItem,
   CommandSeparator
 } from '@/components/ui/command'
 import { isUrl, normalizeUrl, SEARCH_ENGINES, type SearchEngineId } from '@/lib/searchEngines'
-import type { Tab, Space } from '@/types/api'
+import { api } from '@/lib/ipc'
+import { modKey } from '@/lib/platform'
+import { useBrowserStore } from '@/store/useBrowserStore'
+import type { Tab, Space, HistoryEntry } from '@/types/api'
 
 interface SearchResultsProps {
   query: string
@@ -62,6 +65,24 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   const isInputUrl = isUrl(trimmed)
   const engine = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
+  const [historyResults, setHistoryResults] = useState<HistoryEntry[]>([])
+
+  useEffect(() => {
+    let active = true
+    if (trimmed && api.history?.searchHistory) {
+      api.history.searchHistory(trimmed, 4).then((res) => {
+        if (active && Array.isArray(res)) {
+          setHistoryResults(res)
+        }
+      }).catch(() => {})
+    } else {
+      setHistoryResults([])
+    }
+    return () => {
+      active = false
+    }
+  }, [trimmed])
+
   // Filter tabs and spaces
   const matchingTabs = trimmed
     ? tabs.filter(
@@ -104,6 +125,189 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
             </div>
             <kbd className="flex items-center gap-1 text-xs font-mono text-muted-foreground px-2 py-1 rounded-lg bg-muted border border-border shadow-xs shrink-0">
               ↵ Enter
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('open-history'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <History className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Open Browsing History
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                View timeline of visited pages
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+H
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('open-downloads'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Download className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Downloads Manager
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Manage downloaded files and transfers
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+J
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('tct:webview-print'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Printer className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Print Current Page
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Send active page to system printer
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+P
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('tct:webview-save-pdf'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <FileDown className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Save Page as PDF
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Export current webpage to a clean PDF document
+              </p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('open-bookmarks'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Star className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Bookmarks & Reading List
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Browse saved pages and articles
+              </p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => window.dispatchEvent(new CustomEvent('tct:toggle-find'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Search className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Find in Page
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Search text on the active webpage
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+F
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => {
+              const store = useBrowserStore.getState()
+              const next = !store.zenMode
+              store.setZenMode(next)
+              if (api.window?.setFullScreen) {
+                api.window.setFullScreen(next)
+              }
+            }}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Zen / Pure Focus Mode
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                100% screen browsing with edge-hover gliding
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              F11
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => useBrowserStore.getState().setTaskManagerOpen(true)}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Activity className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Orbit Task Manager & RAM Monitor
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Inspect process CPU/RAM and end frozen tabs
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              Shift+Esc
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={() => {
+              window.dispatchEvent(new CustomEvent('tct:webview-zoom-reset'))
+            }}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <ZoomIn className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">
+                Reset Zoom to 100%
+              </span>
+              <p className="text-[11px] text-muted-foreground">
+                Restore default site magnification
+              </p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+0
             </kbd>
           </CommandItem>
         </CommandGroup>
@@ -202,6 +406,33 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
                 </CommandItem>
               )
             })}
+          </CommandGroup>
+        </>
+      )}
+
+      {/* Matching History Results */}
+      {historyResults.length > 0 && (
+        <>
+          <CommandSeparator />
+          <CommandGroup heading="History">
+            {historyResults.map((item) => (
+              <CommandItem
+                key={item.id}
+                onSelect={() => onNavigate(item.url)}
+                className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+              >
+                <div className="w-5 h-5 shrink-0 flex items-center justify-center rounded-md text-muted-foreground">
+                  <History className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{item.title || item.url}</p>
+                  <p className="text-[11px] text-muted-foreground truncate font-mono">{item.url}</p>
+                </div>
+                <span className="text-[11px] text-muted-foreground flex items-center gap-1 opacity-0 group-hover:opacity-100 shrink-0">
+                  <ArrowRight className="w-2.5 h-2.5" /> Open
+                </span>
+              </CommandItem>
+            ))}
           </CommandGroup>
         </>
       )}

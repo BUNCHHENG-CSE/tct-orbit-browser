@@ -1,10 +1,17 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { TitleBar } from '@/components/TitleBar/TitleBar'
 import { Sidebar } from '@/components/Sidebar/Sidebar'
 import { WebViewContainer } from '@/components/WebView/WebViewContainer'
 import { CommandBar } from '@/components/CommandBar/CommandBar'
+import { HistoryDialog } from '@/components/HistoryModal/HistoryDialog'
+import { DownloadsDialog } from '@/components/DownloadsModal/DownloadsDialog'
+import { BookmarksDialog } from '@/components/Bookmarks/BookmarksDialog'
+import { NotesDrawer } from '@/components/Notes/NotesDrawer'
 import { DockedDevToolsPane } from '@/components/DevTools/DockedDevToolsPane'
 import { BrowserContextMenu, QrCodeModal } from '@/components/ContextMenu/BrowserContextMenu'
+import { ZenControls } from '@/components/ZenMode/ZenControls'
+import { TaskManagerDialog } from '@/components/TaskManager/TaskManagerDialog'
+import { PomodoroDialog } from '@/components/TitleBar/PomodoroDialog'
 import { SmoothScroll } from '@/components/SmoothScroll'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
@@ -24,6 +31,9 @@ export const App: React.FC = () => {
   const devtoolsOpen = useBrowserStore((s) => s.devtoolsOpen)
   const appInfo = useBrowserStore((s) => s.appInfo)
   const setAppInfo = useBrowserStore((s) => s.setAppInfo)
+  const zenMode = useBrowserStore((s) => s.zenMode)
+  const [topHovered, setTopHovered] = useState(false)
+  const [leftHovered, setLeftHovered] = useState(false)
 
   // Initialize dynamic app channel and version metadata
   useEffect(() => {
@@ -271,6 +281,12 @@ export const App: React.FC = () => {
         case 'open-settings':
           window.dispatchEvent(new CustomEvent('open-settings'))
           break
+        case 'open-history':
+          window.dispatchEvent(new CustomEvent('open-history'))
+          break
+        case 'open-downloads':
+          window.dispatchEvent(new CustomEvent('open-downloads'))
+          break
         case 'reload':
           window.dispatchEvent(new CustomEvent('tct:webview-reload'))
           break
@@ -312,6 +328,48 @@ export const App: React.FC = () => {
           }
           break
         }
+        case 'toggle-split-view':
+          window.dispatchEvent(new CustomEvent('tct:toggle-split-view'))
+          break
+        case 'toggle-reader-mode':
+          window.dispatchEvent(new CustomEvent('tct:toggle-reader-mode'))
+          break
+        case 'toggle-pip':
+          window.dispatchEvent(new CustomEvent('tct:toggle-pip'))
+          break
+        case 'toggle-notes':
+          window.dispatchEvent(new CustomEvent('tct:toggle-notes'))
+          break
+        case 'print-page': {
+          const store = useBrowserStore.getState()
+          if (store.readerMode?.isOpen) {
+            window.print()
+          } else {
+            window.dispatchEvent(new CustomEvent('tct:webview-print'))
+          }
+          break
+        }
+        case 'toggle-find':
+          window.dispatchEvent(new CustomEvent('tct:toggle-find'))
+          break
+        case 'toggle-bookmark':
+          window.dispatchEvent(new CustomEvent('tct:toggle-bookmark'))
+          break
+        case 'open-bookmarks':
+          window.dispatchEvent(new CustomEvent('open-bookmarks'))
+          break
+        case 'toggle-zen-mode': {
+          const store = useBrowserStore.getState()
+          const next = !store.zenMode
+          store.setZenMode(next)
+          if (api.window?.setFullScreen) {
+            api.window.setFullScreen(next)
+          }
+          break
+        }
+        case 'open-task-manager':
+          useBrowserStore.getState().setTaskManagerOpen(true)
+          break
       }
     },
     [removeTab, setActiveTab, reopenLastClosedTab, setCommandBarOpen, setSidebarCollapsed, setDevToolsOpen]
@@ -337,10 +395,59 @@ export const App: React.FC = () => {
       const shift = e.shiftKey
       const alt = e.altKey
 
+      // Zen Mode: F11 or Ctrl+Shift+F
+      if ((!isCmdOrCtrl && !shift && !alt && (key === 'f11' || code === 'F11')) || (isCmdOrCtrl && shift && !alt && (key === 'f' || code === 'KeyF'))) {
+        e.preventDefault()
+        executeShortcutAction('toggle-zen-mode')
+        return
+      }
+
+      // Orbit Task Manager: Shift+Escape
+      if (shift && !isCmdOrCtrl && !alt && (key === 'escape' || code === 'Escape')) {
+        e.preventDefault()
+        executeShortcutAction('open-task-manager')
+        return
+      }
+
       // 1. DevTools: F12 or Ctrl+Shift+I
       if (key === 'f12' || (isCmdOrCtrl && shift && !alt && key === 'i')) {
         e.preventDefault()
         executeShortcutAction('toggle-devtools')
+        return
+      }
+
+      // Split View: Ctrl+\
+      if (isCmdOrCtrl && !shift && !alt && (key === '\\' || code === 'Backslash')) {
+        e.preventDefault()
+        executeShortcutAction('toggle-split-view')
+        return
+      }
+
+      // Reader Mode: F9 or Ctrl+Alt+R
+      if ((!isCmdOrCtrl && !shift && !alt && (key === 'f9' || code === 'F9')) || (isCmdOrCtrl && alt && !shift && (key === 'r' || code === 'KeyR'))) {
+        e.preventDefault()
+        executeShortcutAction('toggle-reader-mode')
+        return
+      }
+
+      // Picture-in-Picture: Ctrl+Shift+P or Ctrl+Alt+P
+      if ((isCmdOrCtrl && shift && !alt && key === 'p') || (isCmdOrCtrl && alt && !shift && (key === 'p' || code === 'KeyP'))) {
+        e.preventDefault()
+        executeShortcutAction('toggle-pip')
+        return
+      }
+
+      // Print Page: Ctrl+P
+      if (isCmdOrCtrl && !shift && !alt && (key === 'p' || code === 'KeyP')) {
+        e.preventDefault()
+        executeShortcutAction('print-page')
+        return
+      }
+
+      // Space Notes: Ctrl+Shift+N
+      if (isCmdOrCtrl && shift && !alt && (key === 'n' || code === 'KeyN')) {
+        e.preventDefault()
+        executeShortcutAction('toggle-notes')
         return
       }
 
@@ -415,6 +522,34 @@ export const App: React.FC = () => {
       if (isCmdOrCtrl && !shift && !alt && key === 'k') {
         e.preventDefault()
         executeShortcutAction('open-command-bar')
+        return
+      }
+
+      // Open Browsing History: Ctrl+H
+      if (isCmdOrCtrl && !shift && !alt && (key === 'h' || code === 'KeyH')) {
+        e.preventDefault()
+        executeShortcutAction('open-history')
+        return
+      }
+
+      // Open Downloads: Ctrl+J
+      if (isCmdOrCtrl && !shift && !alt && (key === 'j' || code === 'KeyJ')) {
+        e.preventDefault()
+        executeShortcutAction('open-downloads')
+        return
+      }
+
+      // Find in Page: Ctrl+F
+      if (isCmdOrCtrl && !shift && !alt && (key === 'f' || code === 'KeyF')) {
+        e.preventDefault()
+        executeShortcutAction('toggle-find')
+        return
+      }
+
+      // Bookmark Tab: Ctrl+D
+      if (isCmdOrCtrl && !shift && !alt && (key === 'd' || code === 'KeyD')) {
+        e.preventDefault()
+        executeShortcutAction('toggle-bookmark')
         return
       }
 
@@ -496,22 +631,82 @@ export const App: React.FC = () => {
 
   return (
     <SmoothScroll enabled={settings?.smoothScrolling ?? true}>
-      <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground select-none font-sans">
+      <div className="flex flex-col h-full w-full overflow-hidden bg-background text-foreground select-none font-sans relative">
+        {/* Zen Mode Edge-Hover Gliding Triggers */}
+        {zenMode && (
+          <>
+            {/* Top edge trigger corridor (hovering smoothly glides TitleBar into view) */}
+            <div
+              onMouseEnter={() => setTopHovered(true)}
+              className="fixed top-0 left-0 right-0 h-3 z-40 pointer-events-auto"
+            />
+            {/* Left edge trigger corridor (hovering smoothly glides Sidebar into view) */}
+            <div
+              onMouseEnter={() => setLeftHovered(true)}
+              className="fixed top-0 bottom-0 left-0 w-3 z-40 pointer-events-auto"
+            />
+          </>
+        )}
+
         {/* Title bar strip with drag region and window controls */}
-        <TitleBar
-          spaceName={activeSpace?.name || 'Personal'}
-          spaceColor={activeSpace?.color || '#6366f1'}
-        />
+        <div
+          onMouseEnter={() => zenMode && setTopHovered(true)}
+          onMouseLeave={() => zenMode && setTopHovered(false)}
+          className={`${
+            zenMode
+              ? `fixed top-0 left-0 right-0 z-50 transition-transform duration-300 ease-out shadow-2xl ${
+                  topHovered ? 'translate-y-0 pointer-events-auto' : '-translate-y-full pointer-events-none'
+                }`
+              : 'relative z-20 shrink-0'
+          }`}
+        >
+          <TitleBar
+            spaceName={activeSpace?.name || 'Personal'}
+            spaceColor={activeSpace?.color || '#6366f1'}
+          />
+        </div>
 
         {/* Main browser frame: Sidebar + WebViews + Docked DevTools */}
-        <div className="flex flex-1 w-full min-h-0 overflow-hidden">
-          <Sidebar />
+        <div className="flex flex-1 w-full min-h-0 overflow-hidden relative">
+          <div
+            onMouseEnter={() => zenMode && setLeftHovered(true)}
+            onMouseLeave={() => zenMode && setLeftHovered(false)}
+            className={`${
+              zenMode
+                ? `fixed top-0 bottom-0 left-0 z-50 transition-transform duration-300 ease-out shadow-2xl ${
+                    leftHovered ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
+                  }`
+                : 'relative z-10 flex shrink-0 h-full'
+            }`}
+          >
+            <Sidebar />
+          </div>
+
           <WebViewContainer spaceId={activeSpaceId} />
           <DockedDevToolsPane />
+          <NotesDrawer />
         </div>
+
+        {/* Zen Mode Ambient Soundscapes & Exit Controls */}
+        <ZenControls />
+
+        {/* Orbit Task Manager & RAM Monitor Dialog (Shift+Esc) */}
+        <TaskManagerDialog />
+
+        {/* Focus Sprint Pomodoro Dialog */}
+        <PomodoroDialog />
 
         {/* TCT Orbit spotlight CommandBar overlay */}
         <CommandBar />
+
+        {/* Full Browsing History Timeline Modal (Ctrl+H) */}
+        <HistoryDialog />
+
+        {/* Downloads Manager Dashboard (Ctrl+J) */}
+        <DownloadsDialog />
+
+        {/* Bookmarks & Reading List Dashboard */}
+        <BookmarksDialog />
 
         {/* Edge-Style Right-Click Context Menu */}
         <BrowserContextMenu />

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { Space, Tab, Settings, AppInfo } from '@/types/api'
+import { soundscape, type SoundscapeType } from '@/lib/soundscapes'
 
 interface BrowserState {
   appInfo: AppInfo
@@ -19,6 +20,47 @@ interface BrowserState {
   devtoolsWidth: number
   qrModal: { isOpen: boolean; url: string; title: string }
 
+  // History Dialog State
+  historyDialogOpen: boolean
+
+  // Notes Drawer State
+  notesDrawerOpen: boolean
+
+  // Downloads Dialog State
+  downloadsDialogOpen: boolean
+
+  // Find Bar State
+  findBarOpen: boolean
+
+  // Bookmarks Dialog State
+  bookmarksDialogOpen: boolean
+
+  // Zen / Pure Focus Mode State
+  zenMode: boolean
+  zenSoundscape: SoundscapeType
+
+  // Orbit Task Manager & RAM Monitor State
+  taskManagerOpen: boolean
+
+  // Split View State
+  splitTabId: string | null
+  splitRatio: number
+  splitActivePane: 'primary' | 'secondary'
+
+  // Reader Mode State
+  readerMode: {
+    isOpen: boolean
+    tabId: string | null
+    url: string
+    title: string
+    byline: string
+    contentHtml: string
+    readingTime: string
+    fontSize: number
+    fontTheme: 'sans' | 'serif' | 'mono'
+    colorTheme: 'paper' | 'sepia' | 'dark' | 'black'
+  }
+
   // Store actions
   setAppInfo: (appInfo: AppInfo) => void
   setSpaces: (spaces: Space[]) => void
@@ -27,6 +69,17 @@ interface BrowserState {
   setActiveTabId: (id: string | null) => void
   setSettings: (settings: Settings | null) => void
   setCommandBarOpen: (open: boolean, initialQuery?: string, mode?: 'new-tab' | 'navigate') => void
+  setHistoryDialogOpen: (open: boolean) => void
+  setNotesDrawerOpen: (open: boolean) => void
+  setDownloadsDialogOpen: (open: boolean) => void
+  setFindBarOpen: (open: boolean) => void
+  setBookmarksDialogOpen: (open: boolean) => void
+  setZenMode: (enabled: boolean | ((prev: boolean) => boolean)) => void
+  setZenSoundscape: (soundscape: SoundscapeType) => void
+  setTaskManagerOpen: (open: boolean) => void
+  setTabAudible: (tabId: string, isAudible: boolean) => void
+  setTabMuted: (tabId: string, isMuted: boolean) => void
+  setTabSleeping: (tabId: string, isSleeping: boolean) => void
   pushRecentlyClosedTab: (tab: Tab, spaceId: string) => void
   popRecentlyClosedTab: () => { tab: Tab; spaceId: string } | undefined
   setNavState: (canGoBack: boolean, canGoForward: boolean) => void
@@ -34,6 +87,28 @@ interface BrowserState {
   setDevToolsDetached: (detached: boolean) => void
   setDevToolsWidth: (width: number) => void
   setQrModal: (modal: { isOpen: boolean; url: string; title: string }) => void
+
+  // Split View Actions
+  setSplitTabId: (id: string | null) => void
+  setSplitRatio: (ratio: number) => void
+  setSplitActivePane: (pane: 'primary' | 'secondary') => void
+  closeSplitView: () => void
+
+  // Reader Mode Actions
+  openReaderMode: (data: {
+    tabId: string
+    url: string
+    title: string
+    byline?: string
+    contentHtml: string
+    readingTime?: string
+  }) => void
+  closeReaderMode: () => void
+  updateReaderSettings: (settings: {
+    fontSize?: number
+    fontTheme?: 'sans' | 'serif' | 'mono'
+    colorTheme?: 'paper' | 'sepia' | 'dark' | 'black'
+  }) => void
 
   // Tab mutations in store
   addTabToStore: (spaceId: string, tab: Tab, referenceTabId?: string | null, makeActive?: boolean) => void
@@ -50,7 +125,7 @@ interface BrowserState {
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   appInfo: typeof window !== 'undefined' && window.api?.appInfo
     ? window.api.appInfo
-    : { name: 'TCT Orbit', version: '0.1.1', channel: 'stable' },
+    : { name: 'TCT Orbit', version: '0.1.2', channel: 'stable' },
   setAppInfo: (appInfo) => set({ appInfo }),
   spaces: [],
   activeSpaceId: null,
@@ -67,12 +142,105 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   devtoolsDetached: false,
   devtoolsWidth: 440,
   qrModal: { isOpen: false, url: '', title: '' },
+  historyDialogOpen: false,
+  setHistoryDialogOpen: (historyDialogOpen) => set({ historyDialogOpen }),
+  notesDrawerOpen: false,
+  setNotesDrawerOpen: (notesDrawerOpen) => set({ notesDrawerOpen }),
+  downloadsDialogOpen: false,
+  setDownloadsDialogOpen: (downloadsDialogOpen) => set({ downloadsDialogOpen }),
+  findBarOpen: false,
+  setFindBarOpen: (findBarOpen) => set({ findBarOpen }),
+  bookmarksDialogOpen: false,
+  setBookmarksDialogOpen: (bookmarksDialogOpen) => set({ bookmarksDialogOpen }),
+  zenMode: false,
+  zenSoundscape: 'none',
+  taskManagerOpen: false,
+  setZenMode: (enabled) => {
+    const nextVal = typeof enabled === 'function' ? enabled(get().zenMode) : enabled
+    if (!nextVal) {
+      soundscape.stop()
+      set({ zenMode: false, zenSoundscape: 'none' })
+    } else {
+      set({ zenMode: true })
+    }
+  },
+  setZenSoundscape: (type) => {
+    soundscape.setSoundscape(type)
+    set({ zenSoundscape: type })
+  },
+  setTaskManagerOpen: (taskManagerOpen) => set({ taskManagerOpen }),
+  setTabAudible: (tabId, isAudible) => {
+    get().updateTabInStore(tabId, { isAudible })
+  },
+  setTabMuted: (tabId, isMuted) => {
+    get().updateTabInStore(tabId, { isMuted })
+  },
+  setTabSleeping: (tabId, isSleeping) => {
+    get().updateTabInStore(tabId, { isSleeping })
+  },
+
+  // Split View Initial State
+  splitTabId: null,
+  splitRatio: 0.5,
+  splitActivePane: 'primary',
+
+  // Reader Mode Initial State
+  readerMode: {
+    isOpen: false,
+    tabId: null,
+    url: '',
+    title: '',
+    byline: '',
+    contentHtml: '',
+    readingTime: '',
+    fontSize: 18,
+    fontTheme: 'serif',
+    colorTheme: 'paper'
+  },
 
   setNavState: (canGoBack, canGoForward) => set({ canGoBack, canGoForward }),
   setDevToolsOpen: (open) => set({ devtoolsOpen: open }),
   setDevToolsDetached: (detached) => set({ devtoolsDetached: detached }),
   setDevToolsWidth: (width) => set({ devtoolsWidth: width }),
   setQrModal: (qrModal) => set({ qrModal }),
+
+  // Split View Actions
+  setSplitTabId: (id) => set({ splitTabId: id }),
+  setSplitRatio: (ratio) => set({ splitRatio: Math.min(0.8, Math.max(0.2, ratio)) }),
+  setSplitActivePane: (pane) => set({ splitActivePane: pane }),
+  closeSplitView: () => set({ splitTabId: null, splitActivePane: 'primary' }),
+
+  // Reader Mode Actions
+  openReaderMode: (data) =>
+    set((state) => ({
+      readerMode: {
+        ...state.readerMode,
+        isOpen: true,
+        tabId: data.tabId,
+        url: data.url,
+        title: data.title,
+        byline: data.byline || '',
+        contentHtml: data.contentHtml,
+        readingTime: data.readingTime || '2 min read'
+      }
+    })),
+  closeReaderMode: () =>
+    set((state) => ({
+      readerMode: {
+        ...state.readerMode,
+        isOpen: false,
+        tabId: null
+      }
+    })),
+  updateReaderSettings: (settings) =>
+    set((state) => ({
+      readerMode: {
+        ...state.readerMode,
+        ...(settings.fontSize !== undefined ? { fontSize: settings.fontSize } : {}),
+        ...(settings.fontTheme !== undefined ? { fontTheme: settings.fontTheme } : {}),
+        ...(settings.colorTheme !== undefined ? { colorTheme: settings.colorTheme } : {})
+      }
+    })),
 
   setSpaces: (spaces) => {
     // If no activeSpaceId yet or not in list, find active one or first one
@@ -107,7 +275,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
     set({
       activeSpaceId: id,
-      activeTabId: firstTabId
+      activeTabId: firstTabId,
+      splitTabId: null
     })
   },
 
@@ -247,6 +416,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return {
         tabsBySpace: nextTabsBySpace,
         activeTabId: nextActiveTabId,
+        splitTabId: state.splitTabId === id ? null : state.splitTabId,
         recentlyClosedTabs: nextRecentlyClosed
       }
     })

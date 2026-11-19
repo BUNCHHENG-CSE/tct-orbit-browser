@@ -2,8 +2,13 @@ import React, { useRef, useEffect, useState, useCallback } from 'react'
 import {
   Globe,
   AlertCircle,
-  RefreshCw
+  RefreshCw,
+  ArrowLeftRight,
+  X,
+  Moon,
+  Zap
 } from 'lucide-react'
+import { toast } from 'sonner'
 import { useTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
@@ -11,6 +16,10 @@ import { useThemeStore } from '@/store/useThemeStore'
 import { modKey } from '@/lib/platform'
 import { getThemeSyncScript, resolveIsDark } from '@/lib/theme'
 import { api } from '@/lib/ipc'
+import { ReaderModeOverlay } from '@/components/ReaderMode/ReaderModeOverlay'
+import { FindInPageBar } from '@/components/FindInPage/FindInPageBar'
+import { READABILITY_EXTRACTION_SCRIPT, PICTURE_IN_PICTURE_SCRIPT } from '@/lib/readability'
+import { getDomainZoom, setDomainZoom, getNextZoomIn, getNextZoomOut, extractDomain } from '@/lib/domainZoom'
 import type { Tab } from '@/types/api'
 
 interface SingleWebViewProps {
@@ -19,10 +28,15 @@ interface SingleWebViewProps {
   isDark: boolean
   defaultZoom?: number
   spaceId: string
+  paneStyle?: React.CSSProperties
+  splitRole?: 'primary' | 'secondary' | null
   onUpdateTab: (id: string, data: { url?: string; title?: string; favicon?: string | null }) => void
   onOpenNewTab: (url: string) => void
   registerWebviewRef: (tabId: string, el: any) => void
   unregisterWebviewRef: (tabId: string) => void
+  onCloseSplit?: () => void
+  onSwapSplit?: () => void
+  onFocusPane?: () => void
 }
 
 const SingleWebView: React.FC<SingleWebViewProps> = ({
@@ -31,10 +45,15 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   isDark,
   defaultZoom = 100,
   spaceId,
+  paneStyle,
+  splitRole,
   onUpdateTab,
   onOpenNewTab,
   registerWebviewRef,
-  unregisterWebviewRef
+  unregisterWebviewRef,
+  onCloseSplit,
+  onSwapSplit,
+  onFocusPane
 }) => {
   const webviewRef = useRef<any>(null)
   const [hasError, setHasError] = useState(false)
@@ -115,19 +134,95 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     }
   }, [isDark, isActive])
 
-  // Apply default page zoom level
-  useEffect(() => {
+  // Apply persistent per-domain zoom level
+  const applyDomainZoom = useCallback((targetUrl?: string) => {
     const el = webviewRef.current
-    if (!el) return
+    if (!el) return 100
+    const urlToUse = targetUrl || tab.url
+    const zoomPercent = getDomainZoom(urlToUse, defaultZoom || 100)
     try {
-      const factor = (defaultZoom || 100) / 100
       if (typeof el.setZoomFactor === 'function') {
-        el.setZoomFactor(factor)
+        el.setZoomFactor(zoomPercent / 100)
       }
-    } catch {
-      // ignore
+    } catch {}
+    return zoomPercent
+  }, [tab.url, defaultZoom])
+
+  useEffect(() => {
+    applyDomainZoom()
+  }, [tab.url, defaultZoom, applyDomainZoom])
+
+  // Listen to zoom shortcuts when active
+  useEffect(() => {
+    if (!isActive) return
+
+    const handleZoomIn = () => {
+      const el = webviewRef.current
+      if (!el) return
+      const current = getDomainZoom(tab.url, defaultZoom || 100)
+      const next = getNextZoomIn(current)
+      try {
+        if (typeof el.setZoomFactor === 'function') {
+          el.setZoomFactor(next / 100)
+        }
+      } catch {}
+      setDomainZoom(tab.url, next)
     }
-  }, [defaultZoom])
+
+    const handleZoomOut = () => {
+      const el = webviewRef.current
+      if (!el) return
+      const current = getDomainZoom(tab.url, defaultZoom || 100)
+      const prev = getNextZoomOut(current)
+      try {
+        if (typeof el.setZoomFactor === 'function') {
+          el.setZoomFactor(prev / 100)
+        }
+      } catch {}
+      setDomainZoom(tab.url, prev)
+    }
+
+    const handleZoomReset = () => {
+      const el = webviewRef.current
+      if (!el) return
+      try {
+        if (typeof el.setZoomFactor === 'function') {
+          el.setZoomFactor(1.0)
+        }
+      } catch {}
+      setDomainZoom(tab.url, 100)
+    }
+
+    window.addEventListener('tct:webview-zoom-in', handleZoomIn)
+    window.addEventListener('tct:webview-zoom-out', handleZoomOut)
+    window.addEventListener('tct:webview-zoom-reset', handleZoomReset)
+
+    return () => {
+      window.removeEventListener('tct:webview-zoom-in', handleZoomIn)
+      window.removeEventListener('tct:webview-zoom-out', handleZoomOut)
+      window.removeEventListener('tct:webview-zoom-reset', handleZoomReset)
+    }
+  }, [isActive, tab.url, defaultZoom])
+
+  // Sync zoom changes from other tabs on same domain or from reset pill
+  useEffect(() => {
+    const handleZoomChanged = (e: any) => {
+      const el = webviewRef.current
+      if (!el || !tab.url) return
+      if (e?.detail?.zoom !== undefined) {
+        const currentDomain = extractDomain(tab.url)
+        if (e.detail.domain === currentDomain) {
+          try {
+            if (typeof el.setZoomFactor === 'function') {
+              el.setZoomFactor(e.detail.zoom / 100)
+            }
+          } catch {}
+        }
+      }
+    }
+    window.addEventListener('tct:domain-zoom-changed', handleZoomChanged)
+    return () => window.removeEventListener('tct:domain-zoom-changed', handleZoomChanged)
+  }, [tab.url])
 
   // Automatically focus active webview when switched so keyboard input goes directly to the tab
   useEffect(() => {
@@ -172,12 +267,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       setIsLoading(false)
       setHasError(false)
       syncTheme()
-      try {
-        const factor = (defaultZoom || 100) / 100
-        if (typeof el.setZoomFactor === 'function') {
-          el.setZoomFactor(factor)
-        }
-      } catch {}
+      applyDomainZoom()
       try {
         const currentUrl = el.getURL()
         const currentTitle = el.getTitle() || tab.title
@@ -197,6 +287,17 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
             title: currentTitle,
             favicon
           })
+
+          // Record to persistent browsing history
+          applyDomainZoom(currentUrl)
+          if (api.history?.recordVisit) {
+            api.history.recordVisit({
+              url: currentUrl,
+              title: currentTitle,
+              favicon,
+              spaceId
+            }).catch(() => {})
+          }
         }
       } catch (e) {
         console.error('Error on did-finish-load:', e)
@@ -257,6 +358,16 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
           url: navUrl,
           title: navTitle || tab.title
         })
+
+        applyDomainZoom(navUrl)
+        if (api.history?.recordVisit) {
+          api.history.recordVisit({
+            url: navUrl,
+            title: navTitle || tab.title,
+            favicon: tab.favicon,
+            spaceId
+          }).catch(() => {})
+        }
       }
     }
 
@@ -339,8 +450,37 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       window.dispatchEvent(new CustomEvent('tct:close-omnibox'))
     }
 
+    const handleFoundInPage = (e: any) => {
+      window.dispatchEvent(
+        new CustomEvent('tct:found-in-page', {
+          detail: {
+            tabId: tab.id,
+            activeMatchOrdinal: e.result?.activeMatchOrdinal || 0,
+            matches: e.result?.matches || 0
+          }
+        })
+      )
+    }
+
+    const handleMediaPlaying = () => {
+      useBrowserStore.getState().setTabAudible(tab.id, true)
+    }
+
+    const handleMediaPaused = () => {
+      setTimeout(() => {
+        if (el && typeof el.isCurrentlyAudible === 'function') {
+          useBrowserStore.getState().setTabAudible(tab.id, el.isCurrentlyAudible())
+        } else {
+          useBrowserStore.getState().setTabAudible(tab.id, false)
+        }
+      }, 300)
+    }
+
     el.addEventListener('dom-ready', handleDomReady)
     el.addEventListener('focus', handleWebviewFocus)
+    el.addEventListener('found-in-page', handleFoundInPage)
+    el.addEventListener('media-started-playing', handleMediaPlaying)
+    el.addEventListener('media-paused', handleMediaPaused)
     el.addEventListener('did-start-loading', handleStartLoading)
     el.addEventListener('did-stop-loading', handleStopLoading)
     el.addEventListener('did-finish-load', handleDidFinishLoad)
@@ -355,6 +495,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       unregisterWebviewRef(tab.id)
       el.removeEventListener('dom-ready', handleDomReady)
       el.removeEventListener('focus', handleWebviewFocus)
+      el.removeEventListener('found-in-page', handleFoundInPage)
+      el.removeEventListener('media-started-playing', handleMediaPlaying)
+      el.removeEventListener('media-paused', handleMediaPaused)
       el.removeEventListener('did-start-loading', handleStartLoading)
       el.removeEventListener('did-stop-loading', handleStopLoading)
       el.removeEventListener('did-finish-load', handleDidFinishLoad)
@@ -367,6 +510,24 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     }
   }, [tab.id, onUpdateTab, onOpenNewTab, registerWebviewRef, unregisterWebviewRef])
 
+  // Wake up sleeping tab when it becomes active
+  useEffect(() => {
+    if (isActive && tab.isSleeping) {
+      useBrowserStore.getState().setTabSleeping(tab.id, false)
+    }
+  }, [isActive, tab.isSleeping, tab.id])
+
+  // Free unreferenced DOM & JS memory when tab transitions to background
+  useEffect(() => {
+    if (!isActive) {
+      try {
+        if (webviewRef.current && typeof webviewRef.current.executeJavaScript === 'function') {
+          webviewRef.current.executeJavaScript('if (window.gc) window.gc();', true).catch(() => {})
+        }
+      } catch {}
+    }
+  }, [isActive])
+
   const handleRetry = () => {
     setHasError(false)
     if (webviewRef.current) {
@@ -376,20 +537,93 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
   return (
     <div
-      className="w-full h-full relative bg-background overflow-hidden flex flex-col"
-      style={{ display: isActive ? 'flex' : 'none' }}
+      className="bg-background overflow-hidden flex flex-col"
+      style={{
+        display: isActive ? 'flex' : 'none',
+        position: 'absolute',
+        inset: paneStyle ? undefined : 0,
+        ...paneStyle
+      }}
       onMouseDown={() => {
+        if (onFocusPane) onFocusPane()
         window.dispatchEvent(new CustomEvent('tct:close-omnibox'))
       }}
     >
-      <webview
-        ref={webviewRef}
-        src={initialUrlRef.current}
-        partition="persist:browser-tabs"
-        className="w-full h-full flex-1 bg-background border-none outline-none flex"
-        {...({ allowpopups: 'true' } as any)}
-        webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes, spellcheck=no"
-      />
+      {/* Split Pane Header Indicator */}
+      {splitRole && (
+        <div className="h-7 px-3 bg-muted/60 border-b border-border flex items-center justify-between text-xs shrink-0 select-none z-20">
+          <div className="flex items-center gap-2 truncate">
+            {tab.favicon ? (
+              <img src={tab.favicon} alt="" className="w-3.5 h-3.5 rounded-xs shrink-0" />
+            ) : (
+              <Globe className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+            )}
+            <span className="font-medium text-foreground truncate max-w-[200px]">
+              {tab.title || tab.url || 'Tab'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            {splitRole === 'secondary' && onSwapSplit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onSwapSplit()
+                }}
+                className="p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Swap Left / Right"
+              >
+                <ArrowLeftRight className="w-3 h-3" />
+              </button>
+            )}
+            {onCloseSplit && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCloseSplit()
+                }}
+                className="p-1 rounded-md hover:bg-destructive/20 hover:text-destructive text-muted-foreground transition-colors"
+                title="Close Split View"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* If tab is sleeping and inactive, unmount webview to completely destroy renderer RAM */}
+      {(!tab.isSleeping || isActive) && (
+        <webview
+          ref={webviewRef}
+          src={currentNavUrlRef.current || tab.url || initialUrlRef.current}
+          partition="persist:browser-tabs"
+          className="w-full h-full flex-1 bg-background border-none outline-none flex"
+          {...({ allowpopups: 'true' } as any)}
+          webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes, spellcheck=no"
+        />
+      )}
+
+      {/* Sleeping tab placeholder */}
+      {tab.isSleeping && isActive && (
+        <div className="absolute inset-0 bg-background/95 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center z-10 select-none">
+          <div className="w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center mb-4 ring-1 ring-primary/20">
+            <Moon className="w-7 h-7" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground mb-1">
+            Tab is Sleeping
+          </h3>
+          <p className="text-xs text-muted-foreground max-w-xs mb-4">
+            Hibernated to conserve memory. Click below to wake and restore.
+          </p>
+          <button
+            onClick={() => useBrowserStore.getState().setTabSleeping(tab.id, false)}
+            className="px-4 py-2 bg-primary text-primary-foreground text-xs font-semibold rounded-xl hover:bg-primary/90 transition-all shadow-sm flex items-center gap-2 cursor-pointer hover:scale-105 active:scale-95"
+          >
+            <Zap className="w-3.5 h-3.5" />
+            Wake Tab
+          </button>
+        </div>
+      )}
 
       {/* Loading bar */}
       {isLoading && (
@@ -440,15 +674,138 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const { settings } = useSettings()
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
 
+  // Split View Store Accessors
+  const splitTabId = useBrowserStore((s) => s.splitTabId)
+  const splitRatio = useBrowserStore((s) => s.splitRatio)
+  const setSplitRatio = useBrowserStore((s) => s.setSplitRatio)
+  const setSplitTabId = useBrowserStore((s) => s.setSplitTabId)
+  const closeSplitView = useBrowserStore((s) => s.closeSplitView)
+
   const resolvedTheme = useThemeStore((s) => s.resolved)
   const isDark = resolvedTheme === 'dark'
   const webviewsRef = useRef<Map<string, any>>(new Map())
+  const containerRef = useRef<HTMLDivElement>(null)
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
+  const [isDraggingSplit, setIsDraggingSplit] = useState(false)
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
+  const [matchesCount, setMatchesCount] = useState<{ activeMatchOrdinal: number; matches: number }>({
+    activeMatchOrdinal: 0,
+    matches: 0
+  })
 
-  // Whenever the theme changes (e.g. user toggles dark/light in Settings), synchronize all open webviews live seamlessly
+  // Split view dragging handler
+  const handleSplitterMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault()
+    setIsDraggingSplit(true)
+  }
+
+  useEffect(() => {
+    if (!isDraggingSplit) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      const container = containerRef.current
+      if (!container) return
+      const rect = container.getBoundingClientRect()
+      const newRatio = (e.clientX - rect.left) / rect.width
+      setSplitRatio(newRatio)
+    }
+
+    const handleMouseUp = () => {
+      setIsDraggingSplit(false)
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDraggingSplit, setSplitRatio])
+
+  // Global listeners for Reader Mode, PiP, and Split View shortcuts
+  useEffect(() => {
+    const handleToggleReader = async () => {
+      const store = useBrowserStore.getState()
+      if (store.readerMode.isOpen) {
+        store.closeReaderMode()
+        return
+      }
+      const el = store.activeTabId ? webviewsRef.current.get(store.activeTabId) : null
+      if (!el || typeof el.executeJavaScript !== 'function') return
+
+      try {
+        const res = await el.executeJavaScript(READABILITY_EXTRACTION_SCRIPT)
+        if (res && res.success && res.contentHtml) {
+          store.openReaderMode({
+            tabId: store.activeTabId!,
+            url: typeof el.getURL === 'function' ? el.getURL() : '',
+            title: res.title,
+            byline: res.byline,
+            contentHtml: res.contentHtml,
+            readingTime: res.readingTime
+          })
+        } else {
+          toast.info('No readable article found on this page.')
+        }
+      } catch (err) {
+        console.warn('[ReaderMode] Error extracting content:', err)
+        toast.error('Unable to parse article.')
+      }
+    }
+
+    const handleTogglePip = async () => {
+      const store = useBrowserStore.getState()
+      const el = store.activeTabId ? webviewsRef.current.get(store.activeTabId) : null
+      if (!el || typeof el.executeJavaScript !== 'function') return
+
+      try {
+        const res = await el.executeJavaScript(PICTURE_IN_PICTURE_SCRIPT)
+        if (res && res.success) {
+          toast.success(res.active ? 'Picture-in-Picture active' : 'Picture-in-Picture closed')
+        } else {
+          toast.info(res?.reason || 'No video found on this page.')
+        }
+      } catch (err) {
+        console.warn('[PiP] Error:', err)
+      }
+    }
+
+    const handleToggleSplit = (e: any) => {
+      const store = useBrowserStore.getState()
+      if (store.splitTabId) {
+        store.closeSplitView()
+        return
+      }
+      const targetTabId = e.detail?.targetTabId
+      if (targetTabId && targetTabId !== store.activeTabId) {
+        store.setSplitTabId(targetTabId)
+        return
+      }
+      const curTabs = store.activeSpaceId ? store.tabsBySpace[store.activeSpaceId] || [] : []
+      const other = curTabs.find((t) => t.id !== store.activeTabId)
+      if (other) {
+        store.setSplitTabId(other.id)
+        toast.info(`Split with "${other.title || 'Tab'}"`)
+      } else {
+        toast.info('Open another tab in this space to use Split View.')
+      }
+    }
+
+    window.addEventListener('tct:toggle-reader-mode', handleToggleReader)
+    window.addEventListener('tct:toggle-pip', handleTogglePip)
+    window.addEventListener('tct:toggle-split-view', handleToggleSplit as any)
+
+    return () => {
+      window.removeEventListener('tct:toggle-reader-mode', handleToggleReader)
+      window.removeEventListener('tct:toggle-pip', handleTogglePip)
+      window.removeEventListener('tct:toggle-split-view', handleToggleSplit as any)
+    }
+  }, [])
+
+  // Whenever the theme changes, synchronize all open webviews live seamlessly
   const prevIsDarkRef = useRef(isDark)
   useEffect(() => {
     const script = getThemeSyncScript(isDark)
@@ -574,7 +931,59 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }, [activeTabId])
 
-  // Listen to navigation and zoom events from top unified TitleBar and global shortcuts
+  const handlePrint = useCallback(() => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el) {
+      if (typeof el.print === 'function') {
+        el.print()
+      } else if (typeof el.getWebContentsId === 'function') {
+        const wcId = el.getWebContentsId()
+        api.webview?.print(wcId)
+      }
+    }
+  }, [activeTabId])
+
+  const handleFind = useCallback((text: string, options: any) => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.findInPage === 'function') {
+      el.findInPage(text, options)
+    }
+  }, [activeTabId])
+
+  const handleStopFind = useCallback((action: any) => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.stopFindInPage === 'function') {
+      el.stopFindInPage(action)
+    }
+    setMatchesCount({ activeMatchOrdinal: 0, matches: 0 })
+  }, [activeTabId])
+
+  const handleSavePdf = useCallback(async () => {
+    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
+    if (el && typeof el.getWebContentsId === 'function') {
+      const wcId = el.getWebContentsId()
+      try {
+        const res = await api.webview?.saveAsPdf(wcId)
+        if (res?.success && res.filePath) {
+          toast.success('Page saved as PDF', {
+            description: res.filePath,
+            action: {
+              label: 'Show in Folder',
+              onClick: () => {
+                api.downloads?.showInFolder(res.filePath!)
+              }
+            }
+          })
+        } else if (res?.error) {
+          toast.error(res.error)
+        }
+      } catch {
+        toast.error('Failed to export PDF')
+      }
+    }
+  }, [activeTabId])
+
+  // Listen to navigation, zoom, and print events from top unified TitleBar and global shortcuts
   useEffect(() => {
     const onBack = () => handleBack()
     const onForward = () => handleForward()
@@ -583,6 +992,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     const onZoomIn = () => handleZoomIn()
     const onZoomOut = () => handleZoomOut()
     const onZoomReset = () => handleZoomReset()
+    const onPrint = () => handlePrint()
+    const onSavePdf = () => handleSavePdf()
 
     const onNavigate = (e: any) => {
       const { tabId, url } = e.detail || {}
@@ -593,6 +1004,34 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       }
     }
 
+    const onToggleFind = () => {
+      const store = useBrowserStore.getState()
+      store.setFindBarOpen(!store.findBarOpen)
+    }
+
+    const onFoundInPage = (e: any) => {
+      const { tabId, activeMatchOrdinal, matches } = e.detail || {}
+      if (tabId === activeTabId) {
+        setMatchesCount({ activeMatchOrdinal, matches })
+      }
+    }
+
+    const onToggleMuteTab = (e: any) => {
+      const { tabId } = e.detail || {}
+      if (!tabId) return
+      const el = webviewsRef.current.get(tabId)
+      const currentTabs = spaceId ? useBrowserStore.getState().tabsBySpace[spaceId] || [] : []
+      const targetTab = currentTabs.find((t) => t.id === tabId)
+      if (el && targetTab) {
+        const nextMuted = !targetTab.isMuted
+        if (typeof el.setAudioMuted === 'function') {
+          el.setAudioMuted(nextMuted)
+        }
+        useBrowserStore.getState().setTabMuted(tabId, nextMuted)
+        toast.info(nextMuted ? `Muted "${targetTab.title || 'Tab'}"` : `Unmuted "${targetTab.title || 'Tab'}"`)
+      }
+    }
+
     window.addEventListener('tct:webview-back', onBack)
     window.addEventListener('tct:webview-forward', onForward)
     window.addEventListener('tct:webview-reload', onReload)
@@ -600,7 +1039,12 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     window.addEventListener('tct:webview-zoom-in', onZoomIn)
     window.addEventListener('tct:webview-zoom-out', onZoomOut)
     window.addEventListener('tct:webview-zoom-reset', onZoomReset)
+    window.addEventListener('tct:webview-print', onPrint)
+    window.addEventListener('tct:webview-save-pdf', onSavePdf)
     window.addEventListener('tct:webview-navigate', onNavigate)
+    window.addEventListener('tct:toggle-find', onToggleFind)
+    window.addEventListener('tct:found-in-page', onFoundInPage)
+    window.addEventListener('tct:toggle-mute-tab', onToggleMuteTab)
 
     return () => {
       window.removeEventListener('tct:webview-back', onBack)
@@ -610,9 +1054,43 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       window.removeEventListener('tct:webview-zoom-in', onZoomIn)
       window.removeEventListener('tct:webview-zoom-out', onZoomOut)
       window.removeEventListener('tct:webview-zoom-reset', onZoomReset)
+      window.removeEventListener('tct:webview-print', onPrint)
+      window.removeEventListener('tct:webview-save-pdf', onSavePdf)
       window.removeEventListener('tct:webview-navigate', onNavigate)
+      window.removeEventListener('tct:toggle-find', onToggleFind)
+      window.removeEventListener('tct:found-in-page', onFoundInPage)
+      window.removeEventListener('tct:toggle-mute-tab', onToggleMuteTab)
     }
-  }, [handleBack, handleForward, handleReload, handleHardReload, handleZoomIn, handleZoomOut, handleZoomReset])
+  }, [handleBack, handleForward, handleReload, handleHardReload, handleZoomIn, handleZoomOut, handleZoomReset, handlePrint, handleSavePdf])
+
+  // Memory Saver: hibernate inactive background tabs after 30 minutes
+  useEffect(() => {
+    const memorySaverEnabled = settings?.memorySaverEnabled ?? true
+    if (!memorySaverEnabled || !spaceId) return
+
+    const interval = setInterval(() => {
+      const store = useBrowserStore.getState()
+      const currentTabs = store.tabsBySpace[spaceId] || []
+      const timeoutMs = (settings?.sleepTimeoutMinutes || 30) * 60 * 1000
+      const now = Date.now()
+
+      currentTabs.forEach((t) => {
+        if (
+          t.id !== store.activeTabId &&
+          !t.isPinned &&
+          !t.isAudible &&
+          !t.isSleeping
+        ) {
+          const lastVisitedTime = new Date(t.lastVisited || t.createdAt).getTime()
+          if (now - lastVisitedTime > timeoutMs) {
+            store.setTabSleeping(t.id, true)
+          }
+        }
+      })
+    }, 60000)
+
+    return () => clearInterval(interval)
+  }, [spaceId, settings?.memorySaverEnabled, settings?.sleepTimeoutMinutes])
 
   const lastOpenedUrlRef = useRef<{ url: string; time: number }>({ url: '', time: 0 })
 
@@ -644,9 +1122,15 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }
 
-  return (
-    <div className="flex-1 relative w-full h-full overflow-hidden bg-background">
-      {tabs.length === 0 ? (
+    const isSplitActive = Boolean(
+      splitTabId &&
+      splitTabId !== activeTabId &&
+      tabs.some((t) => t.id === splitTabId)
+    )
+
+    return (
+      <div ref={containerRef} className="flex-1 relative w-full h-full overflow-hidden bg-background">
+        {tabs.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none bg-background">
             <div className="w-12 h-12 rounded-2xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground mb-3">
               <Globe className="w-6 h-6" />
@@ -663,21 +1147,99 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
             </button>
           </div>
         ) : (
-          tabs.map((tab) => (
-            <SingleWebView
-              key={tab.id}
-              tab={tab}
-              isActive={tab.id === activeTabId}
-              isDark={isDark}
-              defaultZoom={settings?.defaultZoom || 100}
-              spaceId={spaceId || tab.spaceId}
-              onUpdateTab={updateTab}
-              onOpenNewTab={handleNewTabFromUrl}
-              registerWebviewRef={registerWebviewRef}
-              unregisterWebviewRef={unregisterWebviewRef}
-            />
-          ))
+          tabs.map((tab) => {
+            const isPrimary = tab.id === activeTabId
+            const isSecondary = isSplitActive && tab.id === splitTabId
+            const isPaneActive = isPrimary || isSecondary
+
+            let paneStyle: React.CSSProperties | undefined
+            let splitRole: 'primary' | 'secondary' | null = null
+
+            if (isSplitActive) {
+              if (isPrimary) {
+                splitRole = 'primary'
+                paneStyle = {
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: `calc(${splitRatio * 100}% - 3px)`,
+                  borderRight: '1px solid var(--border)'
+                }
+              } else if (isSecondary) {
+                splitRole = 'secondary'
+                paneStyle = {
+                  left: `calc(${splitRatio * 100}% + 3px)`,
+                  top: 0,
+                  bottom: 0,
+                  width: `calc(${(1 - splitRatio) * 100}% - 3px)`
+                }
+              }
+            }
+
+            return (
+              <SingleWebView
+                key={tab.id}
+                tab={tab}
+                isActive={isPaneActive}
+                isDark={isDark}
+                defaultZoom={settings?.defaultZoom || 100}
+                spaceId={spaceId || tab.spaceId}
+                paneStyle={paneStyle}
+                splitRole={splitRole}
+                onUpdateTab={updateTab}
+                onOpenNewTab={handleNewTabFromUrl}
+                registerWebviewRef={registerWebviewRef}
+                unregisterWebviewRef={unregisterWebviewRef}
+                onCloseSplit={closeSplitView}
+                onSwapSplit={() => {
+                  if (splitTabId) {
+                    const oldActive = activeTabId
+                    setActiveTab(splitTabId)
+                    setSplitTabId(oldActive)
+                  }
+                }}
+                onFocusPane={() => {
+                  if (splitRole === 'secondary' && splitTabId) {
+                    useBrowserStore.getState().setSplitActivePane('secondary')
+                  } else {
+                    useBrowserStore.getState().setSplitActivePane('primary')
+                  }
+                }}
+              />
+            )
+          })
         )}
-    </div>
-  )
+
+        {/* Resizable Draggable Splitter Bar */}
+        {isSplitActive && (
+          <div
+            onMouseDown={handleSplitterMouseDown}
+            onDoubleClick={() => setSplitRatio(0.5)}
+            style={{
+              left: `calc(${splitRatio * 100}% - 3px)`,
+              width: '6px'
+            }}
+            className="absolute top-0 bottom-0 z-30 cursor-col-resize hover:bg-primary/50 transition-colors select-none group flex items-center justify-center"
+            title="Drag to resize, double-click to reset (50/50)"
+          >
+            <div className="w-[2px] h-8 rounded-full bg-border group-hover:bg-primary transition-colors" />
+          </div>
+        )}
+
+        {/* Overlay while dragging splitter to keep mouse tracking over webviews */}
+        {isDraggingSplit && (
+          <div className="fixed inset-0 z-50 cursor-col-resize select-none" />
+        )}
+
+        {/* In-Page Search Bar (Ctrl+F) */}
+        <FindInPageBar
+          onFind={handleFind}
+          onStop={handleStopFind}
+          matchesCount={matchesCount}
+        />
+
+        {/* Reader Mode Full-Surface Distraction-Free Overlay */}
+        <ReaderModeOverlay />
+      </div>
+    )
 }

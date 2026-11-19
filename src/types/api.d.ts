@@ -26,6 +26,9 @@ export interface Tab {
   order: number;
   lastVisited: string | Date;
   createdAt: string | Date;
+  isAudible?: boolean;
+  isMuted?: boolean;
+  isSleeping?: boolean;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -66,6 +69,10 @@ export interface Settings {
   openFolderOnDownload?: boolean;
   defaultZoom?: number;
   autoArchiveDuration?: AutoArchiveDuration;
+  memorySaverEnabled?: boolean;
+  sleepTimeoutMinutes?: number;
+  memorySaverEnabled?: boolean;
+  sleepTimeoutMinutes?: number;
   updatedAt: string | Date;
 }
 
@@ -119,6 +126,8 @@ export interface UpdateSettingsData {
   openFolderOnDownload?: boolean;
   defaultZoom?: number;
   autoArchiveDuration?: AutoArchiveDuration;
+  memorySaverEnabled?: boolean;
+  sleepTimeoutMinutes?: number;
 }
 
 export type ReleaseChannel = 'stable' | 'nova' | 'deep' | 'canary';
@@ -223,7 +232,19 @@ export interface DownloadCompleted {
   totalBytes: number;
 }
 
-export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy';
+export interface DownloadRecord {
+  id: string;
+  filename: string;
+  savePath: string;
+  totalBytes: number;
+  receivedBytes: number;
+  state: 'progressing' | 'completed' | 'cancelled' | 'interrupted';
+  startTime: string;
+  endTime?: string;
+  url?: string;
+}
+
+export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy' | 'history';
 
 export interface ExportBackupOptions {
   categories?: BackupCategory[];
@@ -240,6 +261,7 @@ export interface ExportBackupResult {
     spaces: number;
     tabs: number;
     pinnedTabs: number;
+    history?: number;
     hasSettings: boolean;
     hasPrivacy: boolean;
   };
@@ -254,6 +276,7 @@ export interface BackupInspectionResult {
   spacesCount: number;
   tabsCount: number;
   pinnedCount: number;
+  historyCount?: number;
   hasSettings: boolean;
   hasPrivacy: boolean;
   categories: string[];
@@ -273,9 +296,107 @@ export interface ImportBackupResult {
   importedCounts: {
     spaces: number;
     tabs: number;
+    history?: number;
     settingsUpdated: boolean;
     privacyUpdated: boolean;
   };
+}
+
+export interface HistoryEntry {
+  id: string;
+  url: string;
+  title: string;
+  favicon?: string | null;
+  visitedAt: string;
+  visitCount: number;
+  spaceId?: string;
+}
+
+export interface RecordVisitData {
+  url: string;
+  title?: string;
+  favicon?: string | null;
+  spaceId?: string;
+}
+
+export interface HistoryFilterOptions {
+  query?: string;
+  spaceId?: string;
+  limit?: number;
+  offset?: number;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface HistoryListResult {
+  entries: HistoryEntry[];
+  total: number;
+}
+
+export type HistoryClearRange = 'last-hour' | 'today' | 'last-7-days' | 'all';
+
+export interface SpaceNote {
+  spaceId: string;
+  content: string;
+  updatedAt: string;
+}
+
+export interface BookmarkItem {
+  id: string;
+  url: string;
+  title: string;
+  favicon?: string | null;
+  spaceId?: string;
+  folder?: string;
+  isReadingList?: boolean;
+  isRead?: boolean;
+  createdAt: string;
+}
+
+export interface AddBookmarkData {
+  url: string;
+  title: string;
+  favicon?: string | null;
+  spaceId?: string;
+  folder?: string;
+  isReadingList?: boolean;
+}
+
+export interface SiteInfoResult {
+  origin: string;
+  protocol: string;
+  isSecure: boolean;
+  cookiesCount: number;
+  hasStorage: boolean;
+  certificate?: {
+    issuerName?: string;
+    validFrom?: string;
+    validTo?: string;
+    subjectName?: string;
+  };
+}
+
+export interface ClearSiteDataResult {
+  success: boolean;
+  origin: string;
+}
+
+export interface ProcessMetricInfo {
+  pid: number;
+  type: string;
+  cpuPercent: number;
+  memoryMB: number;
+  title?: string;
+  url?: string;
+  webContentsId?: number;
+  isTab?: boolean;
+}
+
+export interface SystemMetricsResult {
+  processes: ProcessMetricInfo[];
+  totalAppMemoryMB: number;
+  systemFreeMemoryMB: number;
+  systemTotalMemoryMB: number;
 }
 
 export interface ElectronAPI {
@@ -316,6 +437,9 @@ export interface ElectronAPI {
     close: () => Promise<void>;
     isMaximized: () => Promise<boolean>;
     setTitle?: (title: string) => Promise<void>;
+    toggleFullScreen?: () => Promise<boolean>;
+    isFullScreen?: () => Promise<boolean>;
+    setFullScreen?: (flag: boolean) => Promise<boolean>;
   };
   navigation: {
     openExternal: (url: string) => Promise<void>;
@@ -333,6 +457,8 @@ export interface ElectronAPI {
   webview: {
     call: (webContentsId: number, method: string, ...args: any[]) => Promise<any>;
     saveAs: (webContentsId: number) => Promise<boolean>;
+    saveAsPdf: (webContentsId: number) => Promise<{ success: boolean; filePath?: string; canceled?: boolean; error?: string }>;
+    print: (webContentsId: number) => Promise<any>;
     captureScreenshot: (webContentsId: number) => Promise<boolean>;
   };
   contextMenu: {
@@ -359,14 +485,49 @@ export interface ElectronAPI {
     getDefaultPath: () => Promise<string>;
     openFolder: (dirPath?: string) => Promise<boolean>;
     showInFolder: (filePath: string) => Promise<boolean>;
+    openFile: (filePath: string) => Promise<boolean>;
+    deleteFile: (id: string, filePath?: string) => Promise<boolean>;
+    list: () => Promise<DownloadRecord[]>;
+    clear: () => Promise<boolean>;
+    onStarted?: (callback: (data: DownloadCompleted) => void) => () => void;
     onProgress?: (callback: (data: DownloadProgress) => void) => () => void;
     onCompleted?: (callback: (data: DownloadCompleted) => void) => () => void;
+    onFailed?: (callback: (data: { id: string; filename: string; reason: string }) => void) => () => void;
   };
   backup: {
     exportData: (options: ExportBackupOptions) => Promise<ExportBackupResult>;
     selectAndInspectFile: () => Promise<BackupInspectionResult | null>;
     inspectJsonString: (content: string) => Promise<BackupInspectionResult>;
     importData: (options: ImportBackupOptions) => Promise<ImportBackupResult>;
+  };
+  history: {
+    recordVisit: (data: RecordVisitData) => Promise<HistoryEntry | null>;
+    getHistory: (options?: HistoryFilterOptions) => Promise<HistoryListResult>;
+    searchHistory: (query: string, limit?: number) => Promise<HistoryEntry[]>;
+    deleteItem: (id: string) => Promise<boolean>;
+    deleteByUrl: (url: string) => Promise<boolean>;
+    clearHistory: (range?: HistoryClearRange) => Promise<boolean>;
+  };
+  notes: {
+    get: (spaceId: string) => Promise<string>;
+    save: (spaceId: string, content: string) => Promise<boolean>;
+  };
+  bookmarks: {
+    list: () => Promise<BookmarkItem[]>;
+    add: (data: AddBookmarkData) => Promise<BookmarkItem>;
+    delete: (id: string) => Promise<boolean>;
+    deleteByUrl: (url: string) => Promise<boolean>;
+    toggleRead: (id: string) => Promise<boolean>;
+    isBookmarked: (url: string) => Promise<boolean>;
+  };
+  site: {
+    getInfo: (url: string) => Promise<SiteInfoResult>;
+    clearData: (origin: string) => Promise<ClearSiteDataResult>;
+  };
+  system?: {
+    getProcessMetrics: () => Promise<SystemMetricsResult>;
+    killProcess: (data: { pid?: number; webContentsId?: number }) => Promise<boolean>;
+    trimMemory: () => Promise<boolean>;
   };
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;

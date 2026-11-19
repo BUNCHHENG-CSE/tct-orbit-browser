@@ -1,10 +1,26 @@
-import { app, shell, dialog, clipboard, webContents, type IpcMain, type BrowserWindow, type Rectangle } from 'electron'
+import {
+  app,
+  shell,
+  dialog,
+  clipboard,
+  webContents,
+  session,
+  type IpcMain,
+  type BrowserWindow,
+  type Rectangle
+} from 'electron'
+import fs from 'fs'
+import os from 'os'
 import { register as registerTabs } from './tabs'
 import { register as registerSpaces } from './spaces'
 import { register as registerSettings } from './settings'
 import { register as registerPrivacy } from './privacy'
 import { register as registerDownloads } from './downloads'
 import { register as registerBackup } from './backup'
+import { register as registerHistory } from './history'
+import { register as registerNotes } from './notes'
+import { register as registerBookmarks } from './bookmarks'
+import { register as registerSite } from './site'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
@@ -21,6 +37,10 @@ export function registerAllIpc(
   registerPrivacy(ipcMain)
   registerDownloads(ipcMain, getMainWindow)
   registerBackup(ipcMain, getMainWindow)
+  registerHistory(ipcMain)
+  registerNotes(ipcMain)
+  registerBookmarks(ipcMain)
+  registerSite(ipcMain)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning
@@ -73,6 +93,144 @@ export function registerAllIpc(
     const win = getMainWindow()
     if (win && !win.isDestroyed() && typeof title === 'string') {
       win.setTitle(title)
+    }
+  })
+
+  secureHandle(ipcMain, 'window:toggleFullScreen', null, () => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed()) {
+      const isFull = win.isFullScreen()
+      win.setFullScreen(!isFull)
+      return !isFull
+    }
+    return false
+  })
+
+  secureHandle(ipcMain, 'window:isFullScreen', null, () => {
+    const win = getMainWindow()
+    return win && !win.isDestroyed() ? win.isFullScreen() : false
+  })
+
+  secureHandle(ipcMain, 'window:setFullScreen', Schemas.windowSetFullScreen, (_, flag: boolean) => {
+    const win = getMainWindow()
+    if (win && !win.isDestroyed()) {
+      win.setFullScreen(flag)
+      return flag
+    }
+    return false
+  })
+
+  // System & Task Manager Process Metrics
+  secureHandle(ipcMain, 'system:get-process-metrics', null, async () => {
+    const rawMetrics = app.getAppMetrics()
+    const allWcs = webContents.getAllWebContents()
+    const wcByPid = new Map<number, { id: number; title: string; url: string; type: string }>()
+
+    for (const wc of allWcs) {
+      if (!wc.isDestroyed()) {
+        try {
+          const pid = wc.getOSProcessId()
+          wcByPid.set(pid, {
+            id: wc.id,
+            title: wc.getTitle() || 'Untitled Tab',
+            url: wc.getURL() || '',
+            type: wc.getType()
+          })
+        } catch {}
+      }
+    }
+
+    let totalAppMemoryKB = 0
+
+    const processes = rawMetrics.map((metric) => {
+      const workingSetKB = metric.memory.workingSetSize || 0
+      totalAppMemoryKB += workingSetKB
+      const memoryMB = Math.round((workingSetKB / 1024) * 10) / 10
+      const cpuPercent = Math.round((metric.cpu.percentCPUUsage || 0) * 10) / 10
+
+      const wcInfo = wcByPid.get(metric.pid)
+      const isTab = metric.type === 'Tab' || (wcInfo && wcInfo.type === 'webview')
+
+      return {
+        pid: metric.pid,
+        type: metric.type,
+        cpuPercent,
+        memoryMB,
+        title: wcInfo?.title,
+        url: wcInfo?.url,
+        webContentsId: wcInfo?.id,
+        isTab: !!isTab
+      }
+    })
+
+    const totalMemBytes = os.totalmem()
+    const freeMemBytes = os.freemem()
+
+    return {
+      processes,
+      totalAppMemoryMB: Math.round((totalAppMemoryKB / 1024) * 10) / 10,
+      systemFreeMemoryMB: Math.round((freeMemBytes / (1024 * 1024)) * 10) / 10,
+      systemTotalMemoryMB: Math.round((totalMemBytes / (1024 * 1024)) * 10) / 10
+    }
+  })
+
+  secureHandle(ipcMain, 'system:kill-process', Schemas.processKill, async (_, { pid, webContentsId }: { pid?: number; webContentsId?: number }) => {
+    try {
+      if (webContentsId) {
+        const wc = webContents.fromId(webContentsId)
+        if (wc && !wc.isDestroyed()) {
+          wc.forcefullyCrashRenderer()
+          return true
+        }
+      }
+      if (pid) {
+        const allWcs = webContents.getAllWebContents()
+        for (const wc of allWcs) {
+          if (!wc.isDestroyed() && wc.getOSProcessId() === pid) {
+            wc.forcefullyCrashRenderer()
+            return true
+          }
+        }
+        if (pid !== process.pid) {
+          process.kill(pid)
+          return true
+        }
+      }
+    } catch (err) {
+      console.error('[IPC system:kill-process] Error killing process:', err)
+    }
+    return false
+  })
+
+  // Purge caches and force V8 garbage collection
+  secureHandle(ipcMain, 'system:trim-memory', null, async () => {
+    try {
+      await session.defaultSession.clearCache()
+      session.defaultSession.clearHostResolverCache()
+
+      const tabSession = session.fromPartition('persist:browser-tabs')
+      await tabSession.clearCache()
+      tabSession.clearHostResolverCache()
+
+      const allWcs = webContents.getAllWebContents()
+      for (const wc of allWcs) {
+        if (!wc.isDestroyed()) {
+          try {
+            wc.executeJavaScript('if (window.gc) window.gc();', true).catch(() => {})
+          } catch {}
+        }
+      }
+
+      if (typeof (global as any).gc === 'function') {
+        try {
+          ;(global as any).gc()
+        } catch {}
+      }
+
+      return true
+    } catch (err) {
+      console.error('[IPC system:trim-memory] Error trimming memory:', err)
+      return false
     }
   })
 
@@ -130,7 +288,6 @@ export function registerAllIpc(
       const wc = webContents.fromId(webContentsId)
       if (!wc || wc.isDestroyed()) return false
 
-      // Guard: only allow calling on webview contexts, never UI window or external frames
       if (wc.getType() !== 'webview') {
         console.warn(`[Security] Rejected webview:call on non-webview contents id ${webContentsId}`)
         return false
@@ -171,6 +328,38 @@ export function registerAllIpc(
       }
     }
     return false
+  })
+
+  // Save webpage as PDF
+  secureHandle(ipcMain, 'page:save-pdf', Schemas.webContentsTarget, async (_, { webContentsId }: { webContentsId: number }) => {
+    const wc = webContents.fromId(webContentsId)
+    const win = getMainWindow()
+    if (wc && win && !wc.isDestroyed() && !win.isDestroyed()) {
+      try {
+        const title = (wc.getTitle() || 'document').replace(/[/\\?%*:|"<>]/g, '_')
+        const res = await dialog.showSaveDialog(win, {
+          title: 'Save Page as PDF',
+          defaultPath: `${title}.pdf`,
+          filters: [
+            { name: 'PDF Document', extensions: ['pdf'] },
+            { name: 'All Files', extensions: ['*'] }
+          ]
+        })
+        if (!res.canceled && res.filePath) {
+          const pdfBuffer = await wc.printToPDF({
+            printBackground: true,
+            preferCSSPageSize: true
+          })
+          await fs.promises.writeFile(res.filePath, pdfBuffer)
+          return { success: true, filePath: res.filePath }
+        }
+        return { success: false, canceled: true }
+      } catch (err: any) {
+        console.error('[IPC page:save-pdf] Error exporting PDF:', err)
+        return { success: false, error: err?.message || 'Failed to generate PDF' }
+      }
+    }
+    return { success: false, error: 'WebContents or window unavailable' }
   })
 
   // Capture screenshot of webContents and write to clipboard

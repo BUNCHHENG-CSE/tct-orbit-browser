@@ -29,6 +29,10 @@ import {
 import { resolveIsDark } from '@/lib/theme'
 import browserLogo from '@/assets/logo-sm.png'
 import { SiteShieldPopover } from './SiteShieldPopover'
+import { SiteInfoPopover } from './SiteInfoPopover'
+import { BookmarkPopover } from './BookmarkPopover'
+import { ToolsMenu } from './ToolsMenu'
+import { getDomainZoom, setDomainZoom } from '@/lib/domainZoom'
 
 interface TitleBarProps {
   spaceName?: string
@@ -55,8 +59,35 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   // Edge-style inline omnibox state
   const [inputValue, setInputValue] = useState('')
   const [isFocused, setIsFocused] = useState(false)
+  const [hasActiveDownload, setHasActiveDownload] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // Track active downloads for badge pulse in titlebar
+  useEffect(() => {
+    const unsubs: (() => void)[] = []
+    if (api.downloads?.onStarted) {
+      unsubs.push(api.downloads.onStarted(() => setHasActiveDownload(true)))
+    }
+    if (api.downloads?.onCompleted) {
+      unsubs.push(api.downloads.onCompleted(() => {
+        // Check if other downloads still active
+        api.downloads?.list().then((list) => {
+          setHasActiveDownload(list?.some((d) => d.state === 'progressing') ?? false)
+        }).catch(() => setHasActiveDownload(false))
+      }))
+    }
+    if (api.downloads?.onFailed) {
+      unsubs.push(api.downloads.onFailed(() => {
+        api.downloads?.list().then((list) => {
+          setHasActiveDownload(list?.some((d) => d.state === 'progressing') ?? false)
+        }).catch(() => setHasActiveDownload(false))
+      }))
+    }
+    return () => {
+      unsubs.forEach((u) => u())
+    }
+  }, [])
 
   // Keep input synchronized with active tab URL when not editing
   useEffect(() => {
@@ -64,6 +95,26 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       setInputValue(activeTab?.url || '')
     }
   }, [activeTab?.url, isFocused])
+
+  // Persistent domain zoom state & sync
+  const [currentZoom, setCurrentZoom] = useState(100)
+  useEffect(() => {
+    setCurrentZoom(getDomainZoom(activeTab?.url, 100))
+    const handleZoomChanged = (e: any) => {
+      if (e?.detail?.zoom !== undefined) {
+        setCurrentZoom(e.detail.zoom)
+      }
+    }
+    window.addEventListener('tct:domain-zoom-changed', handleZoomChanged)
+    return () => window.removeEventListener('tct:domain-zoom-changed', handleZoomChanged)
+  }, [activeTab?.url])
+
+  const handleResetZoom = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    window.dispatchEvent(new CustomEvent('tct:webview-zoom-reset'))
+    setDomainZoom(activeTab?.url, 100)
+    setCurrentZoom(100)
+  }
 
   // Window maximized polling
   useEffect(() => {
@@ -313,18 +364,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           }`}
         >
           {/* Security / Search Icon on the left */}
-          <div
-            className="shrink-0 flex items-center mr-2 cursor-pointer"
-            title={isSecure ? 'Connection is secure' : 'Site information'}
-          >
-            {isFocused ? (
+          {isFocused ? (
+            <div className="shrink-0 flex items-center mr-2">
               <Search className="w-3.5 h-3.5 text-primary" />
-            ) : isSecure ? (
-              <Lock className="w-3.5 h-3.5 text-emerald-500" />
-            ) : (
-              <Globe className="w-3.5 h-3.5 text-muted-foreground" />
-            )}
-          </div>
+            </div>
+          ) : (
+            <SiteInfoPopover url={activeTab?.url} />
+          )}
 
           {/* Interactive Native Omnibox Input */}
           <input
@@ -366,8 +412,29 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             </button>
           )}
 
+          {/* Per-Domain Zoom Reset Pill */}
+          {!isFocused && currentZoom !== 100 && (
+            <button
+              onClick={handleResetZoom}
+              title="Click to reset zoom to 100% (Ctrl+0)"
+              className="px-2 py-0.5 rounded-full bg-primary/10 hover:bg-primary/25 text-primary border border-primary/30 text-[11px] font-mono font-bold flex items-center gap-1 transition-all mr-1"
+            >
+              <span>{currentZoom}%</span>
+              <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+
           {/* Per-site Privacy & Adblock Shield Control */}
           {!isFocused && <SiteShieldPopover url={activeTab?.url} />}
+
+          {/* Bookmark Tab Control */}
+          {!isFocused && (
+            <BookmarkPopover
+              url={activeTab?.url}
+              title={activeTab?.title}
+              favicon={activeTab?.favicon}
+            />
+          )}
 
           {/* Search Engine Badge when showing search query */}
           {!isFocused && urlInfo.isSearch && urlInfo.searchEngineName && (
@@ -423,15 +490,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         )}
       </div>
 
-      {/* Right: New Tab (+) & Window Controls for Windows/Linux */}
+      {/* Right: Actions (Add New Tab, Tools Dropdown Menu) & Window Controls */}
       <div className="flex items-center gap-1 app-no-drag shrink-0">
         <button
           onClick={handleNewTab}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
           title={`New Tab (${modKey}+T)`}
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
+
+        <ToolsMenu hasActiveDownload={hasActiveDownload} />
 
         {!isMac && (
           <div className="flex items-center gap-0.5 pl-1">

@@ -313,7 +313,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setIsCheckingUpdates(true)
     setTimeout(() => {
       setIsCheckingUpdates(false)
-      toast.success(`TCT Orbit is up to date! (v${appInfo?.version || '0.1.1'})`)
+      toast.success(`TCT Orbit is up to date! (v${appInfo?.version || '0.1.2'})`)
     }, 900)
   }
 
@@ -1714,7 +1714,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           {appInfo?.name || 'TCT Orbit'}
                         </h3>
                         <p className="text-xs text-muted-foreground">
-                          Version {appInfo?.version || '0.1.1'} ({getPlatformDescription()})
+                          Version {appInfo?.version || '0.1.2'} ({getPlatformDescription()})
                         </p>
                       </div>
                     </div>

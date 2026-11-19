@@ -13,13 +13,16 @@ import type {
   PrivacyStats,
   MasterShieldStatus,
   ExportBackupOptions,
-  ImportBackupOptions
+  ImportBackupOptions,
+  RecordVisitData,
+  HistoryFilterOptions,
+  HistoryClearRange
 } from '../src/types/api'
 
 // Initialize app info synchronously on startup
 let initialAppInfo: AppInfo = {
   name: 'TCT Orbit',
-  version: '0.1.1',
+  version: '0.1.2',
   channel: 'stable'
 }
 
@@ -88,7 +91,10 @@ const hardenedApi: ElectronAPI = {
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
-    setTitle: (title: string) => ipcRenderer.invoke('window:setTitle', title)
+    setTitle: (title: string) => ipcRenderer.invoke('window:setTitle', title),
+    toggleFullScreen: () => ipcRenderer.invoke('window:toggleFullScreen'),
+    isFullScreen: () => ipcRenderer.invoke('window:isFullScreen'),
+    setFullScreen: (flag: boolean) => ipcRenderer.invoke('window:setFullScreen', flag)
   },
 
   navigation: {
@@ -120,6 +126,9 @@ const hardenedApi: ElectronAPI = {
     call: (webContentsId: number, method: string, ...args: any[]) =>
       ipcRenderer.invoke('webview:call', { webContentsId, method, args }),
     saveAs: (webContentsId: number) => ipcRenderer.invoke('page:save-as', { webContentsId }),
+    saveAsPdf: (webContentsId: number) => ipcRenderer.invoke('page:save-pdf', { webContentsId }),
+    print: (webContentsId: number) =>
+      ipcRenderer.invoke('webview:call', { webContentsId, method: 'print', args: [{ silent: false, printBackground: true }] }),
     captureScreenshot: (webContentsId: number) =>
       ipcRenderer.invoke('page:capture-screenshot', { webContentsId })
   },
@@ -182,6 +191,17 @@ const hardenedApi: ElectronAPI = {
     getDefaultPath: () => ipcRenderer.invoke('downloads:get-default-path'),
     openFolder: (dirPath?: string) => ipcRenderer.invoke('downloads:open-folder', dirPath),
     showInFolder: (filePath: string) => ipcRenderer.invoke('downloads:show-in-folder', filePath),
+    openFile: (filePath: string) => ipcRenderer.invoke('downloads:open-file', filePath),
+    deleteFile: (id: string, filePath?: string) => ipcRenderer.invoke('downloads:delete-file', { id, deleteDiskFile: Boolean(filePath) }),
+    list: () => ipcRenderer.invoke('downloads:list'),
+    clear: () => ipcRenderer.invoke('downloads:clear'),
+    onStarted: (callback: (data: any) => void) => {
+      const handler = (_: unknown, data: any) => callback(data)
+      ipcRenderer.on('downloads:started', handler)
+      return () => {
+        ipcRenderer.removeListener('downloads:started', handler)
+      }
+    },
     onProgress: (callback: (data: any) => void) => {
       const handler = (_: unknown, data: any) => callback(data)
       ipcRenderer.on('downloads:progress', handler)
@@ -195,6 +215,13 @@ const hardenedApi: ElectronAPI = {
       return () => {
         ipcRenderer.removeListener('downloads:completed', handler)
       }
+    },
+    onFailed: (callback: (data: any) => void) => {
+      const handler = (_: unknown, data: any) => callback(data)
+      ipcRenderer.on('downloads:failed', handler)
+      return () => {
+        ipcRenderer.removeListener('downloads:failed', handler)
+      }
     }
   },
 
@@ -203,6 +230,40 @@ const hardenedApi: ElectronAPI = {
     selectAndInspectFile: () => ipcRenderer.invoke('backup:select-file'),
     inspectJsonString: (content: string) => ipcRenderer.invoke('backup:inspect-json', content),
     importData: (options: ImportBackupOptions) => ipcRenderer.invoke('backup:import', options)
+  },
+
+  history: {
+    recordVisit: (data: RecordVisitData) => ipcRenderer.invoke('history:record', data),
+    getHistory: (options?: HistoryFilterOptions) => ipcRenderer.invoke('history:get', options),
+    searchHistory: (query: string, limit?: number) => ipcRenderer.invoke('history:search', { query, limit }),
+    deleteItem: (id: string) => ipcRenderer.invoke('history:delete', id),
+    deleteByUrl: (url: string) => ipcRenderer.invoke('history:deleteByUrl', url),
+    clearHistory: (range?: HistoryClearRange) => ipcRenderer.invoke('history:clear', range)
+  },
+
+  notes: {
+    get: (spaceId: string) => ipcRenderer.invoke('notes:get', spaceId),
+    save: (spaceId: string, content: string) => ipcRenderer.invoke('notes:save', { spaceId, content })
+  },
+
+  bookmarks: {
+    list: () => ipcRenderer.invoke('bookmarks:list'),
+    add: (data: any) => ipcRenderer.invoke('bookmarks:add', data),
+    delete: (id: string) => ipcRenderer.invoke('bookmarks:delete', id),
+    deleteByUrl: (url: string) => ipcRenderer.invoke('bookmarks:delete-by-url', url),
+    toggleRead: (id: string) => ipcRenderer.invoke('bookmarks:toggle-read', id),
+    isBookmarked: (url: string) => ipcRenderer.invoke('bookmarks:is-bookmarked', url)
+  },
+
+  site: {
+    getInfo: (url: string) => ipcRenderer.invoke('site:get-info', url),
+    clearData: (origin: string) => ipcRenderer.invoke('site:clear-data', origin)
+  },
+
+  system: {
+    getProcessMetrics: () => ipcRenderer.invoke('system:get-process-metrics'),
+    killProcess: (data: { pid?: number; webContentsId?: number }) => ipcRenderer.invoke('system:kill-process', data),
+    trimMemory: () => ipcRenderer.invoke('system:trim-memory')
   },
 
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => {

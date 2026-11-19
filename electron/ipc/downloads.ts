@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { secureHandle, Schemas } from '../security'
 import { localStorageService } from '../storage/localStorage'
+import { downloadsService } from '../storage/downloadsService'
 
 /**
  * Generates a unique, non-colliding file path if a file with the same name exists.
@@ -61,6 +62,17 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
       }
 
       // Notify renderer that a download has initiated
+      downloadsService.addOrUpdate({
+        id: downloadId,
+        filename: item.getFilename(),
+        totalBytes: item.getTotalBytes(),
+        receivedBytes: 0,
+        savePath: item.getSavePath(),
+        state: 'progressing',
+        startTime: new Date().toISOString(),
+        url: item.getURL ? item.getURL() : undefined
+      })
+
       if (win && !win.isDestroyed()) {
         win.webContents.send('downloads:started', {
           id: downloadId,
@@ -72,20 +84,30 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
 
       // Track progress
       item.on('updated', (_updateEvent, state) => {
-        if (state === 'progressing' && win && !win.isDestroyed()) {
+        if (state === 'progressing') {
           const total = item.getTotalBytes()
           const received = item.getReceivedBytes()
           const progress = total > 0 ? Math.round((received / total) * 100) : 0
 
-          win.webContents.send('downloads:progress', {
+          downloadsService.addOrUpdate({
             id: downloadId,
-            filename: item.getFilename(),
             receivedBytes: received,
             totalBytes: total,
-            progress,
             state: 'progressing',
             savePath: item.getSavePath()
           })
+
+          if (win && !win.isDestroyed()) {
+            win.webContents.send('downloads:progress', {
+              id: downloadId,
+              filename: item.getFilename(),
+              receivedBytes: received,
+              totalBytes: total,
+              progress,
+              state: 'progressing',
+              savePath: item.getSavePath()
+            })
+          }
         }
       })
 
@@ -93,6 +115,15 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
       item.once('done', (_doneEvent, state) => {
         const finalPath = item.getSavePath()
         const win = getMainWindow()
+
+        downloadsService.addOrUpdate({
+          id: downloadId,
+          savePath: finalPath,
+          state: state === 'completed' ? 'completed' : state === 'cancelled' ? 'cancelled' : 'interrupted',
+          receivedBytes: item.getReceivedBytes(),
+          totalBytes: item.getTotalBytes(),
+          endTime: new Date().toISOString()
+        })
 
         if (state === 'completed') {
           console.log(`[DownloadManager] Download completed: ${finalPath}`)
@@ -208,5 +239,29 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
       }
     }
     return false
+  })
+
+  // 5. Open downloaded file directly
+  secureHandle(ipcMain, 'downloads:open-file', Schemas.downloadsOpenFile, async (_, filePath: string) => {
+    if (filePath && fs.existsSync(filePath)) {
+      await shell.openPath(filePath)
+      return true
+    }
+    return false
+  })
+
+  // 6. Delete file from list and optionally disk
+  secureHandle(ipcMain, 'downloads:delete-file', Schemas.downloadsDeleteFile, async (_, data: { id: string; deleteDiskFile?: boolean }) => {
+    return downloadsService.delete(data.id, data.deleteDiskFile)
+  })
+
+  // 7. List all download records
+  secureHandle(ipcMain, 'downloads:list', null, async () => {
+    return downloadsService.list()
+  })
+
+  // 8. Clear download history
+  secureHandle(ipcMain, 'downloads:clear', null, async () => {
+    return downloadsService.clear()
   })
 }

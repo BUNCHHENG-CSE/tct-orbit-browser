@@ -67,6 +67,13 @@ export function createMainWindow(): BrowserWindow {
     mainWindow.show()
   })
 
+  // Ensure window always displays even if ready-to-show event is delayed by HMR/compilation
+  setTimeout(() => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
+      mainWindow.show()
+    }
+  }, 1000)
+
   // In development mode only, provide Inspect UI Element context menu for browser chrome
   if (!app.isPackaged) {
     mainWindow.webContents.on('context-menu', (_event, params) => {

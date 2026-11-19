@@ -13,8 +13,8 @@ export interface ChannelMeta {
 
 export const BRAND = {
   name: 'TCT Orbit',
-  version: '0.1.1',
-  description: 'TCT Orbit (v0.1.1) — A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.',
+  version: '0.1.2',
+  description: 'TCT Orbit (v0.1.2) — A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.',
   homepage: 'https://tctorbit.com',
   updateUrl: 'https://updates.tctorbit.com',
   repository: 'https://github.com/tctorbit/tct-orbit',

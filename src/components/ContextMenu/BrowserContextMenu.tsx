@@ -22,12 +22,15 @@ import {
   ClipboardPaste,
   Check,
   Download,
+  FileDown,
   X,
   Volume2,
   VolumeX,
   Pin,
-  PinOff
+  PinOff,
+  ShieldCheck
 } from 'lucide-react'
+import { cleanUrl } from '@/lib/urlCleaner'
 import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
@@ -282,7 +285,29 @@ export const BrowserContextMenu: React.FC = () => {
 
   const handlePrint = () => {
     closeMenu()
-    api.webview.call(menu.webContentsId, 'print')
+    api.webview.call(menu.webContentsId, 'print', [{ silent: false, printBackground: true }])
+  }
+
+  const handleSavePdf = async () => {
+    closeMenu()
+    try {
+      const res = await api.webview?.saveAsPdf(menu.webContentsId)
+      if (res?.success && res.filePath) {
+        toast.success('Page saved as PDF', {
+          description: res.filePath,
+          action: {
+            label: 'Show in Folder',
+            onClick: () => {
+              api.downloads?.showInFolder(res.filePath!)
+            }
+          }
+        })
+      } else if (res?.error) {
+        toast.error(res.error)
+      }
+    } catch {
+      toast.error('Failed to export PDF')
+    }
   }
 
   const handleCreateQr = (urlToUse: string, title: string) => {
@@ -309,6 +334,16 @@ export const BrowserContextMenu: React.FC = () => {
     const pageUrl = menu.pageURL || activeTab?.url || ''
     navigator.clipboard.writeText(pageUrl)
     toast.success('Page URL copied to clipboard')
+  }
+
+  const handleCopyCleanPageUrl = () => {
+    closeMenu()
+    const pageUrl = menu.pageURL || activeTab?.url || ''
+    if (pageUrl) {
+      const sanitized = cleanUrl(pageUrl)
+      navigator.clipboard.writeText(sanitized)
+      toast.success('Clean page URL copied (trackers stripped)')
+    }
   }
 
   const handleOpenExternal = () => {
@@ -356,6 +391,15 @@ export const BrowserContextMenu: React.FC = () => {
     if (menu.linkURL) {
       navigator.clipboard.writeText(menu.linkURL)
       toast.success('Link copied to clipboard')
+    }
+  }
+
+  const handleCopyCleanLink = () => {
+    closeMenu()
+    if (menu.linkURL) {
+      const sanitized = cleanUrl(menu.linkURL)
+      navigator.clipboard.writeText(sanitized)
+      toast.success('Clean link copied (trackers stripped)')
     }
   }
 
@@ -500,6 +544,11 @@ export const BrowserContextMenu: React.FC = () => {
             onClick={handleCopyLink}
           />
           <MenuItem
+            icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
+            label="Copy Clean Link (No Trackers)"
+            onClick={handleCopyCleanLink}
+          />
+          <MenuItem
             icon={<Save className="w-4 h-4" />}
             label="Save link as..."
             onClick={handleSaveLink}
@@ -560,6 +609,11 @@ export const BrowserContextMenu: React.FC = () => {
             label="Print..."
             shortcut={`${modKey}+P`}
             onClick={handlePrint}
+          />
+          <MenuItem
+            icon={<FileDown className="w-4 h-4 text-primary" />}
+            label="Save as PDF..."
+            onClick={handleSavePdf}
           />
           <Divider />
         </>
@@ -667,6 +721,11 @@ export const BrowserContextMenu: React.FC = () => {
             shortcut={`${modKey}+P`}
             onClick={handlePrint}
           />
+          <MenuItem
+            icon={<FileDown className="w-4 h-4 text-primary" />}
+            label="Save as PDF..."
+            onClick={handleSavePdf}
+          />
           <Divider />
           <MenuItem
             icon={<QrCode className="w-4 h-4 text-emerald-500" />}
@@ -752,6 +811,11 @@ export const BrowserContextMenu: React.FC = () => {
                   icon={<Copy className="w-4 h-4" />}
                   label="Copy Page URL"
                   onClick={handleCopyPageUrl}
+                />
+                <MenuItem
+                  icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
+                  label="Copy Clean Page URL"
+                  onClick={handleCopyCleanPageUrl}
                 />
                 <MenuItem
                   icon={<ExternalLink className="w-4 h-4" />}
