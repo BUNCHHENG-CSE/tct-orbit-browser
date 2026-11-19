@@ -120,9 +120,9 @@ export const SplitViewPopover: React.FC = () => {
             <div className="flex items-center gap-2 pt-1">
               <button
                 onClick={handleSwap}
-                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium border border-border transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium border border-border transition-colors cursor-pointer"
               >
-                <ArrowLeftRight className="w-3.5 h-3.5" />
+                <ArrowLeftRight className="w-3.5 h-3.5 text-primary" />
                 <span>Swap Panes</span>
               </button>
 
@@ -131,9 +131,9 @@ export const SplitViewPopover: React.FC = () => {
                   closeSplitView()
                   setOpen(false)
                 }}
-                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-destructive/10 hover:bg-destructive/20 text-destructive text-xs font-medium border border-destructive/20 transition-colors"
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-destructive/15 hover:bg-destructive/25 text-destructive dark:text-red-400 text-xs font-semibold border border-destructive/30 hover:border-destructive/50 transition-colors cursor-pointer"
               >
-                <X className="w-3.5 h-3.5" />
+                <X className="w-3.5 h-3.5 text-destructive dark:text-red-400" />
                 <span>Close Split</span>
               </button>
             </div>
