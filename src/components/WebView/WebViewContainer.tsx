@@ -63,6 +63,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   const currentNavUrlRef = useRef(tab.url)
   const lastNavigatedFromWebviewUrlRef = useRef<string>('')
 
+  const onUpdateTabRef = useRef(onUpdateTab)
+  onUpdateTabRef.current = onUpdateTab
+  const onOpenNewTabRef = useRef(onOpenNewTab)
+  onOpenNewTabRef.current = onOpenNewTab
+
   // Programmatic external navigation listener (from omnibox, history, etc.)
   useEffect(() => {
     const el = webviewRef.current
@@ -282,7 +287,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         if (currentUrl && currentUrl !== 'about:blank') {
           lastNavigatedFromWebviewUrlRef.current = currentUrl
           currentNavUrlRef.current = currentUrl
-          onUpdateTab(tab.id, {
+          onUpdateTabRef.current(tab.id, {
             url: currentUrl,
             title: currentTitle,
             favicon
@@ -306,7 +311,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
 
     const handleFaviconUpdated = (e: any) => {
       if (e.favicons && e.favicons.length > 0) {
-        onUpdateTab(tab.id, { favicon: e.favicons[0] })
+        onUpdateTabRef.current(tab.id, { favicon: e.favicons[0] })
       }
     }
 
@@ -316,9 +321,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         if (live && live !== 'about:blank') {
           lastNavigatedFromWebviewUrlRef.current = live
           currentNavUrlRef.current = live
-          onUpdateTab(tab.id, { title: e.title, url: live })
+          onUpdateTabRef.current(tab.id, { title: e.title, url: live })
         } else {
-          onUpdateTab(tab.id, { title: e.title })
+          onUpdateTabRef.current(tab.id, { title: e.title })
         }
       }
     }
@@ -335,7 +340,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     const handleNewWindow = (e: any) => {
       if (e.preventDefault) e.preventDefault()
       if (e.url && e.url !== 'about:blank') {
-        onOpenNewTab(e.url)
+        onOpenNewTabRef.current(e.url)
       }
     }
 
@@ -354,7 +359,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
           url: navUrl,
           title: navTitle || tab.title
         })
-        onUpdateTab(tab.id, {
+        onUpdateTabRef.current(tab.id, {
           url: navUrl,
           title: navTitle || tab.title
         })
@@ -508,7 +513,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       el.removeEventListener('did-fail-load', handleDidFailLoad)
       el.removeEventListener('new-window', handleNewWindow)
     }
-  }, [tab.id, onUpdateTab, onOpenNewTab, registerWebviewRef, unregisterWebviewRef])
+  }, [tab.id, registerWebviewRef, unregisterWebviewRef])
 
   // Wake up sleeping tab when it becomes active
   useEffect(() => {
@@ -1098,7 +1103,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
 
   const lastOpenedUrlRef = useRef<{ url: string; time: number }>({ url: '', time: 0 })
 
-  const handleNewTabFromUrl = async (url: string) => {
+  const handleNewTabFromUrl = useCallback(async (url: string) => {
     if (!url || url === 'about:blank') return
     const now = Date.now()
     if (lastOpenedUrlRef.current.url === url && now - lastOpenedUrlRef.current.time < 800) {
@@ -1124,7 +1129,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         console.error('Failed to create tab from webview:', err)
       }
     }
-  }
+  }, [spaceId, createTab, setActiveTab])
 
     const isSplitActive = Boolean(
       splitTabId &&

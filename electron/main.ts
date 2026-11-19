@@ -130,7 +130,11 @@ process.on('uncaughtException', (error) => {
   console.error('[Main Process] Uncaught Exception:', error)
 })
 
-process.on('unhandledRejection', (reason) => {
+process.on('unhandledRejection', (reason: any) => {
+  // ERR_ABORTED (-3) is Chromium's internal cancellation code when a navigation is superseded or redirected
+  if (reason && (reason.errno === -3 || reason.code === 'ERR_ABORTED' || String(reason).includes('ERR_ABORTED'))) {
+    return
+  }
   console.error('[Main Process] Unhandled Promise Rejection:', reason)
 })
 
@@ -586,6 +590,7 @@ if (!gotSingleInstanceLock) {
 
       // Security rules & minimalist scrollbar injection for webview contents
       if (contents.getType() === 'webview') {
+        contents.setMaxListeners(50)
         activeWebviewContents.add(contents)
         contents.on('destroyed', () => {
           activeWebviewContents.delete(contents)

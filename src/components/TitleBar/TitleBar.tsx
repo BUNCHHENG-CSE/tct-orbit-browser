@@ -201,23 +201,21 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     if (inputRef.current) inputRef.current.blur()
 
     if (activeTab) {
-      window.dispatchEvent(
-        new CustomEvent('tct:webview-navigate', {
-          detail: { tabId: activeTab.id, url: targetUrl }
-        })
-      )
-
-      useBrowserStore.getState().updateTabInStore(activeTab.id, {
-        url: targetUrl,
-        title: title || targetUrl
-      })
-
-      try {
-        await api.tabs.update(activeTab.id, {
+      if (activeTab.url === targetUrl) {
+        window.dispatchEvent(new CustomEvent('tct:webview-reload'))
+      } else {
+        useBrowserStore.getState().updateTabInStore(activeTab.id, {
           url: targetUrl,
           title: title || targetUrl
         })
-      } catch {}
+
+        try {
+          await api.tabs.update(activeTab.id, {
+            url: targetUrl,
+            title: title || targetUrl
+          })
+        } catch {}
+      }
     } else if (activeSpaceId) {
       try {
         const newTab = await api.tabs.create({
