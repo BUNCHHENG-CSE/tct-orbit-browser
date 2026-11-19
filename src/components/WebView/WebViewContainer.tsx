@@ -539,7 +539,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
     <div
       className="bg-background overflow-hidden flex flex-col"
       style={{
-        display: isActive ? 'flex' : 'none',
+        display: 'flex',
+        visibility: isActive ? 'visible' : 'hidden',
+        opacity: isActive ? 1 : 0,
+        pointerEvents: isActive ? 'auto' : 'none',
+        zIndex: isActive ? 10 : 0,
         position: 'absolute',
         inset: paneStyle ? undefined : 0,
         ...paneStyle
@@ -1148,7 +1152,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
           </div>
         ) : (
           tabs.map((tab) => {
-            const isPrimary = tab.id === activeTabId
+            const effectiveActiveId = activeTabId || activeTab?.id || tabs[0]?.id
+            const isPrimary = tab.id === effectiveActiveId
             const isSecondary = isSplitActive && tab.id === splitTabId
             const isPaneActive = isPrimary || isSecondary
 

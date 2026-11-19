@@ -82,14 +82,10 @@ export function normalizeUrl(input: string): string {
 /**
  * Builds search engine URL for a given query
  */
-export function buildSearchUrl(query: string, engine: SearchEngineId, isDark?: boolean): string {
+export function buildSearchUrl(query: string, engine: SearchEngineId, _isDark?: boolean): string {
   const targetEngine = SEARCH_ENGINES[engine] || SEARCH_ENGINES[DEFAULT_ENGINE];
   const encodedQuery = encodeURIComponent(query.trim());
-  let url = targetEngine.searchUrl.replace("%s", encodedQuery);
-  if (engine === 'duckduckgo') {
-    url += isDark ? '&kae=d' : '&kae=-1';
-  }
-  return url;
+  return targetEngine.searchUrl.replace("%s", encodedQuery);
 }
 
 export interface DisplayUrlInfo {

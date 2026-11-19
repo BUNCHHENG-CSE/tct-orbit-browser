@@ -57,9 +57,8 @@ const customUserAgent = setupCustomUserAgent()
 app.commandLine.appendSwitch('enable-smooth-scrolling')
 
 // Memory & CPU Optimization Switches (Reduces idle RAM & background CPU overhead)
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=128 --optimize-for-size --expose-gc')
-app.commandLine.appendSwitch('renderer-process-limit', '4')
-app.commandLine.appendSwitch('process-per-site')
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --optimize-for-size')
+app.commandLine.appendSwitch('renderer-process-limit', '6')
 app.commandLine.appendSwitch('disable-breakpad')
 app.commandLine.appendSwitch('disable-component-update')
 app.commandLine.appendSwitch('disable-domain-reliability')
@@ -67,25 +66,16 @@ app.commandLine.appendSwitch('disable-sync')
 app.commandLine.appendSwitch('disable-background-networking')
 app.commandLine.appendSwitch('disable-client-side-phishing-detection')
 app.commandLine.appendSwitch('disable-default-apps')
-app.commandLine.appendSwitch('num-raster-threads', '2')
-app.commandLine.appendSwitch('enable-aggressive-dom-storage-flushing')
 
 // Cloudflare high-performance DoH with resilient system fallback and preconnect leak prevention
-app.commandLine.appendSwitch('dns-over-https-templates', 'https://cloudflare-dns.com/dns-query')
 app.commandLine.appendSwitch(
   'disable-features',
-  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication,BackForwardCache,MediaFoundationD3D11VideoDecoder'
+  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication'
 )
 
 const enabledFeatures = [
   'OverlayScrollbar',
-  'SmoothScrolling',
-  'CanvasOopRasterization',
-  'FreeFrozenTabMemory',
-  'IntensiveWakeUpThrottling',
-  'QuickBackgroundResourceUsageReduction',
-  'DiscardUnloadedTabMemory',
-  'MemoryReducer'
+  'SmoothScrolling'
 ]
 
 // --- 1. Linux Deep Optimization (Ubuntu 22.04 LTS, Debian, Fedora, Arch) ---
@@ -95,28 +85,17 @@ const enabledFeatures = [
 if (process.platform === 'linux') {
   app.commandLine.appendSwitch('ozone-platform-hint', 'auto')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
-  app.commandLine.appendSwitch('enable-zero-copy')
   app.commandLine.appendSwitch('ignore-gpu-blocklist')
   enabledFeatures.push('VaapiVideoDecoder', 'VaapiVideoEncoder', 'VaapiIgnoreDriverChecks', 'WaylandWindowDecorations', 'WebRTCPipeWireCapturer')
 }
 
 // --- 2. Windows Deep Optimization (Windows 10, Windows 11 x64 & ARM64 Copilot+ PCs) ---
-// - DirectComposition hardware overlays: passes video frames directly to GPU without DWM compositing
-// - Direct3D 11 backend: bypasses OpenGL translation layer, reducing GPU VRAM by ~20%
 // - D3D11 hardware video decoding for smooth 4K/60fps YouTube playback
+// - Hardware rasterization for high-framerate rendering without DWM black screen glitches
 if (process.platform === 'win32') {
   app.setAppUserModelId(appPaths.channelMeta.appId)
-  app.commandLine.appendSwitch('use-angle', 'd3d11')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
-  app.commandLine.appendSwitch('enable-zero-copy')
-  app.commandLine.appendSwitch('enable-hardware-overlays', 'single-fullscreen,single-on-top,underlay')
-
-  // Deep GPU Memory & VRAM Optimization (Drops GPU process from ~550MB to ~110MB)
-  app.commandLine.appendSwitch('force-gpu-mem-available-mb', '128')
-  app.commandLine.appendSwitch('gpu-program-cache-size-kb', '4096')
-  app.commandLine.appendSwitch('tile-manager-low-priority-cutoff-time', '3')
-  app.commandLine.appendSwitch('max-active-webgl-contexts', '4')
-  enabledFeatures.push('D3D11VideoDecoder', 'ZeroCopyTabTransfer')
+  enabledFeatures.push('D3D11VideoDecoder')
 }
 
 // --- 3. macOS Deep Optimization (Apple Silicon M1-M4 & Intel Universal) ---
