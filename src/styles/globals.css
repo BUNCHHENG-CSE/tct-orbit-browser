@@ -356,3 +356,16 @@
 .app-no-drag {
   -webkit-app-region: no-drag;
 }
+
+/* Split view smooth resizing guard */
+.is-split-resizing,
+.is-split-resizing * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.is-split-resizing webview {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+

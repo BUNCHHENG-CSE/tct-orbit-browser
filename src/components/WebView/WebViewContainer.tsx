@@ -697,6 +697,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const [canGoBack, setCanGoBack] = useState(false)
   const [canGoForward, setCanGoForward] = useState(false)
   const [isDraggingSplit, setIsDraggingSplit] = useState(false)
+  const currentRatioRef = useRef(splitRatio)
+  const rafIdRef = useRef<number | null>(null)
   const activeTabRef = useRef(activeTab)
   activeTabRef.current = activeTab
   const [matchesCount, setMatchesCount] = useState<{ activeMatchOrdinal: number; matches: number }>({
@@ -704,10 +706,21 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     matches: 0
   })
 
-  // Split view dragging handler
+  // Synchronize CSS variable when splitRatio changes from outside (e.g. presets 50/50, 70/30)
+  useEffect(() => {
+    currentRatioRef.current = splitRatio
+    if (containerRef.current) {
+      containerRef.current.style.setProperty('--split-ratio', `${splitRatio}`)
+    }
+  }, [splitRatio])
+
+  // Split view dragging handler (60fps hardware-accelerated with requestAnimationFrame)
   const handleSplitterMouseDown = (e: React.MouseEvent) => {
     e.preventDefault()
     setIsDraggingSplit(true)
+    currentRatioRef.current = splitRatio
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
   }
 
   useEffect(() => {
@@ -717,18 +730,40 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       const container = containerRef.current
       if (!container) return
       const rect = container.getBoundingClientRect()
-      const newRatio = (e.clientX - rect.left) / rect.width
-      setSplitRatio(newRatio)
+      if (rect.width <= 0) return
+      const rawRatio = (e.clientX - rect.left) / rect.width
+      const clamped = Math.min(0.85, Math.max(0.15, rawRatio))
+      currentRatioRef.current = clamped
+
+      if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current)
+      rafIdRef.current = requestAnimationFrame(() => {
+        if (containerRef.current) {
+          containerRef.current.style.setProperty('--split-ratio', `${clamped}`)
+        }
+      })
     }
 
     const handleMouseUp = () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
       setIsDraggingSplit(false)
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+      setSplitRatio(currentRatioRef.current)
     }
 
-    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mousemove', handleMouseMove, { passive: true })
     window.addEventListener('mouseup', handleMouseUp)
 
     return () => {
+      if (rafIdRef.current) {
+        cancelAnimationFrame(rafIdRef.current)
+        rafIdRef.current = null
+      }
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
@@ -1150,7 +1185,13 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     )
 
     return (
-      <div ref={containerRef} className="flex-1 relative w-full h-full overflow-hidden bg-background">
+      <div
+        ref={containerRef}
+        style={{ '--split-ratio': `${splitRatio}` } as React.CSSProperties}
+        className={`flex-1 relative w-full h-full overflow-hidden bg-background ${
+          isDraggingSplit ? 'is-split-resizing select-none' : ''
+        }`}
+      >
         {tabs.length === 0 ? (
           <div className="w-full h-full flex flex-col items-center justify-center p-6 text-center select-none bg-background">
             <div className="w-12 h-12 rounded-2xl bg-muted/60 border border-border flex items-center justify-center text-muted-foreground mb-3">
@@ -1184,16 +1225,16 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
                   left: 0,
                   top: 0,
                   bottom: 0,
-                  width: `calc(${splitRatio * 100}% - 3px)`,
+                  width: 'calc(var(--split-ratio, 0.5) * 100% - 3px)',
                   borderRight: '1px solid var(--border)'
                 }
               } else if (isSecondary) {
                 splitRole = 'secondary'
                 paneStyle = {
-                  left: `calc(${splitRatio * 100}% + 3px)`,
+                  left: 'calc(var(--split-ratio, 0.5) * 100% + 3px)',
                   top: 0,
                   bottom: 0,
-                  width: `calc(${(1 - splitRatio) * 100}% - 3px)`
+                  width: 'calc((1 - var(--split-ratio, 0.5)) * 100% - 3px)'
                 }
               }
             }
@@ -1236,21 +1277,34 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         {isSplitActive && (
           <div
             onMouseDown={handleSplitterMouseDown}
-            onDoubleClick={() => setSplitRatio(0.5)}
-            style={{
-              left: `calc(${splitRatio * 100}% - 3px)`,
-              width: '6px'
+            onDoubleClick={() => {
+              setSplitRatio(0.5)
+              if (containerRef.current) {
+                containerRef.current.style.setProperty('--split-ratio', '0.5')
+              }
             }}
-            className="absolute top-0 bottom-0 z-30 cursor-col-resize hover:bg-primary/50 transition-colors select-none group flex items-center justify-center"
+            style={{
+              left: 'calc(var(--split-ratio, 0.5) * 100% - 4px)',
+              width: '8px'
+            }}
+            className={`absolute top-0 bottom-0 z-30 cursor-col-resize select-none flex items-center justify-center transition-colors group ${
+              isDraggingSplit ? 'bg-primary/20' : 'hover:bg-primary/20'
+            }`}
             title="Drag to resize, double-click to reset (50/50)"
           >
-            <div className="w-[2px] h-8 rounded-full bg-border group-hover:bg-primary transition-colors" />
+            <div
+              className={`w-[3px] h-10 rounded-full transition-all duration-150 ${
+                isDraggingSplit
+                  ? 'bg-primary h-14 shadow-[0_0_8px_rgba(99,102,241,0.6)]'
+                  : 'bg-border/80 group-hover:bg-primary group-hover:h-12'
+              }`}
+            />
           </div>
         )}
 
         {/* Overlay while dragging splitter to keep mouse tracking over webviews */}
         {isDraggingSplit && (
-          <div className="fixed inset-0 z-50 cursor-col-resize select-none" />
+          <div className="fixed inset-0 z-50 cursor-col-resize select-none bg-transparent" />
         )}
 
         {/* In-Page Search Bar (Ctrl+F) */}
