@@ -49,9 +49,11 @@ import {
   Download,
   FolderDown,
   FolderOpen,
-  ZoomIn
+  ZoomIn,
+  Database
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { BackupSettings } from './BackupSettings'
 
 interface SettingsDialogProps {
   open: boolean
@@ -67,6 +69,7 @@ type SettingsTab =
   | 'privacy'
   | 'performance'
   | 'shortcuts'
+  | 'backup'
   | 'about'
 
 const ACCENT_OPTIONS = ACCENT_PRESETS
@@ -391,6 +394,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     { id: 'privacy', label: 'Privacy & Shield', icon: Shield },
     { id: 'performance', label: 'Performance', icon: Zap },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
+    { id: 'backup', label: 'Data & Backup', icon: Database },
     { id: 'about', label: 'About', icon: Info }
   ] as const
 
@@ -1691,7 +1695,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
               </div>
             )}
 
-            {/* 7. ABOUT TAB */}
+            {/* 8. BACKUP & RESTORE TAB */}
+            {activeTab === 'backup' && <BackupSettings />}
+
+            {/* 9. ABOUT TAB */}
             {activeTab === 'about' && (
               <div className="space-y-5">
                 <div className="p-4 rounded-xl bg-muted/30 border border-border space-y-2.5">

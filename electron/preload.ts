@@ -11,7 +11,9 @@ import type {
   AppInfo,
   PrivacyShieldPrefs,
   PrivacyStats,
-  MasterShieldStatus
+  MasterShieldStatus,
+  ExportBackupOptions,
+  ImportBackupOptions
 } from '../src/types/api'
 
 // Initialize app info synchronously on startup
@@ -194,6 +196,13 @@ const hardenedApi: ElectronAPI = {
         ipcRenderer.removeListener('downloads:completed', handler)
       }
     }
+  },
+
+  backup: {
+    exportData: (options: ExportBackupOptions) => ipcRenderer.invoke('backup:export', options),
+    selectAndInspectFile: () => ipcRenderer.invoke('backup:select-file'),
+    inspectJsonString: (content: string) => ipcRenderer.invoke('backup:inspect-json', content),
+    importData: (options: ImportBackupOptions) => ipcRenderer.invoke('backup:import', options)
   },
 
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => {

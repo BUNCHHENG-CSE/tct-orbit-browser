@@ -488,6 +488,20 @@ class LocalStorageService {
     }
     return false
   }
+
+  // --- Backup & Restore Accessors ---
+  public getFullState(): LocalBrowserData {
+    return JSON.parse(JSON.stringify(this.data))
+  }
+
+  public setFullState(newData: LocalBrowserData): void {
+    this.data = JSON.parse(JSON.stringify(newData))
+    this.save()
+  }
+
+  public getStateFilePath(): string {
+    return this.filePath || getAppPaths().stateFilePath
+  }
 }
 
 export const localStorageService = new LocalStorageService()

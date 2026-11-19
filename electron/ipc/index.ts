@@ -4,6 +4,7 @@ import { register as registerSpaces } from './spaces'
 import { register as registerSettings } from './settings'
 import { register as registerPrivacy } from './privacy'
 import { register as registerDownloads } from './downloads'
+import { register as registerBackup } from './backup'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
@@ -19,6 +20,7 @@ export function registerAllIpc(
   registerSettings(ipcMain)
   registerPrivacy(ipcMain)
   registerDownloads(ipcMain, getMainWindow)
+  registerBackup(ipcMain, getMainWindow)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning

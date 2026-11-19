@@ -54,6 +54,9 @@ export const api = {
   get downloads() {
     return getApi().downloads
   },
+  get backup() {
+    return getApi().backup
+  },
   onOpenUrl(callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) {
     if (typeof window !== 'undefined' && window.api?.onOpenUrl) {
       return window.api.onOpenUrl(callback)

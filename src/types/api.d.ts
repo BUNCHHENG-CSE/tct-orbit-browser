@@ -223,6 +223,61 @@ export interface DownloadCompleted {
   totalBytes: number;
 }
 
+export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy';
+
+export interface ExportBackupOptions {
+  categories?: BackupCategory[];
+  includeOpenTabs?: boolean;
+  includePinnedTabs?: boolean;
+}
+
+export interface ExportBackupResult {
+  success: boolean;
+  canceled?: boolean;
+  filePath?: string;
+  error?: string;
+  itemCounts?: {
+    spaces: number;
+    tabs: number;
+    pinnedTabs: number;
+    hasSettings: boolean;
+    hasPrivacy: boolean;
+  };
+}
+
+export interface BackupInspectionResult {
+  valid: boolean;
+  version: number;
+  exportedAt: string;
+  appName?: string;
+  appVersion?: string;
+  spacesCount: number;
+  tabsCount: number;
+  pinnedCount: number;
+  hasSettings: boolean;
+  hasPrivacy: boolean;
+  categories: string[];
+  rawContent: string;
+  error?: string;
+}
+
+export interface ImportBackupOptions {
+  rawContent: string;
+  mode: 'merge' | 'replace';
+}
+
+export interface ImportBackupResult {
+  success: boolean;
+  mode: 'merge' | 'replace';
+  error?: string;
+  importedCounts: {
+    spaces: number;
+    tabs: number;
+    settingsUpdated: boolean;
+    privacyUpdated: boolean;
+  };
+}
+
 export interface ElectronAPI {
   app: {
     getInfo: () => Promise<AppInfo>;
@@ -306,6 +361,12 @@ export interface ElectronAPI {
     showInFolder: (filePath: string) => Promise<boolean>;
     onProgress?: (callback: (data: DownloadProgress) => void) => () => void;
     onCompleted?: (callback: (data: DownloadCompleted) => void) => () => void;
+  };
+  backup: {
+    exportData: (options: ExportBackupOptions) => Promise<ExportBackupResult>;
+    selectAndInspectFile: () => Promise<BackupInspectionResult | null>;
+    inspectJsonString: (content: string) => Promise<BackupInspectionResult>;
+    importData: (options: ImportBackupOptions) => Promise<ImportBackupResult>;
   };
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;

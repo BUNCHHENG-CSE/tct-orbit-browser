@@ -223,6 +223,18 @@ export const Schemas = {
   downloadsOpenFolder: z.string().optional(),
   downloadsShowInFolder: z.string().min(1),
 
+  // Backup & Restore
+  backupExport: z.object({
+    categories: z.array(z.enum(['settings', 'spaces', 'tabs', 'privacy'])).optional(),
+    includeOpenTabs: z.boolean().optional(),
+    includePinnedTabs: z.boolean().optional()
+  }).optional(),
+  backupInspectJson: z.string().min(1),
+  backupImport: z.object({
+    rawContent: z.string().min(1),
+    mode: z.enum(['merge', 'replace'])
+  }),
+
   // Theme
   themeSet: z.object({
     mode: z.enum(['light', 'dark', 'system']).optional(),
