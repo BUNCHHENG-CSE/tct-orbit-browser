@@ -304,7 +304,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                         </span>
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side={collapsed ? 'right' : 'bottom'}>
+                    <TooltipContent side={collapsed ? 'right' : 'bottom'} sideOffset={collapsed ? 10 : 4}>
                       <div className="space-y-0.5">
                         <div className="flex items-center gap-1.5">
                           <span className="font-semibold text-xs">{space.name}</span>
@@ -368,7 +368,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                 )}
               </button>
             </TooltipTrigger>
-            <TooltipContent side={collapsed ? 'right' : 'bottom'}>
+            <TooltipContent side={collapsed ? 'right' : 'bottom'} sideOffset={collapsed ? 10 : 4}>
               <div className="space-y-0.5">
                 <p className="font-semibold text-xs">Spaces Hub</p>
                 <p className="text-[10px] opacity-70">
@@ -395,7 +395,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
               {collapsed ? <FolderPlus className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
             </button>
           </TooltipTrigger>
-          <TooltipContent side={collapsed ? 'right' : 'bottom'}>
+          <TooltipContent side={collapsed ? 'right' : 'bottom'} sideOffset={collapsed ? 10 : 4}>
             <p>New Space</p>
           </TooltipContent>
         </Tooltip>

@@ -75,7 +75,7 @@ export const TabList: React.FC<TabListProps> = ({
                         <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
                       </button>
                     </TooltipTrigger>
-                    <TooltipContent side="right">
+                    <TooltipContent side="right" sideOffset={10}>
                       <p>No tabs open • Click to open ({modKey}+T)</p>
                     </TooltipContent>
                   </Tooltip>

@@ -129,7 +129,7 @@ export const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             {isCollapsed && (
-              <TooltipContent side="right">
+              <TooltipContent side="right" sideOffset={10}>
                 <p>New Tab ({modKey}+T)</p>
               </TooltipContent>
             )}
@@ -151,7 +151,7 @@ export const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             {isCollapsed && (
-              <TooltipContent side="right">
+              <TooltipContent side="right" sideOffset={10}>
                 <p>History ({modKey}+H)</p>
               </TooltipContent>
             )}
@@ -173,7 +173,7 @@ export const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             {isCollapsed && (
-              <TooltipContent side="right">
+              <TooltipContent side="right" sideOffset={10}>
                 <p>Downloads ({modKey}+J)</p>
               </TooltipContent>
             )}
@@ -195,7 +195,7 @@ export const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             {isCollapsed && (
-              <TooltipContent side="right">
+              <TooltipContent side="right" sideOffset={10}>
                 <p>Bookmarks & Reading List</p>
               </TooltipContent>
             )}
@@ -217,7 +217,7 @@ export const Sidebar: React.FC = () => {
               </button>
             </TooltipTrigger>
             {isCollapsed && (
-              <TooltipContent side="right">
+              <TooltipContent side="right" sideOffset={10}>
                 <p>Settings</p>
               </TooltipContent>
             )}

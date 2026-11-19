@@ -9,7 +9,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { modKey } from '@/lib/platform'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import type { Tab } from '@/types/api'
@@ -222,34 +222,35 @@ export const TabItem: React.FC<TabItemProps> = ({
 
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild>
-        {collapsed ? (
-          <TooltipProvider delayDuration={150}>
-            <Tooltip>
-              <TooltipTrigger asChild>{content}</TooltipTrigger>
-              <TooltipContent
-                side="right"
-                className="bg-popover border border-border text-popover-foreground shadow-xl py-2 px-3 max-w-[260px] rounded-xl z-50"
-              >
-                <div className="space-y-1">
-                  <p className="font-semibold text-xs leading-snug line-clamp-2 text-foreground">
-                    {tab.title || 'New Tab'}
-                  </p>
-                  {tabHostname && (
-                    <p className="text-[11.5px] text-muted-foreground truncate font-mono">{tabHostname}</p>
-                  )}
-                  <div className="flex items-center gap-2 pt-1 text-[10.5px] text-muted-foreground border-t border-border">
-                    <span>Middle-click to close</span>
-                    {tab.isPinned && <span className="text-amber-500">• Pinned</span>}
-                  </div>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          content
-        )}
-      </ContextMenuTrigger>
+      {collapsed ? (
+        <Tooltip delayDuration={150}>
+          <ContextMenuTrigger asChild>
+            <TooltipTrigger asChild>{content}</TooltipTrigger>
+          </ContextMenuTrigger>
+          <TooltipContent
+            side="right"
+            sideOffset={10}
+            className="bg-popover border border-border text-popover-foreground shadow-2xl py-2 px-3 max-w-[260px] rounded-xl z-[100] pointer-events-none"
+          >
+            <div className="space-y-1">
+              <p className="font-semibold text-xs leading-snug line-clamp-2 text-foreground">
+                {tab.title || 'New Tab'}
+              </p>
+              {tabHostname && (
+                <p className="text-[11.5px] text-muted-foreground truncate font-mono">{tabHostname}</p>
+              )}
+              <div className="flex items-center gap-2 pt-1 text-[10.5px] text-muted-foreground border-t border-border">
+                <span>Middle-click to close</span>
+                {tab.isPinned && <span className="text-amber-500">• Pinned</span>}
+              </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+      ) : (
+        <ContextMenuTrigger asChild>
+          {content}
+        </ContextMenuTrigger>
+      )}
 
       <ContextMenuContent className="w-48 bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl p-1 z-50">
         {onNewTabToRight && (
