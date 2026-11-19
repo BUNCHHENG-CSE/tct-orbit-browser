@@ -57,6 +57,9 @@ app.commandLine.appendSwitch('disable-breakpad')
 app.commandLine.appendSwitch('disable-component-update')
 app.commandLine.appendSwitch('disable-domain-reliability')
 app.commandLine.appendSwitch('disable-sync')
+app.commandLine.appendSwitch('disable-background-networking')
+app.commandLine.appendSwitch('disable-client-side-phishing-detection')
+app.commandLine.appendSwitch('disable-default-apps')
 
 // Cloudflare high-performance DoH with resilient system fallback and preconnect leak prevention
 app.commandLine.appendSwitch('dns-over-https-templates', 'https://cloudflare-dns.com/dns-query')

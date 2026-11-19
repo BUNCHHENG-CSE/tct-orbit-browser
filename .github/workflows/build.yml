@@ -18,13 +18,13 @@ jobs:
         include:
           - os: windows-latest
             platform: win
-            args: --win --x64 --arm64
+            args: --win --x64
           - os: macos-latest
             platform: mac
-            args: --mac dmg zip --universal
+            args: --mac dmg --arm64
           - os: ubuntu-22.04
             platform: linux
-            args: --linux AppImage deb rpm tar.gz --x64
+            args: --linux AppImage deb --x64
 
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
@@ -48,6 +48,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -y rpm build-essential libarchive-tools libopenjp2-tools
 
+      - name: Clean Output Directory
+        run: npm run clean
+
       - name: Build Application Bundles
         run: npm run build
 
@@ -65,8 +68,6 @@ jobs:
           path: |
             dist/*.exe
             dist/*.dmg
-            dist/*.zip
             dist/*.AppImage
             dist/*.deb
-            dist/*.rpm
-            dist/*.tar.gz
+          if-no-files-found: error

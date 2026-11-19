@@ -42,7 +42,7 @@ nsis:
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
-  artifactName: tct-orbit-${version}-setup.${ext}
+  artifactName: tct-orbit-${version}-${arch}-setup.${ext}
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
   createDesktopShortcut: always
@@ -51,7 +51,7 @@ nsis:
   uninstallerIcon: build/icon.ico
 
 portable:
-  artifactName: tct-orbit-${version}-portable.${ext}
+  artifactName: tct-orbit-${version}-${arch}-portable.${ext}
 
 # ==============================================================================
 # macOS Configuration (Apple Silicon M1/M2/M3/M4 & Apple Intel x64)
@@ -69,12 +69,10 @@ mac:
       arch:
         - arm64
         - x64
-        - universal
     - target: zip
       arch:
         - arm64
         - x64
-        - universal
   extendInfo:
     - NSCameraUsageDescription: TCT Orbit needs access to your camera for video calls and web conferencing.
     - NSMicrophoneUsageDescription: TCT Orbit needs access to your microphone for audio recording and voice calls.
@@ -83,7 +81,7 @@ mac:
   notarize: false
 
 dmg:
-  artifactName: tct-orbit-${version}.${ext}
+  artifactName: tct-orbit-${version}-${arch}.${ext}
   title: ${productName} ${version}
   contents:
     - x: 130
@@ -131,10 +129,10 @@ linux:
         - arm64
 
 appImage:
-  artifactName: tct-orbit-${version}.${ext}
+  artifactName: tct-orbit-${version}-${arch}.${ext}
 
 deb:
-  artifactName: tct-orbit-${version}.${ext}
+  artifactName: tct-orbit-${version}-${arch}.${ext}
   packageName: tct-orbit
   depends:
     - gconf2
@@ -146,11 +144,11 @@ deb:
     - libasound2
 
 rpm:
-  artifactName: tct-orbit-${version}.${ext}
+  artifactName: tct-orbit-${version}-${arch}.${ext}
   packageName: tct-orbit
   fpm:
     - --iteration=1
     - --rpm-rpmbuild-define=_build_id_links none
 
 pacman:
-  artifactName: tct-orbit-${version}.${ext}
+  artifactName: tct-orbit-${version}-${arch}.${ext}
