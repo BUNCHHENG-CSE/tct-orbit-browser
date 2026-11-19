@@ -23,6 +23,10 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('electron/main.ts')
+        },
+        onwarn(warning, warn) {
+          if (warning.code === 'INVALID_ANNOTATION') return
+          warn(warning)
         }
       }
     }
@@ -56,6 +60,10 @@ export default defineConfig({
       rollupOptions: {
         input: {
           index: resolve('src/index.html')
+        },
+        onwarn(warning, warn) {
+          if (warning.code === 'INVALID_ANNOTATION') return
+          warn(warning)
         },
         output: {
           manualChunks: {

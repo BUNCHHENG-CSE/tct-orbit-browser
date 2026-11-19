@@ -10,7 +10,7 @@ files:
   - resources/browser-logo.png
   - resources/icon.ico
   - package.json
-  - "!node_modules/**/*"
+  - node_modules/@ghostery/adblocker-electron-preload/**/*
   - "!**/*.tsbuildinfo"
   - "!**/*.map"
   - "!**/*.md"
