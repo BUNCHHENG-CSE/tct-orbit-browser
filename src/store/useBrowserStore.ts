@@ -198,7 +198,12 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     colorTheme: 'paper'
   },
 
-  setNavState: (canGoBack, canGoForward) => set({ canGoBack, canGoForward }),
+  setNavState: (canGoBack, canGoForward) =>
+    set((state) =>
+      state.canGoBack === canGoBack && state.canGoForward === canGoForward
+        ? state
+        : { canGoBack, canGoForward }
+    ),
   setDevToolsOpen: (open) => set({ devtoolsOpen: open }),
   setDevToolsDetached: (detached) => set({ devtoolsDetached: detached }),
   setDevToolsWidth: (width) => set({ devtoolsWidth: width }),

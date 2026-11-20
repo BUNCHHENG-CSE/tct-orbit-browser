@@ -251,6 +251,9 @@
     margin: 0;
     padding: 0;
     overflow: hidden !important;
+    overscroll-behavior: none !important;
+    overscroll-behavior-y: none !important;
+    overscroll-behavior-x: none !important;
   }
   html.lenis,
   html.lenis body {

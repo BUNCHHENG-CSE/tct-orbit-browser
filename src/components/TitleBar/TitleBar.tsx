@@ -117,7 +117,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     setCurrentZoom(100)
   }
 
-  // Window maximized polling
+  // Window maximized state sync
   useEffect(() => {
     let mounted = true
     const checkMaximized = async () => {
@@ -129,10 +129,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       }
     }
     checkMaximized()
-    const timer = setInterval(checkMaximized, 1000)
+    window.addEventListener('resize', checkMaximized)
     return () => {
       mounted = false
-      clearInterval(timer)
+      window.removeEventListener('resize', checkMaximized)
     }
   }, [])
 
@@ -205,6 +205,12 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       if (activeTab.url === targetUrl) {
         window.dispatchEvent(new CustomEvent('tct:webview-reload'))
       } else {
+        window.dispatchEvent(
+          new CustomEvent('tct:webview-navigate', {
+            detail: { tabId: activeTab.id, url: targetUrl }
+          })
+        )
+
         useBrowserStore.getState().updateTabInStore(activeTab.id, {
           url: targetUrl,
           title: title || targetUrl

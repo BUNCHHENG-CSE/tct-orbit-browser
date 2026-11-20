@@ -56,9 +56,20 @@ const customUserAgent = setupCustomUserAgent()
 // Cross-platform engine & hardware acceleration switches
 app.commandLine.appendSwitch('enable-smooth-scrolling')
 
-// Memory & CPU Optimization Switches (Reduces idle RAM & background CPU overhead)
-app.commandLine.appendSwitch('js-flags', '--max-old-space-size=512 --optimize-for-size')
-app.commandLine.appendSwitch('renderer-process-limit', '6')
+// Disable pull-to-refresh & overscroll history navigation gestures
+// Prevents pages from auto-refreshing when scrolling or overscrolling down
+app.commandLine.appendSwitch('disable-pull-to-refresh')
+app.commandLine.appendSwitch('pull-to-refresh', '0')
+app.commandLine.appendSwitch('overscroll-history-navigation', '0')
+app.commandLine.appendSwitch('disable-overscroll-edge-effect')
+
+// High-performance hardware acceleration & zero-copy pipeline
+app.commandLine.appendSwitch('enable-gpu-rasterization')
+app.commandLine.appendSwitch('enable-zero-copy')
+app.commandLine.appendSwitch('enable-native-gpu-memory-buffers')
+app.commandLine.appendSwitch('ignore-gpu-blocklist')
+
+// Optimization Switches (Clean telemetry & background overhead reduction)
 app.commandLine.appendSwitch('disable-breakpad')
 app.commandLine.appendSwitch('disable-component-update')
 app.commandLine.appendSwitch('disable-domain-reliability')
@@ -68,14 +79,16 @@ app.commandLine.appendSwitch('disable-client-side-phishing-detection')
 app.commandLine.appendSwitch('disable-default-apps')
 
 // Cloudflare high-performance DoH with resilient system fallback and preconnect leak prevention
+// Disable PullToRefreshEffect, OverscrollHistoryNavigation and SlideToNavigate so pages only refresh via F5 or Refresh button
 app.commandLine.appendSwitch(
   'disable-features',
-  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication'
+  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication,PullToRefreshEffect,OverscrollHistoryNavigation,SlideToNavigate'
 )
 
 const enabledFeatures = [
   'OverlayScrollbar',
-  'SmoothScrolling'
+  'SmoothScrolling',
+  'CanvasOopRasterization'
 ]
 
 // --- 1. Linux Deep Optimization (Ubuntu 22.04 LTS, Debian, Fedora, Arch) ---
@@ -90,10 +103,12 @@ if (process.platform === 'linux') {
 }
 
 // --- 2. Windows Deep Optimization (Windows 10, Windows 11 x64 & ARM64 Copilot+ PCs) ---
+// - Direct3D 11 ANGLE backend for buttery-smooth 60/120Hz refresh rates and zero UI stutter
 // - D3D11 hardware video decoding for smooth 4K/60fps YouTube playback
 // - Hardware rasterization for high-framerate rendering without DWM black screen glitches
 if (process.platform === 'win32') {
   app.setAppUserModelId(appPaths.channelMeta.appId)
+  app.commandLine.appendSwitch('use-angle', 'd3d11')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   enabledFeatures.push('D3D11VideoDecoder')
 }
@@ -632,6 +647,11 @@ if (!gotSingleInstanceLock) {
         }
 
         const customScrollbarCss = `
+          :root, html, body {
+            overscroll-behavior: none !important;
+            overscroll-behavior-y: none !important;
+            overscroll-behavior-x: none !important;
+          }
           :root, html, body, * {
             scrollbar-width: thin !important;
             scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
@@ -831,6 +851,12 @@ if (!gotSingleInstanceLock) {
         mainWindow.focus()
       }
     })
+  })
+
+  app.on('before-quit', () => {
+    try {
+      localStorageService.flushSave()
+    } catch {}
   })
 
   app.on('window-all-closed', () => {

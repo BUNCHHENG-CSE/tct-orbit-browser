@@ -69,8 +69,10 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
             const imgData = origGetImageData.apply(this, args);
             try {
               const d = imgData.data;
-              // Alter only a tiny fraction of pixels (every 64th byte) by 1 unit
-              for (let i = 0; i < d.length; i += 64) {
+              // Alter only a tiny fraction of pixels (capped at 16 sample points)
+              // to defeat canvas fingerprint hashes without lagging large canvas rendering or 60fps web apps
+              const sampleLimit = Math.min(d.length, 64);
+              for (let i = 0; i < sampleLimit; i += 4) {
                 d[i] = shiftNoise(d[i]);
               }
             } catch(e) {}
@@ -193,56 +195,55 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
           \`;
           safeAppendStyle(ytStyle);
 
-          // Auto-skip video ads ONLY when movie_player is actively in ad-showing mode
+          // Auto-skip video ads with minimal CPU overhead
+          let cachedPlayer = null;
+          let wasAdShowing = false;
           const handleYouTubeAds = () => {
             try {
-              // Never manipulate video playback on Shorts reels
               if (window.location.pathname.startsWith('/shorts')) return;
 
-              const moviePlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
-              const isAdShowing = Boolean(
-                moviePlayer && (
-                  moviePlayer.classList.contains('ad-showing') ||
-                  moviePlayer.classList.contains('ad-interrupting')
-                )
-              );
+              if (!cachedPlayer || !cachedPlayer.isConnected) {
+                cachedPlayer = document.getElementById('movie_player') || document.querySelector('.html5-video-player');
+              }
+              if (!cachedPlayer) return;
+
+              const isAdShowing = cachedPlayer.classList.contains('ad-showing') || cachedPlayer.classList.contains('ad-interrupting');
 
               if (isAdShowing) {
-                // If ad is currently showing, click skip button or fast-forward ad to end
-                const skipButtons = document.querySelectorAll(
+                wasAdShowing = true;
+                const skipButtons = cachedPlayer.querySelectorAll(
                   '.ytp-ad-skip-button, .ytp-ad-skip-button-modern, .ytp-skip-ad-button, .ytp-ad-skip-button-slot button, button.ytp-ad-skip-button-modern'
                 );
                 skipButtons.forEach((btn) => {
                   if (typeof btn.click === 'function') btn.click();
                 });
 
-                const adVideo = moviePlayer ? moviePlayer.querySelector('video') : null;
+                const adVideo = cachedPlayer.querySelector('video');
                 if (adVideo && !isNaN(adVideo.duration) && adVideo.duration > 0) {
                   adVideo.playbackRate = 16.0;
                   adVideo.muted = true;
                   adVideo.currentTime = adVideo.duration - 0.05;
                 }
 
-                // Strip the ad-showing class so player controls and screen brighten immediately
-                moviePlayer.classList.remove('ad-showing');
-                moviePlayer.classList.remove('ad-interrupting');
-              } else {
-                // Normal video playback: ensure playback rate is normalized
-                const mainVideo = document.querySelector('video.html5-main-video') || document.querySelector('video');
+                cachedPlayer.classList.remove('ad-showing');
+                cachedPlayer.classList.remove('ad-interrupting');
+
+                const closeButtons = cachedPlayer.querySelectorAll('.ytp-ad-overlay-close-button');
+                closeButtons.forEach((btn) => {
+                  if (typeof btn.click === 'function') btn.click();
+                });
+              } else if (wasAdShowing) {
+                wasAdShowing = false;
+                const mainVideo = cachedPlayer.querySelector('video');
                 if (mainVideo && mainVideo.playbackRate === 16.0) {
                   mainVideo.playbackRate = 1.0;
                 }
               }
-
-              // Close any overlay popup banners
-              const closeButtons = document.querySelectorAll('.ytp-ad-overlay-close-button');
-              closeButtons.forEach((btn) => {
-                if (typeof btn.click === 'function') btn.click();
-              });
             } catch(e) {}
           };
 
-          setInterval(handleYouTubeAds, 200);
+          // Lightweight 500ms interval replaces aggressive 200ms unthrottled DOM queries
+          setInterval(handleYouTubeAds, 500);
         }
 
         // --- 4. GENERAL COSMETIC AD CONTAINER REMOVAL ---
@@ -263,10 +264,16 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
         \`;
         safeAppendStyle(generalAdStyle);
 
-        // --- 5. MODERN SLIM OVERLAY SCROLLBAR ---
+        // --- 5. MODERN SLIM OVERLAY SCROLLBAR & OVERSCROLL PREVENTION ---
         const modernScrollbarStyle = document.createElement('style');
         modernScrollbarStyle.id = 'tct-orbit-modern-scrollbar';
         modernScrollbarStyle.textContent = \`
+          :root, html, body {
+            overscroll-behavior: none !important;
+            overscroll-behavior-y: none !important;
+            overscroll-behavior-x: none !important;
+          }
+
           :root, html, body, * {
             scrollbar-width: thin !important;
             scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;

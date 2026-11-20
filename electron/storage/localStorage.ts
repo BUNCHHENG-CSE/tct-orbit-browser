@@ -112,7 +112,22 @@ class LocalStorageService {
     }
   }
 
+  private saveTimeout: NodeJS.Timeout | null = null
+
   private save(): void {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout)
+    }
+    this.saveTimeout = setTimeout(() => {
+      this.flushSave()
+    }, 250)
+  }
+
+  public flushSave(): void {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout)
+      this.saveTimeout = null
+    }
     let tmpPath: string | null = null
     try {
       if (!this.filePath) {
@@ -124,7 +139,7 @@ class LocalStorageService {
       }
       // Atomic write pattern: write to unique .tmp file, then renameSync
       tmpPath = `${this.filePath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-      fs.writeFileSync(tmpPath, JSON.stringify(this.data, null, 2), 'utf-8')
+      fs.writeFileSync(tmpPath, JSON.stringify(this.data), 'utf-8')
       fs.renameSync(tmpPath, this.filePath)
     } catch (err) {
       console.error('[LocalStorage] Failed to write browser data atomically to disk:', err)

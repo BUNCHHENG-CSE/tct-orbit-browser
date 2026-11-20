@@ -29,7 +29,7 @@ interface TabItemProps {
   onCloseToRight?: () => void
 }
 
-export const TabItem: React.FC<TabItemProps> = ({
+export const TabItem: React.FC<TabItemProps> = React.memo(({
   tab,
   isActive,
   accentColor = '#6366f1',
@@ -361,4 +361,4 @@ export const TabItem: React.FC<TabItemProps> = ({
       </ContextMenuContent>
     </ContextMenu>
   )
-}
+})

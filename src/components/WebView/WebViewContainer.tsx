@@ -39,7 +39,7 @@ interface SingleWebViewProps {
   onFocusPane?: () => void
 }
 
-const SingleWebView: React.FC<SingleWebViewProps> = ({
+const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   tab,
   isActive,
   isDark,
@@ -61,12 +61,19 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
   const [isLoading, setIsLoading] = useState(false)
   const initialUrlRef = useRef(tab.url)
   const currentNavUrlRef = useRef(tab.url)
-  const lastNavigatedFromWebviewUrlRef = useRef<string>('')
+  const lastNavigatedFromWebviewUrlRef = useRef<string>(tab.url)
 
   const onUpdateTabRef = useRef(onUpdateTab)
   onUpdateTabRef.current = onUpdateTab
   const onOpenNewTabRef = useRef(onOpenNewTab)
   onOpenNewTabRef.current = onOpenNewTab
+
+  // If the tab is sleeping, keep initialUrlRef updated so waking up loads the current URL
+  useEffect(() => {
+    if (tab.isSleeping) {
+      initialUrlRef.current = tab.url
+    }
+  }, [tab.isSleeping, tab.url])
 
   // Programmatic external navigation listener (from omnibox, history, etc.)
   useEffect(() => {
@@ -92,28 +99,35 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         // 3. Webview is already on target URL (ignoring trailing slash)
         if (liveNorm === targetNorm) {
           currentNavUrlRef.current = tab.url
+          lastNavigatedFromWebviewUrlRef.current = tab.url
           return
         }
 
-        // 4. SPA Route Protection:
-        // If webview is already navigating or present on a subpath of the same origin
-        // (e.g. live is 'https://www.youtube.com/shorts' and target is 'https://www.youtube.com'),
-        // NEVER force loadURL to root origin due to a stale prop!
+        // 4. SPA Route & In-Page Navigation Protection:
+        // When scrolling down on YouTube Shorts, Instagram Reels, TikTok, Twitter, Reddit, etc.,
+        // the page updates the URL in-page via history.replaceState/pushState.
+        // NEVER force loadURL to refresh the page on scroll!
         try {
           const liveUrlObj = new URL(live)
           const targetUrlObj = new URL(tab.url)
-          if (
-            liveUrlObj.origin === targetUrlObj.origin &&
-            targetUrlObj.pathname === '/' &&
-            liveUrlObj.pathname.length > 1
-          ) {
-            currentNavUrlRef.current = live
-            return
+          if (liveUrlObj.origin === targetUrlObj.origin) {
+            if (
+              liveUrlObj.pathname === targetUrlObj.pathname ||
+              (targetUrlObj.pathname === '/' && liveUrlObj.pathname.length > 1) ||
+              (liveUrlObj.pathname.startsWith('/shorts') && targetUrlObj.pathname.startsWith('/shorts')) ||
+              (liveUrlObj.pathname.startsWith('/reel') && targetUrlObj.pathname.startsWith('/reel')) ||
+              (liveUrlObj.pathname.startsWith('/watch') && targetUrlObj.pathname.startsWith('/watch'))
+            ) {
+              currentNavUrlRef.current = live
+              lastNavigatedFromWebviewUrlRef.current = live
+              return
+            }
           }
         } catch {}
       }
 
       currentNavUrlRef.current = tab.url
+      lastNavigatedFromWebviewUrlRef.current = tab.url
       if (typeof el.loadURL === 'function') {
         el.loadURL(tab.url).catch(() => {})
       }
@@ -417,6 +431,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
         `).catch(() => {})
 
         el.insertCSS(`
+          :root, html, body {
+            overscroll-behavior: none !important;
+            overscroll-behavior-y: none !important;
+            overscroll-behavior-x: none !important;
+          }
           :root, html, body, * {
             scrollbar-width: thin !important;
             scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
@@ -604,7 +623,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       {(!tab.isSleeping || isActive) && (
         <webview
           ref={webviewRef}
-          src={currentNavUrlRef.current || tab.url || initialUrlRef.current}
+          src={initialUrlRef.current}
           partition="persist:browser-tabs"
           className="w-full h-full flex-1 bg-background border-none outline-none flex"
           {...({ allowpopups: 'true' } as any)}
@@ -672,7 +691,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = ({
       )}
     </div>
   )
-}
+})
 
 interface WebViewContainerProps {
   spaceId: string | null
@@ -896,13 +915,18 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       return
     }
 
+    const prevNavRef = { canBack: false, canFwd: false }
     const updateNavState = () => {
       try {
         const canBack = typeof activeEl.canGoBack === 'function' ? activeEl.canGoBack() : false
         const canFwd = typeof activeEl.canGoForward === 'function' ? activeEl.canGoForward() : false
-        setCanGoBack(canBack)
-        setCanGoForward(canFwd)
-        useBrowserStore.getState().setNavState(canBack, canFwd)
+        if (canBack !== prevNavRef.canBack || canFwd !== prevNavRef.canFwd) {
+          prevNavRef.canBack = canBack
+          prevNavRef.canFwd = canFwd
+          setCanGoBack(canBack)
+          setCanGoForward(canFwd)
+          useBrowserStore.getState().setNavState(canBack, canFwd)
+        }
 
         // Live URL synchronization (e.g. user submitted search, dynamic scroll hash, pushState, replaceState)
         if (typeof activeEl.getURL === 'function') {
@@ -928,8 +952,19 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
 
     updateNavState()
-    const interval = setInterval(updateNavState, 200)
-    return () => clearInterval(interval)
+    activeEl.addEventListener('did-navigate', updateNavState)
+    activeEl.addEventListener('did-navigate-in-page', updateNavState)
+    activeEl.addEventListener('did-stop-loading', updateNavState)
+
+    const interval = setInterval(updateNavState, 1000)
+    return () => {
+      clearInterval(interval)
+      try {
+        activeEl.removeEventListener('did-navigate', updateNavState)
+        activeEl.removeEventListener('did-navigate-in-page', updateNavState)
+        activeEl.removeEventListener('did-stop-loading', updateNavState)
+      } catch {}
+    }
   }, [activeTabId, updateTab])
 
   const handleBack = useCallback(() => {
@@ -1184,6 +1219,23 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       tabs.some((t) => t.id === splitTabId)
     )
 
+    const handleSwapSplit = useCallback(() => {
+      const curSplitId = useBrowserStore.getState().splitTabId
+      const curActiveId = useBrowserStore.getState().activeTabId
+      if (curSplitId) {
+        setActiveTab(curSplitId)
+        setSplitTabId(curActiveId)
+      }
+    }, [setActiveTab, setSplitTabId])
+
+    const handleFocusPrimary = useCallback(() => {
+      useBrowserStore.getState().setSplitActivePane('primary')
+    }, [])
+
+    const handleFocusSecondary = useCallback(() => {
+      useBrowserStore.getState().setSplitActivePane('secondary')
+    }, [])
+
     return (
       <div
         ref={containerRef}
@@ -1254,20 +1306,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
                 registerWebviewRef={registerWebviewRef}
                 unregisterWebviewRef={unregisterWebviewRef}
                 onCloseSplit={closeSplitView}
-                onSwapSplit={() => {
-                  if (splitTabId) {
-                    const oldActive = activeTabId
-                    setActiveTab(splitTabId)
-                    setSplitTabId(oldActive)
-                  }
-                }}
-                onFocusPane={() => {
-                  if (splitRole === 'secondary' && splitTabId) {
-                    useBrowserStore.getState().setSplitActivePane('secondary')
-                  } else {
-                    useBrowserStore.getState().setSplitActivePane('primary')
-                  }
-                }}
+                onSwapSplit={handleSwapSplit}
+                onFocusPane={splitRole === 'secondary' ? handleFocusSecondary : handleFocusPrimary}
               />
             )
           })
