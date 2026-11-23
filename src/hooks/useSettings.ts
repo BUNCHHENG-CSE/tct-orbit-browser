@@ -31,11 +31,23 @@ export function useSettings() {
 
   const updateSettings = async (data: UpdateSettingsData): Promise<Settings> => {
     try {
-      if (settings) {
-        setSettings({ ...settings, ...data } as Settings)
+      // Optimistic update (read latest store state, not a possibly stale render closure)
+      const current = useBrowserStore.getState().settings
+      if (current) {
+        setSettings({ ...current, ...data } as Settings)
       }
       const updated = await api.settings.update(data)
-      setSettings(updated)
+      // Skip the second store write when the main process confirmed exactly what we applied:
+      // it would re-render every settings consumer mid-animation (e.g. sidebar toggle) for nothing.
+      const latest = useBrowserStore.getState().settings
+      const confirmed =
+        latest &&
+        (Object.keys(data) as Array<keyof UpdateSettingsData>).every(
+          (k) => JSON.stringify((latest as any)[k]) === JSON.stringify((updated as any)[k])
+        )
+      if (!confirmed) {
+        setSettings(updated)
+      }
       return updated
     } catch (err) {
       console.error('[useSettings] Error updating settings:', err)

@@ -104,7 +104,7 @@ export const SiteShieldPopover: React.FC<SiteShieldPopoverProps> = ({ url }) => 
 
   const handleOpenSettings = () => {
     setIsOpen(false)
-    window.dispatchEvent(new CustomEvent('open-settings'))
+    window.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'privacy' } }))
   }
 
   return (
@@ -215,7 +215,15 @@ export const SiteShieldPopover: React.FC<SiteShieldPopoverProps> = ({ url }) => 
 
           {/* Footer actions */}
           <div className="pt-2 mt-1 border-t border-border flex items-center justify-between text-[11px]">
-            <span className="text-muted-foreground">Mullvad Standard</span>
+            <button
+              onClick={() => {
+                setIsOpen(false)
+                window.dispatchEvent(new CustomEvent('tct:open-privacy-report'))
+              }}
+              className="text-muted-foreground hover:text-foreground font-medium cursor-pointer"
+            >
+              Privacy report
+            </button>
             <button
               onClick={handleOpenSettings}
               className="flex items-center gap-1 text-primary hover:text-primary/80 font-medium cursor-pointer"

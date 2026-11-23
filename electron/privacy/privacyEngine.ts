@@ -1,18 +1,26 @@
-import { app, session, BrowserWindow, type Session, type WebContents } from 'electron'
+import { app, session, BrowserWindow, webContents as allWebContents, type Session, type WebContents } from 'electron'
 import fs from 'fs'
 import path from 'path'
-import fetch from 'cross-fetch'
 import { ElectronBlocker, Request } from '@ghostery/adblocker-electron'
 import {
   type PrivacyShieldPrefs,
   type MasterShieldStatus,
   type PrivacyStats,
   type SiteShieldStatus,
-  DEFAULT_PRIVACY_SHIELD_PREFS
+  type DohProvider,
+  type ProxyMode,
+  type ProxyTestResult,
+  type PrivacyReport,
+  DEFAULT_PRIVACY_SHIELD_PREFS,
+  DOH_TEMPLATES,
+  PRIVATE_PARTITION,
+  TOR_PROXY_URL
 } from './types'
 import { getShieldInjectionScript } from './preloadShield'
+import { lockDownSessionPermissions } from '../security'
+import { sitePermissions } from '../permissions/sitePermissions'
 
-// Tracking query parameters stripped from navigation & web requests
+// Tracking query parameters stripped from top-level navigations
 const TRACKING_QUERY_PARAMS = new Set([
   'utm_source',
   'utm_medium',
@@ -33,13 +41,12 @@ const TRACKING_QUERY_PARAMS = new Set([
   '_hsenc',
   '_hsmi',
   'mkt_tok',
-  'trk',
-  'tracking_id',
   's_kwcid'
 ])
 
-// Hardcoded network patterns for high-frequency ad & tracker networks (fallback blocking)
-const AD_URL_PATTERNS = [
+// Fallback ad/tracker hosts, used ONLY while the full EasyList engine is not loaded yet
+// (first launch while lists download, or when the network is unavailable).
+const FALLBACK_AD_HOSTS = [
   'doubleclick.net',
   'googleadservices.com',
   'googlesyndication.com',
@@ -54,6 +61,43 @@ const AD_URL_PATTERNS = [
   'openx.net',
   'casalemedia.com'
 ]
+
+// Refresh filter lists in the background when the cache is older than this
+const LIST_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000
+const LIST_FETCH_TIMEOUT_MS = 20_000
+const MAX_SITE_STATS_ENTRIES = 500
+
+// HTTPS-Only loop guard: if a host bounces back to http this many times in the window, stop upgrading it
+const HTTPS_UPGRADE_WINDOW_MS = 10_000
+const HTTPS_UPGRADE_MAX_ATTEMPTS = 3
+
+function hostMatchesSuffix(hostname: string, suffix: string): boolean {
+  return hostname === suffix || hostname.endsWith('.' + suffix)
+}
+
+/** Hosts that should never be force-upgraded to HTTPS (routers, LAN devices, dev servers) */
+function isLocalOrPrivateHost(hostname: string): boolean {
+  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.lan') || h.endsWith('.internal') || h.endsWith('.home.arpa')) {
+    return true
+  }
+  if (h.includes(':')) {
+    // IPv6 loopback, link-local and unique-local ranges
+    return h === '::1' || h.startsWith('fe80:') || h.startsWith('fc') || h.startsWith('fd')
+  }
+  const m = h.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (!m) return false
+  const a = Number(m[1])
+  const b = Number(m[2])
+  return (
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 100 && b >= 64 && b <= 127)
+  )
+}
 
 function getRootDomain(hostname: string): string {
   if (!hostname) return ''
@@ -89,8 +133,114 @@ function isSameSiteOrRelated(targetHostname: string, topHostname: string): boole
   return false
 }
 
+function isYouTubeHost(hostname: string): boolean {
+  return hostMatchesSuffix(hostname, 'youtube.com') || hostMatchesSuffix(hostname, 'youtu.be')
+}
+
+const YOUTUBE_SPA_PREFIXES = [
+  '/youtubei/',
+  '/s/desktop/',
+  '/shorts',
+  '/feed',
+  '/api/stats/',
+  '/watch',
+  '/channel/',
+  '/c/',
+  '/@',
+  '/results',
+  '/playlist',
+  '/live'
+]
+
+type WebRequestDetails = {
+  url: string
+  resourceType?: string
+  referrer?: string
+  webContents?: WebContents
+  webContentsId?: number
+  id?: number
+}
+
+/**
+ * URL of the top-level page that issued a request. Whitelisting and per-site stats are keyed on
+ * this, not on the request URL (otherwise allowing "example.com" never unblocks its ad requests).
+ */
+function getPageUrl(details: WebRequestDetails): string {
+  if (details.resourceType === 'mainFrame') return details.url
+  try {
+    const wc = details.webContents
+    if (wc && !wc.isDestroyed()) {
+      const u = wc.getURL()
+      if (u && u.startsWith('http')) return u
+    }
+  } catch {}
+  return details.referrer || ''
+}
+
+function safeOrigin(url: string): string {
+  if (!url) return ''
+  try {
+    return new URL(url).origin
+  } catch {
+    return ''
+  }
+}
+
+const SPOOFED_ACCEPT_LANGUAGE = 'en-US,en;q=0.9'
+const PROXY_MODES: ProxyMode[] = ['off', 'system', 'tor', 'custom']
+const PROXY_URL_RE = /^(socks5|socks4|http|https):\/\/[a-z0-9.\-_[\]:]+:\d{1,5}$/i
+
+const BOOLEAN_PREF_KEYS: Array<keyof PrivacyShieldPrefs> = [
+  'adBlockerEnabled',
+  'trackerProtection',
+  'fingerprintResistance',
+  'httpsOnlyMode',
+  'dnsOverHttps',
+  'webrtcProtection',
+  'globalPrivacyControl',
+  'stripTrackingParams',
+  'blockThirdPartyCookies',
+  'clearCacheOnExit',
+  'blockPings',
+  'strictReferrer',
+  'spoofLanguage',
+  'blockCookieBanners'
+]
+
+/** Keep only known keys with the right type (input comes from IPC and from imported backup files) */
+function sanitizePrefs(input: unknown): Partial<PrivacyShieldPrefs> {
+  const out: Partial<PrivacyShieldPrefs> = {}
+  if (!input || typeof input !== 'object') return out
+  const src = input as Record<string, unknown>
+  for (const key of BOOLEAN_PREF_KEYS) {
+    if (typeof src[key] === 'boolean') (out as any)[key] = src[key]
+  }
+  if (typeof src.dohProvider === 'string') {
+    // 'automatic' secure-DNS mode falls back to system DNS, so every listed provider is safe to keep
+    const provider = src.dohProvider as DohProvider
+    if (Object.prototype.hasOwnProperty.call(DOH_TEMPLATES, provider)) out.dohProvider = provider
+  }
+  if (typeof src.proxyMode === 'string' && PROXY_MODES.includes(src.proxyMode as ProxyMode)) {
+    out.proxyMode = src.proxyMode as ProxyMode
+  }
+  if (typeof src.proxyUrl === 'string' && PROXY_URL_RE.test(src.proxyUrl.trim())) {
+    out.proxyUrl = src.proxyUrl.trim()
+  }
+  if (Array.isArray(src.whitelistedOrigins)) {
+    out.whitelistedOrigins = Array.from(
+      new Set(
+        src.whitelistedOrigins
+          .filter((o): o is string => typeof o === 'string' && o.length > 0 && o.length < 2048)
+          .map((o) => safeOrigin(o) || o)
+      )
+    )
+  }
+  return out
+}
+
 export class PrivacyEngine {
-  private prefs: PrivacyShieldPrefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS }
+  private prefs: PrivacyShieldPrefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS, whitelistedOrigins: [] }
+  private whitelist = new Set<string>()
   private blocker: ElectronBlocker | null = null
   private stats: PrivacyStats = {
     adsBlockedTotal: 0,
@@ -99,191 +249,396 @@ export class PrivacyEngine {
     httpsUpgradesTotal: 0
   }
   private siteStats: Map<string, { ads: number; trackers: number }> = new Map()
+  private httpsUpgradeAttempts = new Map<string, { count: number; first: number }>()
+  private httpsExemptHosts = new Set<string>()
+  /** Hosts whose top-level navigation was just upgraded to https (host -> time), for fallback */
+  private recentHttpsUpgrades = new Map<string, number>()
   private initialized = false
+  private refreshingLists = false
   private prefsPath = ''
-  private cachePath = ''
+  private cacheDir = ''
+  /** Persistent counters for the privacy report (daily totals + per-site totals) */
+  private reportPath = ''
+  private daily: Record<string, { ads: number; trackers: number; https: number }> = {}
+  private siteTotals: Record<string, { ads: number; trackers: number }> = {}
+  private reportSince = new Date().toISOString()
+  private reportSaveTimer: NodeJS.Timeout | null = null
+  /** Focus Sprint: top-level navigations to these domains are blocked (null = off) */
+  private focusBlockedDomains: string[] | null = null
+  /** Hooks for UI notifications (set by main.ts) */
+  public onHttpsFallback: ((info: { host: string; url: string; webContentsId?: number }) => void) | null = null
+  public onFocusBlocked: ((info: { url: string; host: string; webContentsId?: number }) => void) | null = null
+  /** Which prebuilt list set the current engine was built from */
+  private engineVariant: 'ads-tracking' | 'full' | null = null
+
+  /** All browsing sessions the shield protects (UI default, persistent tabs, private tabs) */
+  private getSessions(): Session[] {
+    return [session.defaultSession, session.fromPartition('persist:browser-tabs'), session.fromPartition(PRIVATE_PARTITION)]
+  }
+
+  private get wantedVariant(): 'ads-tracking' | 'full' {
+    return this.prefs.blockCookieBanners ? 'full' : 'ads-tracking'
+  }
+
+  private cachePathFor(variant: 'ads-tracking' | 'full'): string {
+    // Keep the original file name for the default variant so existing caches stay valid
+    return path.join(this.cacheDir, variant === 'full' ? 'adblocker-cache-full.bin' : 'adblocker-cache.bin')
+  }
 
   public async init(): Promise<void> {
     if (this.initialized) return
     this.initialized = true
 
     this.prefsPath = path.join(app.getPath('userData'), 'privacy-shield-prefs.json')
-    this.cachePath = path.join(app.getPath('userData'), 'adblocker-cache.bin')
+    this.reportPath = path.join(app.getPath('userData'), 'privacy-report.json')
+    this.loadReport()
+    this.cacheDir = app.getPath('userData')
 
     this.loadPrefs()
-    await this.initAdBlocker()
-    const tabSession = session.fromPartition('persist:browser-tabs')
-    this.setupNetworkFilters(session.defaultSession)
-    this.setupPermissionsHandler(session.defaultSession)
-    this.setupNetworkFilters(tabSession)
-    this.setupPermissionsHandler(tabSession)
 
-    // Handle clear on exit if enabled
-    app.on('before-quit', async () => {
-      if (this.prefs.clearCacheOnExit) {
-        await this.clearBrowsingData()
-      }
+    // Load cached filter engine synchronously (fast, ~tens of ms). Never block startup on the network:
+    // downloading lists happens in the background and the engine is hot-swapped when ready.
+    const cacheFresh = this.loadCachedEngine()
+    if (!cacheFresh) {
+      void this.refreshFilterLists()
+    }
+
+    for (const ses of this.getSessions()) {
+      // NOTE: Electron supports exactly ONE listener per webRequest event and ONE permission
+      // handler per session. This engine owns them all — do not register others elsewhere.
+      this.setupNetworkFilters(ses)
+      lockDownSessionPermissions(ses)
+    }
+
+    try {
+      session.fromPartition(PRIVATE_PARTITION).setSpellCheckerEnabled(false)
+    } catch {}
+
+    this.applySecureDns()
+    await this.applyProxy()
+
+    // Clear-on-exit: before-quit does not wait for async listeners, so hold the quit until done
+    let clearing = false
+    let cleared = false
+    app.on('before-quit', (event) => {
+      if (!this.prefs.clearCacheOnExit || cleared) return
+      event.preventDefault()
+      if (clearing) return
+      clearing = true
+      const timeout = new Promise((resolve) => setTimeout(resolve, 5000))
+      Promise.race([this.clearBrowsingData(), timeout]).finally(() => {
+        cleared = true
+        app.quit()
+      })
     })
   }
 
   private loadPrefs(): void {
     try {
       if (fs.existsSync(this.prefsPath)) {
-        const raw = fs.readFileSync(this.prefsPath, 'utf8')
-        const loaded = JSON.parse(raw)
-        if (loaded.dohProvider === 'mullvad') {
-          loaded.dohProvider = 'cloudflare'
-        }
-        this.prefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS, ...loaded }
+        const loaded = JSON.parse(fs.readFileSync(this.prefsPath, 'utf8'))
+        this.prefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS, whitelistedOrigins: [], ...sanitizePrefs(loaded) }
       }
     } catch (err) {
       console.warn('[PrivacyEngine] Could not load saved privacy prefs, using defaults:', err)
-      this.prefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS }
+      this.prefs = { ...DEFAULT_PRIVACY_SHIELD_PREFS, whitelistedOrigins: [] }
     }
+    this.whitelist = new Set(this.prefs.whitelistedOrigins)
   }
 
   private savePrefs(): void {
+    const data = JSON.stringify(this.prefs, null, 2)
+    const tmp = `${this.prefsPath}.tmp`
+    fs.promises
+      .writeFile(tmp, data, 'utf8')
+      .then(() => fs.promises.rename(tmp, this.prefsPath))
+      .catch((err) => console.error('[PrivacyEngine] Failed to save privacy prefs to disk:', err))
+  }
+
+  /** Returns true when a cache was loaded AND is recent enough to skip a refresh */
+  private loadCachedEngine(): boolean {
+    const variant = this.wantedVariant
+    const cachePath = this.cachePathFor(variant)
     try {
-      fs.writeFileSync(this.prefsPath, JSON.stringify(this.prefs, null, 2), 'utf8')
+      if (!fs.existsSync(cachePath)) return false
+      const stat = fs.statSync(cachePath)
+      this.blocker = ElectronBlocker.deserialize(fs.readFileSync(cachePath))
+      this.engineVariant = variant
+      console.log(`[PrivacyEngine] AdBlocker engine (${variant}) loaded from cache`)
+      return Date.now() - stat.mtimeMs < LIST_MAX_AGE_MS
     } catch (err) {
-      console.error('[PrivacyEngine] Failed to save privacy prefs to disk:', err)
+      // Corrupt cache, or engine format changed after a library upgrade
+      // Keep whatever engine is already running; a refresh will replace it
+      console.warn('[PrivacyEngine] AdBlocker cache unusable, will re-download lists:', err)
+      return false
     }
   }
 
-  /**
-   * Initialize @ghostery/adblocker-electron with EasyList, EasyPrivacy, and local caching
-   */
-  private async initAdBlocker(): Promise<void> {
+  /** Download prebuilt EasyList + EasyPrivacy in the background, then hot-swap the engine */
+  private async refreshFilterLists(): Promise<void> {
+    if (this.refreshingLists) return
+    this.refreshingLists = true
+    // Node's built-in fetch (undici). Replaces cross-fetch/node-fetch@2, which triggered the
+    // DEP0040 (punycode) and DEP0169 (url.parse) deprecation warnings.
+    const timedFetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
+      globalThis.fetch(input, { ...init, signal: AbortSignal.timeout(LIST_FETCH_TIMEOUT_MS) })
+    const variant = this.wantedVariant
     try {
-      if (fs.existsSync(this.cachePath)) {
-        try {
-          const buffer = fs.readFileSync(this.cachePath)
-          this.blocker = ElectronBlocker.deserialize(buffer)
-        } catch (e) {
-          console.warn('[PrivacyEngine] Cache corrupted, refreshing ad blocker rules from network...')
-          this.blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch)
-          try {
-            fs.writeFileSync(this.cachePath, this.blocker.serialize())
-          } catch {}
-        }
-      } else {
-        this.blocker = await ElectronBlocker.fromPrebuiltAdsAndTracking(fetch)
-        try {
-          fs.writeFileSync(this.cachePath, this.blocker.serialize())
-        } catch {}
+      // 'full' adds EasyList Cookie (consent banners) + annoyance lists on top of ads & tracking
+      const fresh =
+        variant === 'full'
+          ? await ElectronBlocker.fromPrebuiltFull(timedFetch)
+          : await ElectronBlocker.fromPrebuiltAdsAndTracking(timedFetch)
+      // The toggle may have flipped while downloading; only swap in the wanted set
+      if (variant === this.wantedVariant) {
+        this.blocker = fresh
+        this.engineVariant = variant
       }
-      console.log('[PrivacyEngine] AdBlocker engine loaded successfully with prebuilt EasyList & EasyPrivacy rules')
+      const cachePath = this.cachePathFor(variant)
+      const tmp = `${cachePath}.tmp`
+      await fs.promises.writeFile(tmp, fresh.serialize())
+      await fs.promises.rename(tmp, cachePath)
+      console.log(`[PrivacyEngine] AdBlocker filter lists (${variant}) refreshed`)
     } catch (err) {
-      console.error('[PrivacyEngine] Failed to initialize Ghostery/EasyList adblocker:', err)
+      console.warn('[PrivacyEngine] Could not refresh filter lists (keeping current engine):', err)
+    } finally {
+      this.refreshingLists = false
+      // Toggle changed during the download: switch to the other set now
+      if (this.engineVariant !== null && this.engineVariant !== this.wantedVariant) {
+        if (!this.loadCachedEngine()) void this.refreshFilterLists()
+      }
     }
+  }
+
+  // --- Proxy / Tor routing ---
+
+  private get isProxyActive(): boolean {
+    return this.prefs.proxyMode === 'tor' || this.prefs.proxyMode === 'custom'
+  }
+
+  private getProxyRules(): string {
+    return this.prefs.proxyMode === 'tor' ? TOR_PROXY_URL : this.prefs.proxyUrl
+  }
+
+  /** Route every browsing session through the configured proxy (no bypass except loopback) */
+  private async applyProxy(): Promise<void> {
+    let config: Electron.ProxyConfig
+    if (this.prefs.proxyMode === 'system') {
+      config = { mode: 'system' }
+    } else if (this.isProxyActive) {
+      config = { mode: 'fixed_servers', proxyRules: this.getProxyRules(), proxyBypassRules: '<-loopback>' }
+    } else {
+      config = { mode: 'direct' }
+    }
+    for (const ses of this.getSessions()) {
+      try {
+        await ses.setProxy(config)
+        // Drop pooled connections so new requests actually use the new route
+        await ses.closeAllConnections()
+      } catch (err) {
+        console.error('[PrivacyEngine] Failed to apply proxy settings:', err)
+      }
+    }
+  }
+
+  /** Fetch the public exit IP through the tab session (honors proxy + filters) */
+  public async testProxy(): Promise<ProxyTestResult> {
+    const ses = session.fromPartition('persist:browser-tabs')
+    try {
+      const res = await ses.fetch('https://check.torproject.org/api/ip', {
+        signal: AbortSignal.timeout(15_000),
+        cache: 'no-store'
+      } as RequestInit)
+      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` }
+      const data = (await res.json()) as { IsTor?: boolean; IP?: string }
+      return { ok: true, ip: data.IP, isTor: !!data.IsTor }
+    } catch (err: any) {
+      return {
+        ok: false,
+        error: this.isProxyActive
+          ? `Proxy unreachable (${this.getProxyRules()}). Is Tor / your proxy running?`
+          : err?.message || 'Network error'
+      }
+    }
+  }
+
+  /** Wipe everything the private-tab session stored (called when the last private tab closes) */
+  public async clearPrivateSession(): Promise<void> {
+    const ses = session.fromPartition(PRIVATE_PARTITION)
+    sitePermissions.clearPrivate()
+    try {
+      await ses.clearStorageData()
+      await ses.clearCache()
+      await ses.clearAuthCache()
+      await ses.clearHostResolverCache()
+      await ses.closeAllConnections()
+    } catch (err) {
+      console.warn('[PrivacyEngine] Failed to clear private session:', err)
+    }
+  }
+
+  /** Apply DNS-over-HTTPS. 'automatic' falls back to system DNS so sites never fail to resolve. */
+  private applySecureDns(): void {
+    try {
+      if (this.prefs.dnsOverHttps) {
+        app.configureHostResolver({
+          secureDnsMode: 'automatic',
+          secureDnsServers: [DOH_TEMPLATES[this.prefs.dohProvider] || DOH_TEMPLATES.cloudflare]
+        })
+      } else {
+        app.configureHostResolver({ secureDnsMode: 'off' })
+      }
+    } catch (err) {
+      console.warn('[PrivacyEngine] Could not configure DNS-over-HTTPS:', err)
+    }
+  }
+
+  /** WebRTC policy honoring the user toggle. Both modes hide private LAN IPs. */
+  public getWebRTCPolicy(): 'disable_non_proxied_udp' | 'default_public_interface_only' {
+    // Behind a proxy/Tor any direct UDP would reveal the real IP: always force proxied-only
+    return this.prefs.webrtcProtection || this.isProxyActive ? 'disable_non_proxied_udp' : 'default_public_interface_only'
+  }
+
+  private applyWebRTCPolicyToAll(): void {
+    const policy = this.getWebRTCPolicy()
+    for (const wc of allWebContents.getAllWebContents()) {
+      try {
+        if (!wc.isDestroyed() && wc.getType() === 'webview') wc.setWebRTCIPHandlingPolicy(policy)
+      } catch {}
+    }
+  }
+
+  private isPageWhitelisted(pageUrl: string): boolean {
+    if (this.whitelist.size === 0 || !pageUrl) return false
+    return this.whitelist.has(safeOrigin(pageUrl))
+  }
+
+  private shouldUpgradeToHttps(hostname: string): boolean {
+    if (isLocalOrPrivateHost(hostname) || this.httpsExemptHosts.has(hostname)) return false
+    const now = Date.now()
+    const entry = this.httpsUpgradeAttempts.get(hostname)
+    if (!entry || now - entry.first > HTTPS_UPGRADE_WINDOW_MS) {
+      this.httpsUpgradeAttempts.set(hostname, { count: 1, first: now })
+      if (this.httpsUpgradeAttempts.size > 1000) this.httpsUpgradeAttempts.clear()
+      return true
+    }
+    entry.count++
+    if (entry.count > HTTPS_UPGRADE_MAX_ATTEMPTS) {
+      // The server keeps redirecting https -> http; stop the redirect loop for this session
+      console.warn(`[PrivacyEngine] HTTPS-Only: ${hostname} does not support HTTPS, allowing http for this session`)
+      this.httpsExemptHosts.add(hostname)
+      this.httpsUpgradeAttempts.delete(hostname)
+      return false
+    }
+    return true
   }
 
   /**
    * Attach network-level privacy filters to an Electron session
    */
   public setupNetworkFilters(ses: Session): void {
-    // 1. onBeforeRequest: Ad/Tracker blocking, tracking parameter stripping, and HTTPS upgrade
+    // 1. onBeforeRequest: Ad/Tracker blocking, HTTPS upgrade, tracking-parameter stripping
     ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
-      const urlStr = details.url
       let parsed: URL
       try {
-        parsed = new URL(urlStr)
+        parsed = new URL(details.url)
       } catch {
         return callback({})
       }
 
-      const origin = parsed.origin
-      const isWhitelisted = this.prefs.whitelistedOrigins.includes(origin)
+      const hostname = parsed.hostname.toLowerCase()
+      const isMainFrame = details.resourceType === 'mainFrame'
+      const pageUrl = getPageUrl(details)
+      const pageOrigin = safeOrigin(pageUrl)
+
+      // Focus Sprint: block distracting sites for top-level navigations (independent of the shield)
+      if (isMainFrame && this.focusBlockedDomains && this.focusBlockedDomains.some((d) => hostMatchesSuffix(hostname, d))) {
+        this.onFocusBlocked?.({ url: details.url, host: hostname, webContentsId: details.webContentsId })
+        return callback({ cancel: true })
+      }
+
+      // Site shield disabled by the user for this page
+      if (this.isPageWhitelisted(pageUrl)) {
+        return callback({})
+      }
+
+      // Hyperlink auditing (<a ping>) and navigator.sendBeacon(): pure tracking, never needed
+      if (this.prefs.blockPings && details.resourceType === 'ping') {
+        this.recordBlocked(pageOrigin, 'trackers')
+        return callback({ cancel: true })
+      }
+
+      // C. HTTPS-Only Mode upgrade (checked first for navigations so upgrades are not skipped by allowlists)
+      if (this.prefs.httpsOnlyMode && parsed.protocol === 'http:' && (isMainFrame || details.resourceType === 'subFrame')) {
+        if (this.shouldUpgradeToHttps(hostname)) {
+          this.stats.httpsUpgradesTotal++
+          this.bumpDaily('https')
+          if (isMainFrame) {
+            if (this.recentHttpsUpgrades.size > 200) this.recentHttpsUpgrades.clear()
+            this.recentHttpsUpgrades.set(hostname, Date.now())
+          }
+          parsed.protocol = 'https:'
+          return callback({ redirectURL: parsed.toString() })
+        }
+      }
 
       // Never block media delivery streams (e.g. YouTube *.googlevideo.com)
-      if (parsed.hostname.includes('googlevideo.com')) {
+      if (hostMatchesSuffix(hostname, 'googlevideo.com')) {
         return callback({})
       }
 
-      // Check if site is whitelisted
-      if (isWhitelisted) {
-        return callback({})
+      // Never block YouTube navigations or its SPA endpoints (breaks Shorts/Subscriptions routing)
+      if (isYouTubeHost(hostname)) {
+        if (isMainFrame || YOUTUBE_SPA_PREFIXES.some((p) => parsed.pathname.startsWith(p))) {
+          return callback({})
+        }
       }
 
-      const isFirstPartyYouTube = parsed.hostname.endsWith('youtube.com') || parsed.hostname.endsWith('youtu.be')
+      const blockingEnabled = this.prefs.adBlockerEnabled || this.prefs.trackerProtection
 
-      // Never block top-level navigations or core internal SPA endpoints for YouTube
-      // Doing so breaks internal SPA routing for Shorts, Subscriptions, Channels, and Videos
-      if (isFirstPartyYouTube && details.resourceType === 'mainFrame') {
-        return callback({})
-      }
-
-      const isYouTubeCoreSpaApi = isFirstPartyYouTube && (
-        parsed.pathname.startsWith('/youtubei/') ||
-        parsed.pathname.startsWith('/s/desktop/') ||
-        parsed.pathname.startsWith('/shorts') ||
-        parsed.pathname.startsWith('/feed') ||
-        parsed.pathname.startsWith('/api/stats/') ||
-        parsed.pathname.startsWith('/watch') ||
-        parsed.pathname.startsWith('/channel/') ||
-        parsed.pathname.startsWith('/c/') ||
-        parsed.pathname.startsWith('/@') ||
-        parsed.pathname.startsWith('/results') ||
-        parsed.pathname.startsWith('/playlist') ||
-        parsed.pathname.startsWith('/live')
-      )
-
-      if (isYouTubeCoreSpaApi) {
-        return callback({})
-      }
-
-      // A. Ghostery / EasyList / AdGuard engine matching (subresources only - NEVER cancel mainFrame navigations)
-      if (details.resourceType !== 'mainFrame' && (this.prefs.adBlockerEnabled || this.prefs.trackerProtection) && this.blocker) {
-        try {
-          const req = Request.fromRawDetails(details)
-          const match = this.blocker.match(req)
-          if (match.match) {
-            this.stats.adsBlockedTotal++
-            this.recordSiteStat(origin, 'ads')
-            if (match.redirect && match.redirect.dataUrl) {
-              return callback({ redirectURL: match.redirect.dataUrl })
+      if (!isMainFrame && blockingEnabled) {
+        if (this.blocker) {
+          // A. EasyList / EasyPrivacy matching. The request type and source page MUST be passed so
+          // that $third-party, $script, $image, $xhr ... options are evaluated correctly.
+          try {
+            const req = Request.fromRawDetails({
+              requestId: `${details.id}`,
+              tabId: details.webContentsId,
+              url: details.url,
+              sourceUrl: pageUrl || details.referrer || '',
+              type: (details.resourceType || 'other') as any
+            })
+            const { match, redirect } = this.blocker.match(req)
+            if (match) {
+              const isTracker = details.resourceType === 'ping' || (details.resourceType === 'xhr' && req.isThirdParty)
+              this.recordBlocked(pageOrigin, isTracker ? 'trackers' : 'ads')
+              if (redirect && redirect.dataUrl) {
+                return callback({ redirectURL: redirect.dataUrl })
+              }
+              return callback({ cancel: true })
             }
-            return callback({ cancel: true })
+          } catch (err) {
+            console.warn('[PrivacyEngine] Filter match failed for', details.url, err)
           }
-        } catch {}
-      }
-
-      // B. Fast hardcoded ad & tracker network blocking fallback (subresources only)
-      if (details.resourceType !== 'mainFrame' && !isFirstPartyYouTube && (this.prefs.adBlockerEnabled || this.prefs.trackerProtection)) {
-        const hostname = parsed.hostname.toLowerCase()
-        const pathname = parsed.pathname.toLowerCase()
-        const fullPath = hostname + pathname
-
-        const isAd = AD_URL_PATTERNS.some((pat) => fullPath.includes(pat) || hostname.endsWith(pat))
-        if (isAd) {
-          this.stats.adsBlockedTotal++
-          this.recordSiteStat(origin, 'ads')
+        } else if (FALLBACK_AD_HOSTS.some((h) => hostMatchesSuffix(hostname, h))) {
+          // B. Engine still loading: block the most common ad networks by exact host suffix
+          this.recordBlocked(pageOrigin, 'ads')
           return callback({ cancel: true })
         }
       }
 
-      // C. HTTPS-Only Mode Upgrade (mainFrame or subFrame)
-      if (this.prefs.httpsOnlyMode && parsed.protocol === 'http:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
-        this.stats.httpsUpgradesTotal++
-        parsed.protocol = 'https:'
-        return callback({ redirectURL: parsed.toString() })
-      }
-
-      // D. Query Parameter Stripping (e.g. utm_*, fbclid, gclid)
-      // CRITICAL: ONLY strip query parameters on top-level mainFrame document navigations!
-      // NEVER return redirectURL for fetch/XHR subresources, as doing so breaks same-origin CORS & POST payloads
-      if (details.resourceType === 'mainFrame' && this.prefs.stripTrackingParams && parsed.search) {
+      // D. Query parameter stripping — ONLY on top-level navigations.
+      // Never redirect fetch/XHR subresources: that breaks CORS & POST payloads.
+      if (isMainFrame && this.prefs.stripTrackingParams && parsed.search) {
         let stripped = false
-        const searchParams = parsed.searchParams
-        for (const param of Array.from(searchParams.keys())) {
+        for (const param of Array.from(parsed.searchParams.keys())) {
           if (TRACKING_QUERY_PARAMS.has(param.toLowerCase())) {
-            searchParams.delete(param)
+            parsed.searchParams.delete(param)
             stripped = true
-            this.stats.trackersBlockedTotal++
-            this.recordSiteStat(origin, 'trackers')
           }
         }
         if (stripped) {
+          this.recordBlocked(pageOrigin || parsed.origin, 'trackers')
           return callback({ redirectURL: parsed.toString() })
         }
       }
@@ -291,44 +646,51 @@ export class PrivacyEngine {
       return callback({})
     })
 
-    // 2. onBeforeSendHeaders: GPC, DNT, Referrer origin trimming, and targeted cross-site tracker cookie blocking
+    // 2. onBeforeSendHeaders: telemetry header stripping, GPC/DNT, referrer trimming, 3rd-party cookie blocking
     ses.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
-      const requestHeaders = { ...details.requestHeaders }
+      const requestHeaders = details.requestHeaders
+
+      // Always strip Chromium client telemetry identifiers
+      delete requestHeaders['X-Client-Data']
+      delete requestHeaders['x-client-data']
 
       try {
-        const parsed = new URL(details.url)
-        const isWhitelisted = this.prefs.whitelistedOrigins.includes(parsed.origin)
+        const pageUrl = getPageUrl(details)
+        if (!this.isPageWhitelisted(pageUrl)) {
+          const parsed = new URL(details.url)
 
-        if (!isWhitelisted) {
-          // Global Privacy Control & Do Not Track
           if (this.prefs.globalPrivacyControl) {
             requestHeaders['DNT'] = '1'
             requestHeaders['Sec-GPC'] = '1'
           }
 
-          // Referrer Trimming: trim referrer to origin-only for cross-origin requests
-          if (details.referrer && details.referrer.startsWith('http')) {
-            try {
-              const refUrl = new URL(details.referrer)
-              if (refUrl.origin !== parsed.origin) {
-                requestHeaders['Referer'] = refUrl.origin + '/'
-              }
-            } catch {}
+          // Generic locale so the language list can't narrow down who you are
+          if (this.prefs.spoofLanguage) {
+            requestHeaders['Accept-Language'] = SPOOFED_ACCEPT_LANGUAGE
           }
 
-          // Third-party cookie blocking: only block cookies on subresource requests to external third-party tracking origins
-          // Never block cookies on document frame navigations or within same-site/related first-party ecosystems
-          const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
-          if (this.prefs.blockThirdPartyCookies && !isFrameNav && !parsed.hostname.includes('googlevideo.com')) {
-            try {
-              const topUrl = details.webContents?.getURL() || details.referrer || ''
-              if (topUrl && topUrl.startsWith('http')) {
-                const topHostname = new URL(topUrl).hostname
-                if (!isSameSiteOrRelated(parsed.hostname, topHostname)) {
-                  delete requestHeaders['Cookie']
-                }
+          // Referrer trimming: origin-only cross-origin; nothing at all cross-site in strict mode
+          if (details.referrer && details.referrer.startsWith('http')) {
+            const refOrigin = safeOrigin(details.referrer)
+            if (refOrigin && refOrigin !== parsed.origin) {
+              const crossSite = !isSameSiteOrRelated(parsed.hostname, new URL(details.referrer).hostname)
+              if (this.prefs.strictReferrer && crossSite) {
+                delete requestHeaders['Referer']
+                delete requestHeaders['referer']
+              } else {
+                requestHeaders['Referer'] = refOrigin + '/'
               }
-            } catch {}
+            }
+          }
+
+          // Third-party cookie blocking on subresources only (never on frame navigations)
+          const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
+          if (this.prefs.blockThirdPartyCookies && !isFrameNav && pageUrl.startsWith('http')) {
+            const hostname = parsed.hostname.toLowerCase()
+            if (!hostMatchesSuffix(hostname, 'googlevideo.com') && !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)) {
+              delete requestHeaders['Cookie']
+              delete requestHeaders['cookie']
+            }
           }
         }
       } catch {}
@@ -336,149 +698,265 @@ export class PrivacyEngine {
       return callback({ requestHeaders })
     })
 
-    // 3. onHeadersReceived: Block third-party tracker Set-Cookie
+    // HTTPS-First fallback: the site has no working HTTPS (connection refused, empty response, ...).
+    // Remember the host for this session and reload over http, instead of a dead-end error page
+    // where "Retry" would just upgrade and fail again.
+    ses.webRequest.onErrorOccurred({ urls: ['https://*/*'] }, (details) => {
+      if (details.resourceType !== 'mainFrame' || details.error === 'net::ERR_ABORTED') return
+      try {
+        const parsed = new URL(details.url)
+        const hostname = parsed.hostname.toLowerCase()
+        const upgradedAt = this.recentHttpsUpgrades.get(hostname)
+        if (upgradedAt === undefined || Date.now() - upgradedAt > 60_000) return
+        this.recentHttpsUpgrades.delete(hostname)
+        this.httpsExemptHosts.add(hostname)
+        console.warn(`[PrivacyEngine] HTTPS-Only: ${hostname} failed over https (${details.error}), falling back to http`)
+        const wc = details.webContents
+        if (wc && !wc.isDestroyed()) {
+          parsed.protocol = 'http:'
+          const httpUrl = parsed.toString()
+          this.onHttpsFallback?.({ host: hostname, url: httpUrl, webContentsId: wc.id })
+          wc.loadURL(httpUrl).catch(() => {})
+        }
+      } catch {}
+    })
+
+    // 3. onHeadersReceived: block third-party Set-Cookie
     ses.webRequest.onHeadersReceived({ urls: ['*://*/*'] }, (details, callback) => {
-      const responseHeaders = { ...details.responseHeaders }
-
       const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
-      if (this.prefs.blockThirdPartyCookies && !isFrameNav) {
-        try {
-          const parsed = new URL(details.url)
-          const isWhitelisted = this.prefs.whitelistedOrigins.includes(parsed.origin)
+      if (!this.prefs.blockThirdPartyCookies || isFrameNav || !details.responseHeaders) {
+        return callback({})
+      }
 
-          if (!isWhitelisted && !parsed.hostname.includes('googlevideo.com')) {
-            const topUrl = details.webContents?.getURL() || details.referrer || ''
-            if (topUrl && topUrl.startsWith('http')) {
-              const topHostname = new URL(topUrl).hostname
-              if (!isSameSiteOrRelated(parsed.hostname, topHostname)) {
-                delete responseHeaders['Set-Cookie']
-                delete responseHeaders['set-cookie']
+      try {
+        const pageUrl = getPageUrl(details)
+        if (pageUrl.startsWith('http') && !this.isPageWhitelisted(pageUrl)) {
+          const hostname = new URL(details.url).hostname.toLowerCase()
+          if (!hostMatchesSuffix(hostname, 'googlevideo.com') && !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)) {
+            const responseHeaders = { ...details.responseHeaders }
+            let changed = false
+            for (const key of Object.keys(responseHeaders)) {
+              if (key.toLowerCase() === 'set-cookie') {
+                delete responseHeaders[key]
+                changed = true
               }
             }
+            if (changed) return callback({ responseHeaders })
           }
-        } catch {}
-      }
-
-      return callback({ responseHeaders })
-    })
-  }
-
-  /**
-   * Default-deny sensitive browser permissions (camera, microphone, geolocation, notifications, etc.)
-   * while allowing standard non-invasive browser features (fullscreen, pointerLock, DRM/mediaKeySystem)
-   */
-  public setupPermissionsHandler(ses: Session): void {
-    ses.setPermissionRequestHandler((webContents, permission, callback) => {
-      const url = webContents.getURL()
-      let origin = ''
-      try {
-        origin = new URL(url).origin
+        }
       } catch {}
 
-      // Allow inspect/devtools internals
-      if (url.startsWith('devtools://')) {
-        return callback(true)
-      }
-
-      // Deny sensitive hardware & tracking permissions by default
-      const sensitivePermissions = [
-        'camera',
-        'microphone',
-        'geolocation',
-        'notifications',
-        'clipboard-read',
-        'midi',
-        'sensors',
-        'accessibility-events'
-      ]
-
-      if (sensitivePermissions.includes(permission)) {
-        console.warn(`[PrivacyEngine] Denied permission "${permission}" requested by origin: ${origin || url}`)
-        return callback(false)
-      }
-
-      // Allow standard browser permissions (fullscreen, pointerLock, openExternal, mediaKeySystem / DRM, clipboard-sanitized-write)
-      return callback(true)
-    })
-
-    ses.setPermissionCheckHandler((_webContents, permission) => {
-      const sensitivePermissions = [
-        'camera',
-        'microphone',
-        'geolocation',
-        'notifications',
-        'clipboard-read',
-        'midi',
-        'sensors',
-        'accessibility-events'
-      ]
-      if (sensitivePermissions.includes(permission)) {
-        return false
-      }
-      return true
+      // Unmodified: avoid copying headers for every response
+      return callback({})
     })
   }
 
   /**
-   * Inject client-side fingerprinting resistance and cosmetic ad blocking into guest WebContents
+   * Inject cosmetic ad-hiding CSS and fingerprinting resistance into guest WebContents.
+   * Runs once per document (dom-ready) to avoid stacking duplicate stylesheets.
    */
   public injectShieldScript(wc: WebContents): void {
     if (!wc || wc.isDestroyed()) return
 
-    const apply = () => {
+    wc.on('dom-ready', () => {
       try {
+        if (wc.isDestroyed()) return
         const url = wc.getURL()
         if (!url || !url.startsWith('http')) return
 
         const parsed = new URL(url)
-        const origin = parsed.origin
-        const isWhitelisted = this.prefs.whitelistedOrigins.includes(origin)
+        const isWhitelisted = this.whitelist.has(parsed.origin)
 
-        // 1. Inject Ghostery / EasyList cosmetic filter CSS stylesheets
+        // 1. EasyList cosmetic filters (element hiding)
         if (this.blocker && this.prefs.adBlockerEnabled && !isWhitelisted) {
           try {
+            const domain = Request.fromRawDetails({ url }).domain || parsed.hostname
             const cosmetic = this.blocker.getCosmeticsFilters({
               url,
               hostname: parsed.hostname,
-              domain: parsed.hostname
+              domain
             })
             if (cosmetic && cosmetic.styles) {
+              // Default (author) origin: user-origin !important would override the page's own
+              // layout rules and could break scrolling on some sites.
               wc.insertCSS(cosmetic.styles).catch(() => {})
             }
-          } catch {}
+          } catch (err) {
+            console.warn('[PrivacyEngine] Cosmetic filter injection failed for', url, err)
+          }
         }
 
-        // 2. Inject Mullvad fingerprinting resistance and YouTube ad skipper
+        // 2. Fingerprinting resistance and YouTube ad skipper
         const script = getShieldInjectionScript(
           this.prefs.adBlockerEnabled,
           this.prefs.fingerprintResistance,
-          isWhitelisted
+          isWhitelisted,
+          this.prefs.spoofLanguage
         )
-
         wc.executeJavaScript(script).catch(() => {})
       } catch {}
-    }
-
-    wc.on('dom-ready', apply)
-    wc.on('did-finish-load', apply)
-    apply()
+    })
   }
 
-  private recordSiteStat(origin: string, type: 'ads' | 'trackers'): void {
-    const current = this.siteStats.get(origin) || { ads: 0, trackers: 0 }
-    if (type === 'ads') current.ads++
-    if (type === 'trackers') current.trackers++
-    this.siteStats.set(origin, current)
+  private recordBlocked(pageOrigin: string, type: 'ads' | 'trackers'): void {
+    if (type === 'ads') this.stats.adsBlockedTotal++
+    else this.stats.trackersBlockedTotal++
+    this.bumpDaily(type)
+
+    if (!pageOrigin) return
+    // Persistent per-site totals for the privacy report (bounded)
+    let total = this.siteTotals[pageOrigin]
+    if (!total) {
+      const keys = Object.keys(this.siteTotals)
+      if (keys.length >= 1000) {
+        // Drop the site with the fewest blocks to stay bounded
+        let minKey = keys[0]
+        for (const k of keys) {
+          const t = this.siteTotals[k]
+          const m = this.siteTotals[minKey]
+          if (t.ads + t.trackers < m.ads + m.trackers) minKey = k
+        }
+        delete this.siteTotals[minKey]
+      }
+      total = this.siteTotals[pageOrigin] = { ads: 0, trackers: 0 }
+    }
+    total[type]++
+    let current = this.siteStats.get(pageOrigin)
+    if (!current) {
+      if (this.siteStats.size >= MAX_SITE_STATS_ENTRIES) {
+        const oldest = this.siteStats.keys().next().value
+        if (oldest !== undefined) this.siteStats.delete(oldest)
+      }
+      current = { ads: 0, trackers: 0 }
+      this.siteStats.set(pageOrigin, current)
+    }
+    current[type]++
+  }
+
+  // --- Privacy report (persistent counters) ---
+
+  private loadReport(): void {
+    try {
+      if (fs.existsSync(this.reportPath)) {
+        const raw = JSON.parse(fs.readFileSync(this.reportPath, 'utf8'))
+        if (raw && typeof raw === 'object') {
+          if (raw.daily && typeof raw.daily === 'object') this.daily = raw.daily
+          if (raw.siteTotals && typeof raw.siteTotals === 'object') this.siteTotals = raw.siteTotals
+          if (typeof raw.since === 'string') this.reportSince = raw.since
+        }
+      }
+    } catch (err) {
+      console.warn('[PrivacyEngine] Could not load privacy report data:', err)
+    }
+  }
+
+  private bumpDaily(kind: 'ads' | 'trackers' | 'https'): void {
+    const day = new Date().toISOString().slice(0, 10)
+    let d = this.daily[day]
+    if (!d) {
+      d = this.daily[day] = { ads: 0, trackers: 0, https: 0 }
+      // Keep ~90 days
+      const days = Object.keys(this.daily).sort()
+      while (days.length > 90) delete this.daily[days.shift() as string]
+    }
+    d[kind]++
+    this.scheduleReportSave()
+  }
+
+  private scheduleReportSave(): void {
+    if (this.reportSaveTimer || !this.reportPath) return
+    this.reportSaveTimer = setTimeout(() => this.flushReport(), 5000)
+  }
+
+  /** Write report counters now (also called on quit) */
+  public flushReport(): void {
+    if (this.reportSaveTimer) {
+      clearTimeout(this.reportSaveTimer)
+      this.reportSaveTimer = null
+    }
+    if (!this.reportPath) return
+    try {
+      const tmp = `${this.reportPath}.tmp`
+      fs.writeFileSync(tmp, JSON.stringify({ since: this.reportSince, daily: this.daily, siteTotals: this.siteTotals }), 'utf8')
+      fs.renameSync(tmp, this.reportPath)
+    } catch (err) {
+      console.warn('[PrivacyEngine] Could not save privacy report data:', err)
+    }
+  }
+
+  public getReport(days = 7): PrivacyReport {
+    const series: PrivacyReport['days'] = []
+    const totals = { ads: 0, trackers: 0, https: 0 }
+    for (let i = days - 1; i >= 0; i--) {
+      const date = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10)
+      const d = this.daily[date] || { ads: 0, trackers: 0, https: 0 }
+      series.push({ date, ads: d.ads, trackers: d.trackers, https: d.https })
+      totals.ads += d.ads
+      totals.trackers += d.trackers
+      totals.https += d.https
+    }
+    const topSites = Object.entries(this.siteTotals)
+      .map(([origin, t]) => ({ origin, ads: t.ads, trackers: t.trackers, total: t.ads + t.trackers }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 10)
+    return { since: this.reportSince, days: series, totals, topSites }
+  }
+
+  public resetReport(): void {
+    this.daily = {}
+    this.siteTotals = {}
+    this.reportSince = new Date().toISOString()
+    this.flushReport()
+  }
+
+  // --- Focus Sprint blocking ---
+
+  public setFocusBlock(domains: string[] | null): void {
+    if (!domains || domains.length === 0) {
+      this.focusBlockedDomains = null
+      return
+    }
+    const clean = domains
+      .map((d) => d.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0])
+      .filter((d) => /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))
+    this.focusBlockedDomains = clean.length > 0 ? Array.from(new Set(clean)) : null
+  }
+
+  public getFocusBlock(): string[] | null {
+    return this.focusBlockedDomains ? [...this.focusBlockedDomains] : null
   }
 
   // --- Public Getters & Actions ---
 
   public getPrefs(): PrivacyShieldPrefs {
-    return { ...this.prefs }
+    return { ...this.prefs, whitelistedOrigins: [...this.prefs.whitelistedOrigins] }
   }
 
   public updatePrefs(updates: Partial<PrivacyShieldPrefs>): PrivacyShieldPrefs {
-    this.prefs = { ...this.prefs, ...updates }
+    const clean = sanitizePrefs(updates)
+    const prev = this.prefs
+    this.prefs = { ...this.prefs, ...clean }
+    this.whitelist = new Set(this.prefs.whitelistedOrigins)
+
+    if (prev.dnsOverHttps !== this.prefs.dnsOverHttps || prev.dohProvider !== this.prefs.dohProvider) {
+      this.applySecureDns()
+    }
+    const proxyChanged = prev.proxyMode !== this.prefs.proxyMode || prev.proxyUrl !== this.prefs.proxyUrl
+    if (proxyChanged) {
+      void this.applyProxy()
+    }
+    if (prev.webrtcProtection !== this.prefs.webrtcProtection || proxyChanged) {
+      this.applyWebRTCPolicyToAll()
+    }
+    if (prev.blockCookieBanners !== this.prefs.blockCookieBanners) {
+      if (!this.loadCachedEngine()) void this.refreshFilterLists()
+    }
+    if (prev.httpsOnlyMode !== this.prefs.httpsOnlyMode) {
+      this.httpsExemptHosts.clear()
+      this.httpsUpgradeAttempts.clear()
+      this.recentHttpsUpgrades.clear()
+    }
+
     this.savePrefs()
     this.broadcastState()
     return this.getPrefs()
@@ -507,30 +985,30 @@ export class PrivacyEngine {
     }
 
     const stats = this.siteStats.get(origin) || { ads: 0, trackers: 0 }
-    const isWhitelisted = this.prefs.whitelistedOrigins.includes(origin)
 
     return {
       origin,
-      isWhitelisted,
+      isWhitelisted: this.whitelist.has(origin),
       adsBlocked: stats.ads,
       trackersBlocked: stats.trackers,
       isHttps
     }
   }
 
-  public toggleSiteShield(origin: string): boolean {
+  public toggleSiteShield(originOrUrl: string): boolean {
+    const origin = safeOrigin(originOrUrl) || originOrUrl
     if (!origin) return false
 
-    const index = this.prefs.whitelistedOrigins.indexOf(origin)
-    if (index === -1) {
-      this.prefs.whitelistedOrigins.push(origin)
+    if (this.whitelist.has(origin)) {
+      this.whitelist.delete(origin)
     } else {
-      this.prefs.whitelistedOrigins.splice(index, 1)
+      this.whitelist.add(origin)
     }
+    this.prefs.whitelistedOrigins = Array.from(this.whitelist)
 
     this.savePrefs()
     this.broadcastState()
-    return !this.prefs.whitelistedOrigins.includes(origin)
+    return !this.whitelist.has(origin)
   }
 
   public getStats(): PrivacyStats {
@@ -542,11 +1020,14 @@ export class PrivacyEngine {
    */
   public async clearBrowsingData(): Promise<{ success: boolean }> {
     try {
-      const tabSession = session.fromPartition('persist:browser-tabs')
-      for (const ses of [tabSession, session.defaultSession]) {
-        await ses.clearStorageData({
-          storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'serviceworkers', 'cachestorage']
-        })
+      for (const ses of this.getSessions()) {
+        // defaultSession hosts the browser UI itself: its localStorage holds theme, settings and
+        // per-site zoom, so only drop its HTTP cache. Web content lives in the tab partitions.
+        if (ses !== session.defaultSession) {
+          await ses.clearStorageData({
+            storages: ['cookies', 'filesystem', 'indexdb', 'localstorage', 'shadercache', 'serviceworkers', 'cachestorage']
+          })
+        }
         await ses.clearCache()
         await ses.clearAuthCache()
         await ses.clearHostResolverCache()

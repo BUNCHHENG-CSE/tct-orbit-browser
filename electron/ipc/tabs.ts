@@ -2,6 +2,7 @@ import type { IpcMain } from 'electron'
 import type { CreateTabData, UpdateTabData } from '../../src/types/api'
 import { localStorageService } from '../storage/localStorage'
 import { secureHandle, Schemas } from '../security'
+import { privacyEngine } from '../privacy/privacyEngine'
 
 export function register(ipcMain: IpcMain): void {
   // List tabs for a specific space
@@ -25,6 +26,10 @@ export function register(ipcMain: IpcMain): void {
     Schemas.tabUpdate,
     async (_, id: string, data: UpdateTabData) => {
       if (!id) throw new Error('Tab ID is required')
+      // Private tabs can't be pinned (pinned tabs are restored after restart)
+      if (localStorageService.getTab(id)?.isPrivate && data.isPinned) {
+        data = { ...data, isPinned: false }
+      }
       return localStorageService.updateTab(id, data)
     }
   )
@@ -32,7 +37,13 @@ export function register(ipcMain: IpcMain): void {
   // Remove tab
   secureHandle(ipcMain, 'tabs:remove', Schemas.tabRemove, async (_, id: string) => {
     if (!id) throw new Error('Tab ID is required')
-    return localStorageService.removeTab(id)
+    const wasPrivate = !!localStorageService.getTab(id)?.isPrivate
+    const result = localStorageService.removeTab(id)
+    // Last private tab closed: forget all cookies, storage and cache of the private session
+    if (wasPrivate && !localStorageService.hasPrivateTabs()) {
+      void privacyEngine.clearPrivateSession()
+    }
+    return result
   })
 
   // Reorder tabs

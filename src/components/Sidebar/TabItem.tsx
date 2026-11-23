@@ -1,5 +1,6 @@
 import React, { useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck } from 'lucide-react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2 } from 'lucide-react'
+import { useThumbnailStore } from '@/store/useThumbnailStore'
 import { cleanUrl } from '@/lib/urlCleaner'
 import { toast } from 'sonner'
 import {
@@ -44,6 +45,31 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
   onCloseToRight
 }) => {
   const [faviconError, setFaviconError] = useState(false)
+  const thumbnail = useThumbnailStore((s) => s.thumbs[tab.id]?.dataUrl)
+
+  // Drag onto the page area to open in split view (see WebViewContainer drop zone)
+  const dragProps = {
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      e.dataTransfer.setData('application/x-tct-tab-id', tab.id)
+      e.dataTransfer.setData('text/uri-list', tab.url)
+      e.dataTransfer.effectAllowed = 'move'
+      window.dispatchEvent(new CustomEvent('tct:tab-drag-start', { detail: { tabId: tab.id } }))
+    },
+    onDragEnd: () => {
+      window.dispatchEvent(new CustomEvent('tct:tab-drag-end'))
+    }
+  }
+
+  const openInSplit = () => {
+    const store = useBrowserStore.getState()
+    if (tab.id === store.activeTabId) {
+      toast.info('This tab is already showing. Pick another tab for split view.')
+      return
+    }
+    store.setSplitTabId(tab.id)
+    store.setSplitActivePane('secondary')
+  }
 
   const handleCopyUrl = (e: React.MouseEvent) => {
     e.stopPropagation()
@@ -72,6 +98,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
 
   const content = collapsed ? (
     <div
+      {...dragProps}
       onClick={onSelect}
       onAuxClick={handleAuxClick}
       className={`group relative w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer transition-colors duration-150 select-none ${
@@ -117,6 +144,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
     </div>
   ) : (
     <div
+      {...dragProps}
       onClick={onSelect}
       onAuxClick={handleAuxClick}
       className={`group relative flex items-center gap-2 pl-3.5 pr-2 py-1.5 h-9 rounded-xl text-xs font-medium cursor-pointer transition-colors duration-150 select-none w-full max-w-full min-w-0 ${
@@ -161,6 +189,13 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
       }`}>
         {tab.title || 'New Tab'}
       </span>
+
+      {/* Private tab indicator */}
+      {tab.isPrivate && (
+        <span title="Private tab: nothing is saved after closing" className="shrink-0 flex items-center">
+          <EyeOff className="w-3.5 h-3.5 text-violet-500" />
+        </span>
+      )}
 
       {/* Sleeping indicator */}
       {tab.isSleeping && !isActive && (
@@ -233,6 +268,9 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="bg-popover border border-border text-popover-foreground shadow-2xl py-2 px-3 max-w-[260px] rounded-xl z-[100] pointer-events-none"
           >
             <div className="space-y-1">
+              {thumbnail && !isActive && (
+                <img src={thumbnail} alt="" className="w-[236px] aspect-[16/10] object-cover object-top rounded-lg border border-border mb-1" />
+              )}
               <p className="font-semibold text-xs leading-snug line-clamp-2 text-foreground">
                 {tab.title || 'New Tab'}
               </p>
@@ -247,9 +285,25 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
           </TooltipContent>
         </Tooltip>
       ) : (
-        <ContextMenuTrigger asChild>
-          {content}
-        </ContextMenuTrigger>
+        <Tooltip delayDuration={650}>
+          <ContextMenuTrigger asChild>
+            <TooltipTrigger asChild>{content}</TooltipTrigger>
+          </ContextMenuTrigger>
+          <TooltipContent
+            side="right"
+            sideOffset={12}
+            className="bg-popover border border-border text-popover-foreground shadow-2xl p-2 w-[256px] rounded-xl z-[100] pointer-events-none"
+          >
+            {thumbnail && !isActive ? (
+              <img src={thumbnail} alt="" className="w-full aspect-[16/10] object-cover object-top rounded-lg border border-border" />
+            ) : null}
+            <p className={`font-semibold text-xs leading-snug line-clamp-2 text-foreground ${thumbnail && !isActive ? 'mt-1.5' : ''}`}>
+              {tab.title || 'New Tab'}
+            </p>
+            {tabHostname && <p className="text-[11px] text-muted-foreground truncate font-mono mt-0.5">{tabHostname}</p>}
+            {tab.isSleeping && !isActive && <p className="text-[10.5px] text-indigo-400 mt-1">Sleeping to save memory</p>}
+          </TooltipContent>
+        </Tooltip>
       )}
 
       <ContextMenuContent className="w-48 bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl p-1 z-50">
@@ -263,6 +317,12 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
           <ContextMenuItem onClick={onReload} className="text-xs rounded-lg cursor-pointer">
             <RotateCw className="w-3.5 h-3.5 mr-2" />
             <span>Reload</span>
+          </ContextMenuItem>
+        )}
+        {!isActive && (
+          <ContextMenuItem onClick={openInSplit} className="text-xs rounded-lg cursor-pointer">
+            <Columns2 className="w-3.5 h-3.5 mr-2 text-primary" />
+            <span>Open in Split View</span>
           </ContextMenuItem>
         )}
         {onDuplicate && (

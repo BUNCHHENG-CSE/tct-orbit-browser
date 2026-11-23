@@ -47,6 +47,38 @@ export const NotesDrawer: React.FC = () => {
     }).catch(() => {})
   }, [activeSpaceId, isOpen])
 
+  // "Send to Space Notes" from the page context menu: append a quote + source link and save now.
+  // Done here (not via IPC directly) so a pending debounced save can't overwrite the clip.
+  const contentRef = useRef(content)
+  contentRef.current = content
+  useEffect(() => {
+    const onClip = async (e: Event) => {
+      const { text, url, title } = (e as CustomEvent).detail || {}
+      const spaceId = currentSpaceRef.current
+      if (!text || !spaceId || !api.notes?.save) return
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      const quote = String(text).trim().split(/\r?\n/).map((l: string) => `> ${l}`).join('\n')
+      const source = url ? `\n— [${String(title || url).replace(/[[\]]/g, '')}](${url})` : ''
+      const prev = contentRef.current
+      const sep = !prev ? '' : prev.endsWith('\n\n') ? '' : prev.endsWith('\n') ? '\n' : '\n\n'
+      const next = `${prev}${sep}${quote}${source}\n`
+      setContent(next)
+      try {
+        await api.notes.save(spaceId, next)
+        setSaveStatus('saved')
+        setTimeout(() => setSaveStatus('idle'), 1500)
+      } catch {
+        setSaveStatus('idle')
+        toast.error('Could not save to notes')
+      }
+    }
+    window.addEventListener('tct:clip-to-notes', onClip)
+    return () => window.removeEventListener('tct:clip-to-notes', onClip)
+  }, [])
+
   // Save content debounced
   const handleContentChange = (newVal: string) => {
     setContent(newVal)

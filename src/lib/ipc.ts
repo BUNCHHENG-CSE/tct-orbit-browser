@@ -72,7 +72,28 @@ export const api = {
   get system() {
     return getApi().system
   },
-  onOpenUrl(callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) {
+  get permissions() {
+    return getApi().permissions
+  },
+  get siteSettings() {
+    return getApi().siteSettings
+  },
+  get session() {
+    return getApi().session
+  },
+  get focus() {
+    return getApi().focus
+  },
+  get sync() {
+    return getApi().sync
+  },
+  get thumbnails() {
+    return getApi().thumbnails
+  },
+  get browserImport() {
+    return getApi().browserImport
+  },
+  onOpenUrl(callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean }) => void) {
     if (typeof window !== 'undefined' && window.api?.onOpenUrl) {
       return window.api.onOpenUrl(callback)
     }

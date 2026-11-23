@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { PrivacyAdvancedSettings } from './PrivacyAdvancedSettings'
 import {
   Dialog,
   DialogContent,
@@ -54,10 +55,17 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { BackupSettings } from './BackupSettings'
+import { SiteSettingsPanel } from './SiteSettingsPanel'
+import { BrowserImportPanel, EncryptedSyncPanel } from './DataSyncPanels'
+import { ALL_SHORTCUTS } from '@/lib/shortcuts'
+import { openLegal } from '@/components/Legal/LegalDialog'
+import { LEGAL_LAST_UPDATED } from '@/lib/legal'
 
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** Section to show when opened (e.g. 'backup' from the onboarding "Import now" button) */
+  initialTab?: string
 }
 
 type SettingsTab =
@@ -67,6 +75,7 @@ type SettingsTab =
   | 'tabs'
   | 'downloads'
   | 'privacy'
+  | 'sites'
   | 'performance'
   | 'shortcuts'
   | 'backup'
@@ -103,28 +112,7 @@ const WEB_COLOR_SCHEME_OPTIONS: {
   }
 ]
 
-const KEYBOARD_SHORTCUTS = [
-  { keys: [modKey, 'T'], description: 'Open new tab' },
-  { keys: [modKey, 'W'], description: 'Close active tab' },
-  { keys: [modKey, 'Shift', 'T'], description: 'Reopen closed tab' },
-  { keys: [modKey, 'Tab'], description: 'Switch to next tab' },
-  { keys: [modKey, 'Shift', 'Tab'], description: 'Switch to previous tab' },
-  { keys: [modKey, '1-8'], description: 'Switch to tab 1 through 8' },
-  { keys: [modKey, '9'], description: 'Switch to last tab' },
-  { keys: [modKey, 'L'], description: 'Focus address bar / URL' },
-  { keys: [modKey, 'K'], description: 'Open command bar' },
-  { keys: [modKey, 'R'], description: 'Reload webpage' },
-  { keys: [modKey, 'Shift', 'R'], description: 'Hard reload (bypass cache)' },
-  { keys: ['Alt', '←'], description: 'Back in history' },
-  { keys: ['Alt', '→'], description: 'Forward in history' },
-  { keys: [modKey, 'S'], description: 'Toggle sidebar rail' },
-  { keys: [modKey, '+'], description: 'Zoom in' },
-  { keys: [modKey, '-'], description: 'Zoom out' },
-  { keys: [modKey, '0'], description: 'Reset zoom' },
-  { keys: [modKey, 'Shift', 'S'], description: 'Capture tab screenshot' },
-  { keys: ['F12'], description: 'Toggle Developer Tools' },
-  { keys: [modKey, ','], description: 'Open browser settings' }
-]
+const KEYBOARD_SHORTCUTS = ALL_SHORTCUTS
 
 // Helper for local browser preferences
 const getLocalPref = <T,>(key: string, defaultValue: T): T => {
@@ -144,7 +132,7 @@ const setLocalPref = <T,>(key: string, value: T): void => {
   }
 }
 
-export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChange }) => {
+export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChange, initialTab }) => {
   const {
     settings,
     setDefaultSearchEngine,
@@ -158,7 +146,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setAskWhereToSave,
     setOpenFolderOnDownload,
     setDefaultZoom,
-    setAutoArchiveDuration
+    setAutoArchiveDuration,
+    updateSettings
   } = useSettings()
 
   const { activeSpace, updateSpace } = useSpaces()
@@ -166,6 +155,15 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
   const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const [activeTab, setActiveTab] = useState<SettingsTab>('appearance')
+
+  // Deep link: open straight to a section
+  useEffect(() => {
+    if (open && initialTab) setActiveTab(initialTab as SettingsTab)
+  }, [open, initialTab])
+
+  // Memory Saver (persisted in main-process settings, read by WebViewContainer)
+  const memorySaverEnabled = settings?.memorySaverEnabled ?? true
+  const sleepTimeoutMinutes = settings?.sleepTimeoutMinutes ?? 30
   const [newCustomUrl, setNewCustomUrl] = useState('')
 
   const startupBehavior: StartupBehavior = settings?.startupBehavior || 'previous-session'
@@ -297,6 +295,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     isClearing: isClearingPrivacyData,
     togglePref: togglePrivacyPref,
     setDohProvider,
+    setProxy: setPrivacyProxy,
+    applyMaxPrivacy,
+    testProxy,
     clearBrowsingData: clearPrivacyBrowsingData
   } = usePrivacyShield()
 
@@ -313,7 +314,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     setIsCheckingUpdates(true)
     setTimeout(() => {
       setIsCheckingUpdates(false)
-      toast.success(`TCT Orbit is up to date! (v${appInfo?.version || '0.1.2'})`)
+      // No update server is wired up yet: say so instead of claiming the app is current
+      toast.info(`You're running TCT Orbit v${appInfo?.version || '0.1.2'}`, {
+        description: 'Automatic update checks are not available yet. Get new versions from tctorbit.com.'
+      })
     }, 900)
   }
 
@@ -392,6 +396,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     { id: 'tabs', label: 'Spaces & Dock', icon: Layers },
     { id: 'downloads', label: 'Downloads', icon: Download },
     { id: 'privacy', label: 'Privacy & Shield', icon: Shield },
+    { id: 'sites', label: 'Site Settings', icon: Globe },
     { id: 'performance', label: 'Performance', icon: Zap },
     { id: 'shortcuts', label: 'Shortcuts', icon: Keyboard },
     { id: 'backup', label: 'Data & Backup', icon: Database },
@@ -1443,7 +1448,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                           Encrypted DNS (DNS over HTTPS)
                         </p>
                         <p className="text-[11px] text-muted-foreground">
-                          Encrypts domain name queries with zero unencrypted fallback (prevents ISP snooping)
+                          Encrypts domain name queries so your ISP can't see them (falls back to system DNS if the resolver is unreachable)
                         </p>
                       </div>
                       <Switch
@@ -1552,6 +1557,15 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                 </div>
 
+                {/* Advanced anonymity: proxy/Tor, cookie banners, pings, referrer, locale, presets */}
+                <PrivacyAdvancedSettings
+                  prefs={privacyPrefs}
+                  togglePref={togglePrivacyPref}
+                  setProxy={setPrivacyProxy}
+                  applyMaxPrivacy={applyMaxPrivacy}
+                  testProxy={testProxy}
+                />
+
                 {/* Clear Browsing Data Card */}
                 <div className="pt-2 border-t border-border">
                   <div className="p-3 rounded-xl bg-muted/40 border border-border flex items-center justify-between">
@@ -1592,17 +1606,39 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                       </Badge>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
-                      Puts inactive background tabs to sleep after 30 minutes to free memory
+                      Puts background tabs you haven't used for a while to sleep to free memory (pinned and playing tabs stay awake)
                     </p>
                   </div>
                   <Switch
-                    checked={tabSleeping}
+                    checked={memorySaverEnabled}
                     onCheckedChange={(val) => {
                       setTabSleeping(val)
                       setLocalPref('tab_sleeping', val)
+                      void updateSettings({ memorySaverEnabled: val })
                     }}
                   />
                 </div>
+
+                {memorySaverEnabled && (
+                  <div className="flex items-center justify-between -mt-2 pl-3 border-l-2 border-border">
+                    <p className="text-[11px] text-muted-foreground">Sleep tabs after</p>
+                    <div className="flex items-center gap-1">
+                      {[5, 15, 30, 60, 120].map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => void updateSettings({ sleepTimeoutMinutes: m })}
+                          className={`px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${
+                            sleepTimeoutMinutes === m
+                              ? 'bg-primary text-primary-foreground'
+                              : 'bg-muted text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {m < 60 ? `${m} min` : `${m / 60} h`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between">
                   <div>
@@ -1695,8 +1731,17 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
               </div>
             )}
 
+            {/* SITE SETTINGS TAB */}
+            {activeTab === 'sites' && <SiteSettingsPanel />}
+
             {/* 8. BACKUP & RESTORE TAB */}
-            {activeTab === 'backup' && <BackupSettings />}
+            {activeTab === 'backup' && (
+              <div className="space-y-4">
+                <BrowserImportPanel />
+                <EncryptedSyncPanel />
+                <BackupSettings />
+              </div>
+            )}
 
             {/* 9. ABOUT TAB */}
             {activeTab === 'about' && (
@@ -1741,10 +1786,25 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                   <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                     <p>Platform: {getPlatformDescription()}</p>
-                    <p>Runtime: Chromium 130 • Electron 33.2 • Node 20</p>
+                    <p>Runtime: Chromium {navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1]?.split('.')[0] || '—'} • Electron</p>
                     <p>Graphics: GPU Rasterization • Metal / Direct3D / Wayland-X11 Auto</p>
-                    <p>Storage: 100% Local Machine Storage (Zero Cloud Sync)</p>
-                    <p>Privacy: All Data Stored Locally on Your Computer</p>
+                    <p>Storage: on this computer (optional encrypted sync file in a folder you choose)</p>
+                    <p>Privacy: no accounts, analytics or telemetry</p>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-muted/40 border border-border flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold text-foreground">Legal</p>
+                    <p className="text-[11px] text-muted-foreground">Last updated {LEGAL_LAST_UPDATED}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={() => openLegal('terms')} className="text-xs h-8">
+                      Terms of Use
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={() => openLegal('privacy')} className="text-xs h-8">
+                      Privacy Policy
+                    </Button>
                   </div>
                 </div>
 

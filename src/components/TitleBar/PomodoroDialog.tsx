@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   Dialog,
   DialogContent,
@@ -13,9 +13,12 @@ import {
   RotateCcw,
   Coffee,
   Brain,
-  ShieldAlert
+  ShieldAlert,
+  X,
+  Plus
 } from 'lucide-react'
-import { usePomodoroStore, DISTRACTING_DOMAINS, WORK_TIME, BREAK_TIME } from '@/store/usePomodoroStore'
+import { usePomodoroStore, WORK_TIME, BREAK_TIME, normalizeDomain } from '@/store/usePomodoroStore'
+import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { extractDomain } from '@/lib/domainZoom'
 import { toast } from 'sonner'
@@ -32,6 +35,9 @@ export const PomodoroDialog: React.FC = () => {
   const tick = usePomodoroStore((s) => s.tick)
   const blockDistractions = usePomodoroStore((s) => s.blockDistractions)
   const setBlockDistractions = usePomodoroStore((s) => s.setBlockDistractions)
+  const blockedDomains = usePomodoroStore((s) => s.blockedDomains)
+  const setBlockedDomains = usePomodoroStore((s) => s.setBlockedDomains)
+  const [newDomain, setNewDomain] = useState('')
 
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
@@ -47,26 +53,37 @@ export const PomodoroDialog: React.FC = () => {
     return () => clearInterval(interval)
   }, [isRunning, tick])
 
-  // Distraction alert on navigating to distracting site while running sprint
+  // Focus Sprint blocking: the network layer refuses navigations to listed sites during a work sprint
+  const focusActive = isRunning && mode === 'work' && blockDistractions && blockedDomains.length > 0
+  useEffect(() => {
+    api.focus?.setBlock(focusActive ? blockedDomains : null).catch(() => {})
+  }, [focusActive, blockedDomains])
+
+  // Already on a blocked site when the sprint starts: nudge (the page is not torn down mid-task)
   const lastWarnedDomainRef = useRef<string>('')
   useEffect(() => {
-    if (!isRunning || mode !== 'work' || !blockDistractions || !activeTab?.url) return
-
+    if (!focusActive || !activeTab?.url) return
     const domain = extractDomain(activeTab.url)
     if (!domain) return
-
-    const isDistracting = Array.from(DISTRACTING_DOMAINS).some(
-      (d) => domain === d || domain.endsWith('.' + d)
-    )
-
+    const isDistracting = blockedDomains.some((d) => domain === d || domain.endsWith('.' + d))
     if (isDistracting && lastWarnedDomainRef.current !== domain) {
       lastWarnedDomainRef.current = domain
-      toast.warning(`Focus Sprint in progress!`, {
-        description: `${domain} might distract you from your sprint.`,
+      toast.warning('Focus Sprint in progress', {
+        description: `${domain} is on your block list. New visits are blocked until the sprint ends.`,
         duration: 4000
       })
     }
-  }, [activeTab?.url, isRunning, mode, blockDistractions])
+  }, [activeTab?.url, focusActive, blockedDomains])
+
+  const addDomain = () => {
+    const d = normalizeDomain(newDomain)
+    if (!d) {
+      toast.error('Enter a site like reddit.com')
+      return
+    }
+    setBlockedDomains([...blockedDomains, d])
+    setNewDomain('')
+  }
 
   const minutes = Math.floor(timeLeft / 60)
   const seconds = timeLeft % 60
@@ -175,17 +192,48 @@ export const PomodoroDialog: React.FC = () => {
 
         {/* Distraction Blocker Setting */}
         <div className="mt-3 pt-3 border-t border-border/40 flex items-center justify-between text-xs">
-          <label className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground select-none">
+          <label htmlFor="tct-focus-block" className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground select-none">
             <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
-            <span>Warn when visiting distracting websites</span>
+            <span>Block distracting sites during focus sprints</span>
           </label>
           <input
+            id="tct-focus-block"
             type="checkbox"
             checked={blockDistractions}
             onChange={(e) => setBlockDistractions(e.target.checked)}
             className="rounded border-border text-primary focus:ring-primary cursor-pointer w-4 h-4"
           />
         </div>
+        {blockDistractions && (
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto" data-lenis-prevent>
+              {blockedDomains.map((d) => (
+                <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-muted border border-border text-[11px] text-foreground">
+                  {d}
+                  <button
+                    onClick={() => setBlockedDomains(blockedDomains.filter((x) => x !== d))}
+                    className="p-0.5 rounded hover:bg-background text-muted-foreground hover:text-foreground"
+                    aria-label={`Remove ${d}`}
+                  >
+                    <X className="w-2.5 h-2.5" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex items-center gap-1.5">
+              <input
+                value={newDomain}
+                onChange={(e) => setNewDomain(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && addDomain()}
+                placeholder="Add a site, e.g. news.ycombinator.com"
+                className="flex-1 h-7 px-2 rounded-md bg-background border border-border text-[11px] outline-none focus:border-primary"
+              />
+              <button onClick={addDomain} className="h-7 px-2 rounded-md bg-muted hover:bg-accent text-[11px] flex items-center gap-1 border border-border">
+                <Plus className="w-3 h-3" /> Add
+              </button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   )

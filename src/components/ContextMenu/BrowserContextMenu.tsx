@@ -28,7 +28,9 @@ import {
   VolumeX,
   Pin,
   PinOff,
-  ShieldCheck
+  ShieldCheck,
+  EyeOff,
+  StickyNote
 } from 'lucide-react'
 import { cleanUrl } from '@/lib/urlCleaner'
 import { api } from '@/lib/ipc'
@@ -367,7 +369,8 @@ export const BrowserContextMenu: React.FC = () => {
       const newTab = await api.tabs.create({
         spaceId: targetSpace,
         url: srcUrl,
-        title: `Source of ${activeTab?.title || 'page'}`
+        title: `Source of ${activeTab?.title || 'page'}`,
+        isPrivate: !!activeTab?.isPrivate
       })
       useBrowserStore.getState().addTabToStore(targetSpace, newTab, activeTabId, true)
     }
@@ -380,7 +383,22 @@ export const BrowserContextMenu: React.FC = () => {
       const newTab = await api.tabs.create({
         spaceId: activeSpaceId,
         url: menu.linkURL,
-        title: 'Loading...'
+        title: 'Loading...',
+        // Links opened from a private tab stay private
+        isPrivate: !!activeTab?.isPrivate
+      })
+      useBrowserStore.getState().addTabToStore(activeSpaceId, newTab, activeTabId, true)
+    }
+  }
+
+  const handleOpenLinkInPrivateTab = async () => {
+    closeMenu()
+    if (menu.linkURL && activeSpaceId) {
+      const newTab = await api.tabs.create({
+        spaceId: activeSpaceId,
+        url: menu.linkURL,
+        title: 'Loading...',
+        isPrivate: true
       })
       useBrowserStore.getState().addTabToStore(activeSpaceId, newTab, activeTabId, true)
     }
@@ -417,7 +435,8 @@ export const BrowserContextMenu: React.FC = () => {
       const newTab = await api.tabs.create({
         spaceId: activeSpaceId,
         url: menu.srcURL,
-        title: 'Image'
+        title: 'Image',
+        isPrivate: !!activeTab?.isPrivate
       })
       useBrowserStore.getState().addTabToStore(activeSpaceId, newTab, activeTabId, true)
     }
@@ -460,10 +479,26 @@ export const BrowserContextMenu: React.FC = () => {
       const newTab = await api.tabs.create({
         spaceId: activeSpaceId,
         url: searchUrl,
-        title: `${menu.selectionText.trim()} - Search`
+        title: `${menu.selectionText.trim()} - Search`,
+        isPrivate: !!activeTab?.isPrivate
       })
       useBrowserStore.getState().addTabToStore(activeSpaceId, newTab, activeTabId, true)
     }
+  }
+
+  // Append the selected text (with a link back to the page) to this space's notes
+  const handleClipToNotes = () => {
+    closeMenu()
+    const text = menu.selectionText?.trim()
+    if (!text) return
+    window.dispatchEvent(
+      new CustomEvent('tct:clip-to-notes', {
+        detail: { text, url: menu.pageURL || activeTab?.url || '', title: activeTab?.title || '' }
+      })
+    )
+    toast.success('Added to Space Notes', {
+      action: { label: 'Open notes', onClick: () => useBrowserStore.getState().setNotesDrawerOpen(true) }
+    })
   }
 
   // Editable input actions
@@ -534,9 +569,9 @@ export const BrowserContextMenu: React.FC = () => {
             onClick={handleOpenLinkInNewTab}
           />
           <MenuItem
-            icon={<ExternalLink className="w-4 h-4" />}
-            label="Open link in new window"
-            onClick={handleOpenLinkInNewTab}
+            icon={<EyeOff className="w-4 h-4 text-violet-500" />}
+            label="Open link in private tab"
+            onClick={handleOpenLinkInPrivateTab}
           />
           <MenuItem
             icon={<Copy className="w-4 h-4" />}
@@ -602,6 +637,11 @@ export const BrowserContextMenu: React.FC = () => {
             icon={<Search className="w-4 h-4 text-primary" />}
             label={`Search for "${menu.selectionText!.length > 18 ? menu.selectionText!.slice(0, 18) + '…' : menu.selectionText}"`}
             onClick={handleSearchSelection}
+          />
+          <MenuItem
+            icon={<StickyNote className="w-4 h-4 text-amber-500" />}
+            label="Send to Space Notes"
+            onClick={handleClipToNotes}
           />
           <Divider />
           <MenuItem

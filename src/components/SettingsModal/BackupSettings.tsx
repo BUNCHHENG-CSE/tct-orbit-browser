@@ -98,7 +98,11 @@ export const BackupSettings: React.FC = () => {
       const inspection = await api.backup.selectAndInspectFile()
       if (!inspection) return
 
-      if (!inspection.valid) {
+      if (inspection.encrypted) {
+        // Encrypted .orbitsync file: the sync panel asks for the passphrase
+        window.dispatchEvent(new CustomEvent('tct:encrypted-backup-selected', { detail: { content: inspection.rawContent } }))
+        toast.info('Encrypted file selected', { description: 'Enter its passphrase in the "Encrypted sync file" section.' })
+      } else if (!inspection.valid) {
         toast.error('Invalid backup file', { description: inspection.error })
         setInspectedFile(null)
       } else {
@@ -123,8 +127,8 @@ export const BackupSettings: React.FC = () => {
     const file = e.dataTransfer.files?.[0]
     if (!file) return
 
-    if (!file.name.endsWith('.json')) {
-      toast.error('Please drop a valid .json backup file.')
+    if (!file.name.endsWith('.json') && !file.name.endsWith('.orbitsync')) {
+      toast.error('Please drop a .json or .orbitsync backup file.')
       return
     }
 
@@ -133,7 +137,11 @@ export const BackupSettings: React.FC = () => {
       const text = await file.text()
       const inspection = await api.backup.inspectJsonString(text)
 
-      if (!inspection.valid) {
+      if (inspection.encrypted) {
+        // Encrypted .orbitsync file: the sync panel asks for the passphrase
+        window.dispatchEvent(new CustomEvent('tct:encrypted-backup-selected', { detail: { content: inspection.rawContent } }))
+        toast.info('Encrypted file selected', { description: 'Enter its passphrase in the "Encrypted sync file" section.' })
+      } else if (!inspection.valid) {
         toast.error('Invalid backup file', { description: inspection.error })
         setInspectedFile(null)
       } else {
@@ -160,7 +168,11 @@ export const BackupSettings: React.FC = () => {
       const text = await file.text()
       const inspection = await api.backup.inspectJsonString(text)
 
-      if (!inspection.valid) {
+      if (inspection.encrypted) {
+        // Encrypted .orbitsync file: the sync panel asks for the passphrase
+        window.dispatchEvent(new CustomEvent('tct:encrypted-backup-selected', { detail: { content: inspection.rawContent } }))
+        toast.info('Encrypted file selected', { description: 'Enter its passphrase in the "Encrypted sync file" section.' })
+      } else if (!inspection.valid) {
         toast.error('Invalid backup file', { description: inspection.error })
         setInspectedFile(null)
       } else {

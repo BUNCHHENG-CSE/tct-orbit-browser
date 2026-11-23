@@ -81,6 +81,11 @@ const DEFAULT_DATA: LocalBrowserData = {
 class LocalStorageService {
   private data: LocalBrowserData = DEFAULT_DATA
   private filePath: string = ''
+  /** Crash detection: a lock file exists while the browser runs and is removed on clean exit */
+  private lockPath = ''
+  private crashedLastRun = false
+  /** Tabs from the previous session that the startup policy did not reopen (restorable on demand) */
+  private restorableTabs: Tab[] = []
 
   public init(): void {
     try {
@@ -91,6 +96,12 @@ class LocalStorageService {
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true })
       }
+
+      this.lockPath = path.join(app.getPath('userData'), 'session.lock')
+      try {
+        this.crashedLastRun = fs.existsSync(this.lockPath)
+        fs.writeFileSync(this.lockPath, String(process.pid), 'utf-8')
+      } catch {}
 
       if (fs.existsSync(this.filePath)) {
         const fileContent = fs.readFileSync(this.filePath, 'utf-8')
@@ -139,7 +150,8 @@ class LocalStorageService {
       }
       // Atomic write pattern: write to unique .tmp file, then renameSync
       tmpPath = `${this.filePath}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`
-      fs.writeFileSync(tmpPath, JSON.stringify(this.data), 'utf-8')
+      // Private tabs live in memory only: never written to disk
+      fs.writeFileSync(tmpPath, JSON.stringify(this.getPersistableState()), 'utf-8')
       fs.renameSync(tmpPath, this.filePath)
     } catch (err) {
       console.error('[LocalStorage] Failed to write browser data atomically to disk:', err)
@@ -173,6 +185,8 @@ class LocalStorageService {
       ...(updates.openFolderOnDownload !== undefined ? { openFolderOnDownload: updates.openFolderOnDownload } : {}),
       ...(updates.defaultZoom !== undefined ? { defaultZoom: updates.defaultZoom } : {}),
       ...(updates.autoArchiveDuration !== undefined ? { autoArchiveDuration: updates.autoArchiveDuration } : {}),
+      ...(updates.memorySaverEnabled !== undefined ? { memorySaverEnabled: updates.memorySaverEnabled } : {}),
+      ...(updates.sleepTimeoutMinutes !== undefined ? { sleepTimeoutMinutes: updates.sleepTimeoutMinutes } : {}),
       updatedAt: new Date().toISOString()
     }
     this.save()
@@ -195,6 +209,7 @@ class LocalStorageService {
 
     const activeSpace = this.data.spaces.find((s) => s.isActive) || this.data.spaces[0]
     const spaceId = activeSpace ? activeSpace.id : 'default-personal-space'
+    const previousTabs = this.data.tabs.filter((t) => !t.isPrivate)
 
     if (startupBehavior === 'new-tab') {
       // Pinned tabs always survive across restarts in all spaces
@@ -304,6 +319,55 @@ class LocalStorageService {
         this.save()
       }
     }
+
+    // Remember what the policy closed so "Restore previous session" can bring it back
+    const keptIds = new Set(this.data.tabs.map((t) => t.id))
+    this.restorableTabs = previousTabs.filter((t) => !keptIds.has(t.id))
+  }
+
+  // --- Session restore ---
+
+  public getSessionRestoreInfo(): { crashed: boolean; restorableCount: number } {
+    return { crashed: this.crashedLastRun, restorableCount: this.restorableTabs.length }
+  }
+
+  /** Reopen tabs from the previous session that were not restored at startup */
+  public restorePreviousSession(): number {
+    if (this.restorableTabs.length === 0) return 0
+    const spaceIds = new Set(this.data.spaces.map((s) => s.id))
+    const fallbackSpace = (this.data.spaces.find((s) => s.isActive) || this.data.spaces[0])?.id
+    const existingUrls = new Set(this.data.tabs.map((t) => `${t.spaceId}|${t.url}`))
+    let restored = 0
+    for (const tab of this.restorableTabs) {
+      const targetSpace = spaceIds.has(tab.spaceId) ? tab.spaceId : fallbackSpace
+      if (!targetSpace || existingUrls.has(`${targetSpace}|${tab.url}`)) continue
+      const order = this.data.tabs.filter((t) => t.spaceId === targetSpace).length
+      this.data.tabs.push({
+        ...tab,
+        id: `tab-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        spaceId: targetSpace,
+        order,
+        isSleeping: true,
+        lastVisited: new Date().toISOString()
+      })
+      existingUrls.add(`${targetSpace}|${tab.url}`)
+      restored++
+    }
+    this.restorableTabs = []
+    this.crashedLastRun = false
+    if (restored > 0) this.save()
+    return restored
+  }
+
+  public dismissSessionRestore(): void {
+    this.crashedLastRun = false
+  }
+
+  /** Clean shutdown: remove the crash-detection lock */
+  public markCleanExit(): void {
+    try {
+      if (this.lockPath && fs.existsSync(this.lockPath)) fs.unlinkSync(this.lockPath)
+    } catch {}
   }
 
   // --- Spaces ---
@@ -437,7 +501,8 @@ class LocalStorageService {
       isPinned: data.isPinned || false,
       order: insertOrder,
       lastVisited: new Date().toISOString(),
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      ...(data.isPrivate ? { isPrivate: true, isPinned: false } : {})
     }
     this.data.tabs.push(newTab)
     this.save()
@@ -460,6 +525,20 @@ class LocalStorageService {
     }
     this.save()
     return { ...this.data.tabs[idx] }
+  }
+
+  public getTab(id: string): Tab | undefined {
+    return this.data.tabs.find((t) => t.id === id)
+  }
+
+  public hasPrivateTabs(): boolean {
+    return this.data.tabs.some((t) => t.isPrivate)
+  }
+
+  /** State without private tabs (for disk writes and backups) */
+  private getPersistableState(): LocalBrowserData {
+    if (!this.data.tabs.some((t) => t.isPrivate)) return this.data
+    return { ...this.data, tabs: this.data.tabs.filter((t) => !t.isPrivate) }
   }
 
   public removeTab(id: string): boolean {
@@ -506,7 +585,7 @@ class LocalStorageService {
 
   // --- Backup & Restore Accessors ---
   public getFullState(): LocalBrowserData {
-    return JSON.parse(JSON.stringify(this.data))
+    return JSON.parse(JSON.stringify(this.getPersistableState()))
   }
 
   public setFullState(newData: LocalBrowserData): void {

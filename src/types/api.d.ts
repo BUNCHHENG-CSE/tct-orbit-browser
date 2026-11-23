@@ -29,6 +29,8 @@ export interface Tab {
   isAudible?: boolean;
   isMuted?: boolean;
   isSleeping?: boolean;
+  /** Private tab: in-memory session, never saved to disk or history */
+  isPrivate?: boolean;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -71,8 +73,6 @@ export interface Settings {
   autoArchiveDuration?: AutoArchiveDuration;
   memorySaverEnabled?: boolean;
   sleepTimeoutMinutes?: number;
-  memorySaverEnabled?: boolean;
-  sleepTimeoutMinutes?: number;
   updatedAt: string | Date;
 }
 
@@ -100,6 +100,7 @@ export interface CreateTabData {
   favicon?: string | null;
   isPinned?: boolean;
   order?: number;
+  isPrivate?: boolean;
 }
 
 export interface UpdateTabData {
@@ -178,6 +179,14 @@ export interface DevToolsState {
 
 export type DohProvider = 'mullvad' | 'cloudflare' | 'quad9' | 'adguard';
 export type MasterShieldStatus = 'ACTIVE' | 'PARTIALLY_ACTIVE' | 'OFF';
+export type ProxyMode = 'off' | 'system' | 'tor' | 'custom';
+
+export interface ProxyTestResult {
+  ok: boolean;
+  ip?: string;
+  isTor?: boolean;
+  error?: string;
+}
 
 export interface PrivacyShieldPrefs {
   adBlockerEnabled: boolean;
@@ -191,6 +200,12 @@ export interface PrivacyShieldPrefs {
   stripTrackingParams: boolean;
   blockThirdPartyCookies: boolean;
   clearCacheOnExit: boolean;
+  blockPings: boolean;
+  strictReferrer: boolean;
+  spoofLanguage: boolean;
+  blockCookieBanners: boolean;
+  proxyMode: ProxyMode;
+  proxyUrl: string;
   whitelistedOrigins: string[];
 }
 
@@ -223,6 +238,8 @@ export interface DownloadProgress {
   progress: number;
   state: 'progressing' | 'completed' | 'cancelled' | 'interrupted';
   savePath: string;
+  isPaused?: boolean;
+  canResume?: boolean;
 }
 
 export interface DownloadCompleted {
@@ -242,6 +259,9 @@ export interface DownloadRecord {
   startTime: string;
   endTime?: string;
   url?: string;
+  /** Live only (not persisted): paused by the user or interrupted by the network */
+  isPaused?: boolean;
+  canResume?: boolean;
 }
 
 export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy' | 'history';
@@ -282,6 +302,8 @@ export interface BackupInspectionResult {
   categories: string[];
   rawContent: string;
   error?: string;
+  /** File is passphrase-encrypted (.orbitsync): decrypt it before importing */
+  encrypted?: boolean;
 }
 
 export interface ImportBackupOptions {
@@ -478,6 +500,10 @@ export interface ElectronAPI {
     toggleSiteShield: (origin: string) => Promise<boolean>;
     getStats: () => Promise<PrivacyStats>;
     clearBrowsingData: () => Promise<{ success: boolean }>;
+    testProxy: () => Promise<ProxyTestResult>;
+    getReport: (days?: number) => Promise<PrivacyReport>;
+    resetReport: () => Promise<boolean>;
+    onHttpsFallback: (callback: (info: { host: string; url: string; webContentsId?: number }) => void) => () => void;
     onStateChanged: (callback: (state: PrivacyEngineState) => void) => () => void;
   };
   downloads: {
@@ -489,6 +515,9 @@ export interface ElectronAPI {
     deleteFile: (id: string, filePath?: string) => Promise<boolean>;
     list: () => Promise<DownloadRecord[]>;
     clear: () => Promise<boolean>;
+    pause: (id: string) => Promise<boolean>;
+    resume: (id: string) => Promise<boolean>;
+    cancel: (id: string) => Promise<boolean>;
     onStarted?: (callback: (data: DownloadCompleted) => void) => () => void;
     onProgress?: (callback: (data: DownloadProgress) => void) => () => void;
     onCompleted?: (callback: (data: DownloadCompleted) => void) => () => void;
@@ -529,7 +558,43 @@ export interface ElectronAPI {
     killProcess: (data: { pid?: number; webContentsId?: number }) => Promise<boolean>;
     trimMemory: () => Promise<boolean>;
   };
-  onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => () => void;
+  permissions: {
+    respond: (id: string, allow: boolean, remember: boolean) => Promise<boolean>;
+    onRequest: (callback: (req: PermissionPromptRequest) => void) => () => void;
+    onDismiss: (callback: (id: string) => void) => () => void;
+  };
+  siteSettings: {
+    list: () => Promise<SiteSettingsList>;
+    setPermission: (origin: string, permission: SitePermission, decision: 'allow' | 'block' | null) => Promise<boolean>;
+    resetPermissions: (origin: string) => Promise<boolean>;
+  };
+  session: {
+    getRestoreInfo: () => Promise<{ crashed: boolean; restorableCount: number }>;
+    restore: () => Promise<number>;
+    dismiss: () => Promise<boolean>;
+  };
+  focus: {
+    setBlock: (domains: string[] | null) => Promise<string[] | null>;
+    onBlocked: (callback: (info: { url: string; host: string; webContentsId?: number }) => void) => () => void;
+  };
+  sync: {
+    getConfig: () => Promise<SyncConfig>;
+    configure: (opts: { enabled?: boolean; filePath?: string; passphrase?: string }) => Promise<SyncConfig>;
+    chooseFile: () => Promise<string | null>;
+    syncNow: () => Promise<{ success: boolean; error?: string; filePath?: string }>;
+    readFile: () => Promise<string | null>;
+    exportEncrypted: (passphrase: string) => Promise<{ success: boolean; canceled?: boolean; filePath?: string; error?: string }>;
+    decrypt: (content: string, passphrase: string) => Promise<{ success: boolean; content?: string; error?: string }>;
+  };
+  thumbnails: {
+    capture: (webContentsId: number) => Promise<string | null>;
+  };
+  browserImport: {
+    detect: () => Promise<ImportSource[]>;
+    run: (sourceId: string, bookmarks: boolean, history: boolean) => Promise<BrowserImportResult>;
+    bookmarksHtml: () => Promise<BrowserImportResult | null>;
+  };
+  onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;
 }
 
@@ -537,4 +602,52 @@ declare global {
   interface Window {
     api: ElectronAPI;
   }
+}
+
+// --- Site permissions, sync, import, privacy report ---
+
+export type SitePermission = 'camera' | 'microphone' | 'geolocation' | 'notifications' | 'clipboard-read' | 'midi';
+
+export interface PermissionPromptRequest {
+  id: string;
+  origin: string;
+  permissions: SitePermission[];
+  isPrivate: boolean;
+}
+
+export interface SiteSettingsList {
+  permissions: Record<string, Partial<Record<SitePermission, 'allow' | 'block'>>>;
+  shieldDisabled: string[];
+  blocked: Array<{ origin: string; ads: number; trackers: number; total: number }>;
+}
+
+export interface PrivacyReport {
+  since: string;
+  days: Array<{ date: string; ads: number; trackers: number; https: number }>;
+  totals: { ads: number; trackers: number; https: number };
+  topSites: Array<{ origin: string; ads: number; trackers: number; total: number }>;
+}
+
+export interface SyncConfig {
+  enabled: boolean;
+  filePath: string;
+  hasPassphrase: boolean;
+  lastSyncedAt?: string;
+}
+
+export interface ImportSource {
+  id: string;
+  browser: string;
+  profileName: string;
+  kind: 'chromium' | 'firefox';
+  profilePath: string;
+  hasBookmarks: boolean;
+  hasHistory: boolean;
+}
+
+export interface BrowserImportResult {
+  success: boolean;
+  bookmarks: number;
+  history: number;
+  error?: string;
 }

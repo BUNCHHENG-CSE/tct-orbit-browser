@@ -24,6 +24,8 @@ function getUniqueFilePath(directory: string, filename: string): string {
 }
 
 let isDownloadManagerSetup = false
+/** Live download handles (for pause / resume / cancel), removed when done */
+const activeItems = new Map<string, DownloadItem>()
 
 export function setupDownloadManager(getMainWindow: () => BrowserWindow | null): void {
   if (isDownloadManagerSetup) return
@@ -82,9 +84,11 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
         })
       }
 
+      activeItems.set(downloadId, item)
+
       // Track progress
       item.on('updated', (_updateEvent, state) => {
-        if (state === 'progressing') {
+        if (state === 'progressing' || state === 'interrupted') {
           const total = item.getTotalBytes()
           const received = item.getReceivedBytes()
           const progress = total > 0 ? Math.round((received / total) * 100) : 0
@@ -105,7 +109,10 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
               totalBytes: total,
               progress,
               state: 'progressing',
-              savePath: item.getSavePath()
+              savePath: item.getSavePath(),
+              // Paused by the user, or interrupted by the network (resumable)
+              isPaused: item.isPaused() || state === 'interrupted',
+              canResume: item.canResume()
             })
           }
         }
@@ -113,6 +120,7 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
 
       // Track completion / interruption
       item.once('done', (_doneEvent, state) => {
+        activeItems.delete(downloadId)
         const finalPath = item.getSavePath()
         const win = getMainWindow()
 
@@ -161,6 +169,13 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
     attachListener(tabSession)
   } catch (err) {
     console.warn('[DownloadManager] Error attaching to persist:browser-tabs session:', err)
+  }
+
+  try {
+    // Private tabs (in-memory session) download through the same manager
+    attachListener(session.fromPartition('private-tabs'))
+  } catch (err) {
+    console.warn('[DownloadManager] Error attaching to private-tabs session:', err)
   }
 
   try {
@@ -258,6 +273,46 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
   // 7. List all download records
   secureHandle(ipcMain, 'downloads:list', null, async () => {
     return downloadsService.list()
+  })
+
+  // Pause / resume / cancel an in-progress download
+  const sendState = (id: string, item: DownloadItem) => {
+    const win = getMainWindow()
+    if (!win || win.isDestroyed()) return
+    win.webContents.send('downloads:progress', {
+      id,
+      filename: item.getFilename(),
+      receivedBytes: item.getReceivedBytes(),
+      totalBytes: item.getTotalBytes(),
+      progress: item.getTotalBytes() > 0 ? Math.round((item.getReceivedBytes() / item.getTotalBytes()) * 100) : 0,
+      state: 'progressing',
+      savePath: item.getSavePath(),
+      isPaused: item.isPaused(),
+      canResume: item.canResume()
+    })
+  }
+
+  secureHandle(ipcMain, 'downloads:pause', Schemas.downloadsControl, async (_, id: string) => {
+    const item = activeItems.get(id)
+    if (!item) return false
+    item.pause()
+    sendState(id, item)
+    return true
+  })
+
+  secureHandle(ipcMain, 'downloads:resume', Schemas.downloadsControl, async (_, id: string) => {
+    const item = activeItems.get(id)
+    if (!item || !item.canResume()) return false
+    item.resume()
+    sendState(id, item)
+    return true
+  })
+
+  secureHandle(ipcMain, 'downloads:cancel', Schemas.downloadsControl, async (_, id: string) => {
+    const item = activeItems.get(id)
+    if (!item) return false
+    item.cancel()
+    return true
   })
 
   // 8. Clear download history

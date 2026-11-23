@@ -28,7 +28,11 @@ import {
   X,
   Plus,
   Globe,
-  SlidersHorizontal
+  SlidersHorizontal,
+  LayoutTemplate,
+  ShieldCheck,
+  Keyboard,
+  AppWindow
 } from 'lucide-react'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { usePomodoroStore } from '@/store/usePomodoroStore'
@@ -99,7 +103,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
       <DropdownMenuContent
         align="end"
         sideOffset={6}
-        className="w-64 bg-popover/95 dark:bg-[#121316]/95 backdrop-blur-2xl border border-border/80 text-foreground shadow-2xl rounded-2xl p-1.5 z-50 text-xs font-medium select-none"
+        className="w-64 max-h-[calc(100vh-64px)] overflow-y-auto bg-popover/95 dark:bg-[#121316]/95 backdrop-blur-2xl border border-border/80 text-foreground shadow-2xl rounded-2xl p-1.5 z-50 text-xs font-medium select-none"
       >
         {/* Productivity & Focus */}
         <DropdownMenuLabel className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider px-2 py-1">
@@ -363,6 +367,52 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
           </div>
           <kbd className="text-[10px] font-mono text-muted-foreground bg-accent/60 px-1.5 py-0.5 rounded border border-border/40">
             {modKey}+F
+          </kbd>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => window.dispatchEvent(new CustomEvent('tct:open-tab-search'))}
+          className="flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer hover:bg-accent transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <AppWindow className="w-4 h-4 text-primary" />
+            <span>Search Open Tabs</span>
+          </div>
+          <kbd className="text-[10px] font-mono text-muted-foreground bg-accent/60 px-1.5 py-0.5 rounded border border-border/40">
+            {modKey}+Shift+A
+          </kbd>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => window.dispatchEvent(new CustomEvent('tct:open-space-templates'))}
+          className="flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer hover:bg-accent transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <LayoutTemplate className="w-4 h-4 text-foreground" />
+            <span>Space Templates</span>
+          </div>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => window.dispatchEvent(new CustomEvent('tct:open-privacy-report'))}
+          className="flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer hover:bg-accent transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            <span>Privacy Report</span>
+          </div>
+        </DropdownMenuItem>
+
+        <DropdownMenuItem
+          onClick={() => window.dispatchEvent(new CustomEvent('tct:open-shortcut-help'))}
+          className="flex items-center justify-between px-2.5 py-2 rounded-xl cursor-pointer hover:bg-accent transition-colors"
+        >
+          <div className="flex items-center gap-2.5">
+            <Keyboard className="w-4 h-4 text-foreground" />
+            <span>Keyboard Shortcuts</span>
+          </div>
+          <kbd className="text-[10px] font-mono text-muted-foreground bg-accent/60 px-1.5 py-0.5 rounded border border-border/40">
+            {modKey}+/
           </kbd>
         </DropdownMenuItem>
       </DropdownMenuContent>

@@ -5,7 +5,9 @@ import type {
   MasterShieldStatus,
   PrivacyStats,
   DohProvider,
-  SiteShieldStatus
+  SiteShieldStatus,
+  ProxyMode,
+  ProxyTestResult
 } from '@/types/api'
 
 export const PRIVACY_STORAGE_KEY = 'privacyShieldPrefs'
@@ -16,13 +18,37 @@ export const DEFAULT_PREFS: PrivacyShieldPrefs = {
   fingerprintResistance: true,
   httpsOnlyMode: true,
   dnsOverHttps: true,
-  dohProvider: 'mullvad',
+  dohProvider: 'cloudflare',
   webrtcProtection: false,
   globalPrivacyControl: true,
   stripTrackingParams: true,
   blockThirdPartyCookies: true,
   clearCacheOnExit: false,
+  blockPings: true,
+  strictReferrer: false,
+  spoofLanguage: false,
+  blockCookieBanners: false,
+  proxyMode: 'off',
+  proxyUrl: 'socks5://127.0.0.1:9050',
   whitelistedOrigins: []
+}
+
+/** One-click hardening (proxy is left as-is: it needs Tor / a proxy actually running) */
+export const MAX_PRIVACY_PREFS: Partial<PrivacyShieldPrefs> = {
+  adBlockerEnabled: true,
+  trackerProtection: true,
+  fingerprintResistance: true,
+  httpsOnlyMode: true,
+  dnsOverHttps: true,
+  webrtcProtection: true,
+  globalPrivacyControl: true,
+  stripTrackingParams: true,
+  blockThirdPartyCookies: true,
+  blockPings: true,
+  strictReferrer: true,
+  spoofLanguage: true,
+  blockCookieBanners: true,
+  clearCacheOnExit: true
 }
 
 function getStoredPrefs(): PrivacyShieldPrefs {
@@ -56,6 +82,10 @@ export function usePrivacyShield() {
   })
   const [isClearing, setIsClearing] = useState(false)
   const saveDebounceRef = useRef<NodeJS.Timeout | null>(null)
+  // Changes accumulated during the debounce window (previously only the LAST change was sent)
+  const pendingUpdatesRef = useRef<Partial<PrivacyShieldPrefs>>({})
+  const prefsRef = useRef(prefs)
+  prefsRef.current = prefs
 
   // Initial load from main process & localStorage sync
   useEffect(() => {
@@ -109,6 +139,7 @@ export function usePrivacyShield() {
 
   // Update preferences with debounce auto-save to localStorage and IPC
   const updatePrefs = useCallback((updates: Partial<PrivacyShieldPrefs>) => {
+    pendingUpdatesRef.current = { ...pendingUpdatesRef.current, ...updates }
     setPrefsState((prev) => {
       const next = { ...prev, ...updates }
       storePrefs(next)
@@ -128,9 +159,11 @@ export function usePrivacyShield() {
         clearTimeout(saveDebounceRef.current)
       }
       saveDebounceRef.current = setTimeout(async () => {
+        const batch = pendingUpdatesRef.current
+        pendingUpdatesRef.current = {}
         try {
           if (api.privacy?.updatePrefs) {
-            await api.privacy.updatePrefs(updates)
+            await api.privacy.updatePrefs(batch)
           }
         } catch (e) {
           console.error('[usePrivacyShield] Failed to sync updates to main process:', e)
@@ -142,13 +175,26 @@ export function usePrivacyShield() {
   }, [])
 
   const togglePref = useCallback((key: keyof PrivacyShieldPrefs) => {
-    setPrefsState((prev) => {
-      const val = !prev[key]
-      const updates = { [key]: val } as unknown as Partial<PrivacyShieldPrefs>
-      updatePrefs(updates)
-      return { ...prev, [key]: val }
-    })
+    const val = !prefsRef.current[key]
+    updatePrefs({ [key]: val } as unknown as Partial<PrivacyShieldPrefs>)
   }, [updatePrefs])
+
+  const setProxy = useCallback((proxyMode: ProxyMode, proxyUrl?: string) => {
+    updatePrefs(proxyUrl !== undefined ? { proxyMode, proxyUrl } : { proxyMode })
+  }, [updatePrefs])
+
+  const applyMaxPrivacy = useCallback(() => {
+    updatePrefs(MAX_PRIVACY_PREFS)
+  }, [updatePrefs])
+
+  const testProxy = useCallback(async (): Promise<ProxyTestResult> => {
+    try {
+      if (api.privacy?.testProxy) return await api.privacy.testProxy()
+    } catch (e: any) {
+      return { ok: false, error: e?.message || 'Test failed' }
+    }
+    return { ok: false, error: 'Unavailable' }
+  }, [])
 
   const setDohProvider = useCallback((provider: DohProvider) => {
     updatePrefs({ dohProvider: provider })
@@ -200,6 +246,9 @@ export function usePrivacyShield() {
     updatePrefs,
     togglePref,
     setDohProvider,
+    setProxy,
+    applyMaxPrivacy,
+    testProxy,
     clearBrowsingData,
     toggleSiteShield,
     getSiteStatus

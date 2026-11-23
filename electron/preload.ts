@@ -19,6 +19,15 @@ import type {
   HistoryClearRange
 } from '../src/types/api'
 
+/** Subscribe to a main-process event; returns an unsubscribe function (event object never exposed) */
+function listen<T>(channel: string, callback: (data: T) => void): () => void {
+  const handler = (_: unknown, data: T) => callback(data)
+  ipcRenderer.on(channel, handler)
+  return () => {
+    ipcRenderer.removeListener(channel, handler)
+  }
+}
+
 // Initialize app info synchronously on startup
 let initialAppInfo: AppInfo = {
   name: 'TCT Orbit',
@@ -177,6 +186,11 @@ const hardenedApi: ElectronAPI = {
     toggleSiteShield: (origin: string) => ipcRenderer.invoke('privacy:toggle-site-shield', origin),
     getStats: () => ipcRenderer.invoke('privacy:get-stats'),
     clearBrowsingData: () => ipcRenderer.invoke('privacy:clear-browsing-data'),
+    testProxy: () => ipcRenderer.invoke('privacy:test-proxy'),
+    getReport: (days?: number) => ipcRenderer.invoke('privacy:get-report', days),
+    resetReport: () => ipcRenderer.invoke('privacy:reset-report'),
+    onHttpsFallback: (callback: (info: { host: string; url: string; webContentsId?: number }) => void) =>
+      listen('privacy:https-fallback', callback),
     onStateChanged: (callback: (state: { prefs: PrivacyShieldPrefs; masterStatus: MasterShieldStatus; stats: PrivacyStats }) => void) => {
       const handler = (_: unknown, state: { prefs: PrivacyShieldPrefs; masterStatus: MasterShieldStatus; stats: PrivacyStats }) => callback(state)
       ipcRenderer.on('privacy:state-changed', handler)
@@ -195,6 +209,9 @@ const hardenedApi: ElectronAPI = {
     deleteFile: (id: string, filePath?: string) => ipcRenderer.invoke('downloads:delete-file', { id, deleteDiskFile: Boolean(filePath) }),
     list: () => ipcRenderer.invoke('downloads:list'),
     clear: () => ipcRenderer.invoke('downloads:clear'),
+    pause: (id: string) => ipcRenderer.invoke('downloads:pause', id),
+    resume: (id: string) => ipcRenderer.invoke('downloads:resume', id),
+    cancel: (id: string) => ipcRenderer.invoke('downloads:cancel', id),
     onStarted: (callback: (data: any) => void) => {
       const handler = (_: unknown, data: any) => callback(data)
       ipcRenderer.on('downloads:started', handler)
@@ -266,8 +283,52 @@ const hardenedApi: ElectronAPI = {
     trimMemory: () => ipcRenderer.invoke('system:trim-memory')
   },
 
-  onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number }) => void) => {
-    const handler = (_: unknown, payload: { url: string; active: boolean; sourceWebContentsId?: number } | string) => {
+  permissions: {
+    respond: (id: string, allow: boolean, remember: boolean) => ipcRenderer.invoke('permissions:respond', { id, allow, remember }),
+    onRequest: (callback: (req: any) => void) => listen('permissions:request', callback),
+    onDismiss: (callback: (id: string) => void) => listen('permissions:dismiss', callback)
+  },
+
+  siteSettings: {
+    list: () => ipcRenderer.invoke('site-settings:list'),
+    setPermission: (origin: string, permission: string, decision: 'allow' | 'block' | null) =>
+      ipcRenderer.invoke('site-settings:set-permission', { origin, permission, decision }),
+    resetPermissions: (origin: string) => ipcRenderer.invoke('site-settings:reset-permissions', origin)
+  },
+
+  session: {
+    getRestoreInfo: () => ipcRenderer.invoke('session:get-restore-info'),
+    restore: () => ipcRenderer.invoke('session:restore'),
+    dismiss: () => ipcRenderer.invoke('session:dismiss')
+  },
+
+  focus: {
+    setBlock: (domains: string[] | null) => ipcRenderer.invoke('focus:set-block', domains),
+    onBlocked: (callback: (info: { url: string; host: string; webContentsId?: number }) => void) => listen('focus:blocked', callback)
+  },
+
+  sync: {
+    getConfig: () => ipcRenderer.invoke('sync:get-config'),
+    configure: (opts: { enabled?: boolean; filePath?: string; passphrase?: string }) => ipcRenderer.invoke('sync:configure', opts),
+    chooseFile: () => ipcRenderer.invoke('sync:choose-file'),
+    syncNow: () => ipcRenderer.invoke('sync:now'),
+    readFile: () => ipcRenderer.invoke('sync:read-file'),
+    exportEncrypted: (passphrase: string) => ipcRenderer.invoke('sync:export-encrypted', passphrase),
+    decrypt: (content: string, passphrase: string) => ipcRenderer.invoke('sync:decrypt', { content, passphrase })
+  },
+
+  thumbnails: {
+    capture: (webContentsId: number) => ipcRenderer.invoke('webview:thumbnail', webContentsId)
+  },
+
+  browserImport: {
+    detect: () => ipcRenderer.invoke('import:detect'),
+    run: (sourceId: string, bookmarks: boolean, history: boolean) => ipcRenderer.invoke('import:run', { sourceId, bookmarks, history }),
+    bookmarksHtml: () => ipcRenderer.invoke('import:bookmarks-html')
+  },
+
+  onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean }) => void) => {
+    const handler = (_: unknown, payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean } | string) => {
       if (typeof payload === 'string') {
         callback({ url: payload, active: true })
       } else {

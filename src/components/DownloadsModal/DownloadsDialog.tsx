@@ -26,7 +26,10 @@ import {
   FileAudio,
   FileVideo,
   File,
-  Check
+  Check,
+  Pause,
+  Play,
+  Ban
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/ipc'
@@ -150,7 +153,9 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                     receivedBytes: data.receivedBytes,
                     totalBytes: data.totalBytes,
                     state: data.state,
-                    savePath: data.savePath || d.savePath
+                    savePath: data.savePath || d.savePath,
+                    isPaused: data.isPaused,
+                    canResume: data.canResume
                   }
                 : d
             )
@@ -494,8 +499,8 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                         )}
                         {isProgressing && (
                           <span className="text-[10px] font-medium px-2 py-0.5 rounded-md bg-primary/10 text-primary border border-primary/20 shrink-0 flex items-center gap-1">
-                            <ArrowDownToLine className="w-2.5 h-2.5 animate-bounce" />
-                            {progressPercent}%
+                            {item.isPaused ? <Pause className="w-2.5 h-2.5" /> : <ArrowDownToLine className="w-2.5 h-2.5 animate-bounce" />}
+                            {item.isPaused ? `Paused · ${progressPercent}%` : `${progressPercent}%`}
                           </span>
                         )}
                         {isFailed && (
@@ -553,6 +558,38 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                             title="Show in folder"
                           >
                             <Folder className="w-3.5 h-3.5" />
+                          </button>
+                        </>
+                      )}
+
+                      {isProgressing && (
+                        <>
+                          {item.isPaused ? (
+                            <button
+                              onClick={async () => {
+                                const ok = await api.downloads.resume(item.id)
+                                if (!ok) toast.error("This download can't be resumed", { description: 'The server does not support resuming. Try downloading again.' })
+                              }}
+                              className="p-1.5 rounded-lg text-primary hover:bg-background border border-transparent hover:border-border transition-colors cursor-pointer"
+                              title="Resume"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => void api.downloads.pause(item.id)}
+                              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-background border border-transparent hover:border-border transition-colors cursor-pointer"
+                              title="Pause"
+                            >
+                              <Pause className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          <button
+                            onClick={() => void api.downloads.cancel(item.id)}
+                            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors cursor-pointer"
+                            title="Cancel download"
+                          >
+                            <Ban className="w-3.5 h-3.5" />
                           </button>
                         </>
                       )}

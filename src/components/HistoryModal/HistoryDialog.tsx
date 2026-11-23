@@ -367,7 +367,7 @@ export const HistoryDialog: React.FC<HistoryDialogProps> = ({
               groupedEntries.map((group) => (
                 <div key={group.date} className="space-y-2">
                   {/* Date Header */}
-                  <div className="sticky top-0 z-10 flex items-center gap-2 py-1 bg-background/95 backdrop-blur-xs">
+                  <div className="sticky -top-4 z-10 flex items-center gap-2 pt-4 pb-1.5 -mt-4 bg-background">
                     <span className="text-xs font-bold text-foreground uppercase tracking-wider">
                       {group.label}
                     </span>

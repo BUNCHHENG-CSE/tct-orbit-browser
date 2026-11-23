@@ -13,6 +13,7 @@ import { useTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
+import { useThumbnailStore } from '@/store/useThumbnailStore'
 import { modKey } from '@/lib/platform'
 import { getThemeSyncScript, resolveIsDark } from '@/lib/theme'
 import { api } from '@/lib/ipc'
@@ -39,6 +40,25 @@ interface SingleWebViewProps {
   onFocusPane?: () => void
 }
 
+
+/**
+ * webview.loadURL with one retry for transient network failures (ERR_FAILED -2, connection
+ * resets/closes). Previously failures were swallowed and the tab silently stayed on the old page.
+ * ERR_ABORTED (-3) means the load was superseded by another navigation: never retry that.
+ */
+const TRANSIENT_NET_ERRORS = new Set([-2, -100, -101, -102, -103, -104, -105, -106, -118, -137, -356])
+function loadUrlWithRetry(el: any, url: string, attempt = 0): void {
+  if (!el || typeof el.loadURL !== 'function') return
+  try {
+    el.loadURL(url).catch((err: any) => {
+      const errno = typeof err?.errno === 'number' ? err.errno : undefined
+      if (attempt === 0 && errno !== undefined && TRANSIENT_NET_ERRORS.has(errno)) {
+        setTimeout(() => loadUrlWithRetry(el, url, 1), 400)
+      }
+    })
+  } catch {}
+}
+
 const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   tab,
   isActive,
@@ -60,6 +80,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const initialUrlRef = useRef(tab.url)
+  // A webview's partition can never change after it navigates (Electron throws, which would
+  // crash the whole UI). Freeze it at mount.
+  const partitionRef = useRef(tab.isPrivate ? 'private-tabs' : 'persist:browser-tabs')
   const currentNavUrlRef = useRef(tab.url)
   const lastNavigatedFromWebviewUrlRef = useRef<string>(tab.url)
 
@@ -129,7 +152,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       currentNavUrlRef.current = tab.url
       lastNavigatedFromWebviewUrlRef.current = tab.url
       if (typeof el.loadURL === 'function') {
-        el.loadURL(tab.url).catch(() => {})
+        loadUrlWithRetry(el, tab.url)
       }
     } catch {}
   }, [tab.url])
@@ -309,7 +332,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
           // Record to persistent browsing history
           applyDomainZoom(currentUrl)
-          if (api.history?.recordVisit) {
+          if (!tab.isPrivate && api.history?.recordVisit) {
             api.history.recordVisit({
               url: currentUrl,
               title: currentTitle,
@@ -347,7 +370,12 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       if (e.isMainFrame && e.errorCode !== -3) {
         setIsLoading(false)
         setHasError(true)
-        setErrorMessage(e.errorDescription || 'Failed to load webpage')
+        // -20 ERR_BLOCKED_BY_CLIENT: cancelled by TCT Orbit itself (Focus Sprint block list)
+        setErrorMessage(
+          e.errorCode === -20
+            ? 'This site is on your Focus Sprint block list. It opens again when the sprint ends.'
+            : e.errorDescription || 'Failed to load webpage'
+        )
       }
     }
 
@@ -379,7 +407,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         })
 
         applyDomainZoom(navUrl)
-        if (api.history?.recordVisit) {
+        // Full navigations are recorded in did-finish-load (with the real page title);
+        // only record SPA in-page navigations here to avoid double IPC + double visit counts.
+        if (e?.type === 'did-navigate-in-page' && !tab.isPrivate && api.history?.recordVisit) {
           api.history.recordVisit({
             url: navUrl,
             title: navTitle || tab.title,
@@ -429,42 +459,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
             } catch(e) {}
           })();
         `).catch(() => {})
-
-        el.insertCSS(`
-          :root, html, body {
-            overscroll-behavior: none !important;
-            overscroll-behavior-y: none !important;
-            overscroll-behavior-x: none !important;
-          }
-          :root, html, body, * {
-            scrollbar-width: thin !important;
-            scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
-          }
-          ::-webkit-scrollbar {
-            width: 6px !important;
-            height: 6px !important;
-          }
-          ::-webkit-scrollbar-track {
-            background: transparent !important;
-          }
-          ::-webkit-scrollbar-thumb {
-            background: rgba(130, 130, 150, 0.4) !important;
-            border-radius: 9999px !important;
-            border: 1px solid transparent !important;
-            background-clip: padding-box !important;
-          }
-          ::-webkit-scrollbar-thumb:hover {
-            background: rgba(150, 150, 180, 0.7) !important;
-          }
-          ::-webkit-scrollbar-corner {
-            background: transparent !important;
-          }
-          ::-webkit-scrollbar-button {
-            display: none !important;
-            width: 0 !important;
-            height: 0 !important;
-          }
-        `).catch(() => {})
+        // Scrollbar / overscroll CSS is injected once by the main process (electron/main.ts)
       } catch {
         // ignore
       }
@@ -541,17 +536,6 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     }
   }, [isActive, tab.isSleeping, tab.id])
 
-  // Free unreferenced DOM & JS memory when tab transitions to background
-  useEffect(() => {
-    if (!isActive) {
-      try {
-        if (webviewRef.current && typeof webviewRef.current.executeJavaScript === 'function') {
-          webviewRef.current.executeJavaScript('if (window.gc) window.gc();', true).catch(() => {})
-        }
-      } catch {}
-    }
-  }, [isActive])
-
   const handleRetry = () => {
     setHasError(false)
     if (webviewRef.current) {
@@ -624,8 +608,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         <webview
           ref={webviewRef}
           src={initialUrlRef.current}
-          partition="persist:browser-tabs"
-          className="w-full h-full flex-1 bg-background border-none outline-none flex"
+          partition={partitionRef.current}
+          // flex-1 + min-h-0/min-w-0: let the webview SHRINK with the window. Without min-h-0 a flex
+          // item keeps its previous (larger) size, so the page thinks it fits and won't scroll,
+          // while the bottom is clipped. (h-full also overflowed by the split-pane header height.)
+          className="w-full flex-1 min-h-0 min-w-0 bg-background border-none outline-none flex"
           {...({ allowpopups: 'true' } as any)}
           webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes, spellcheck=no"
         />
@@ -1037,14 +1024,19 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const handleFind = useCallback((text: string, options: any) => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
     if (el && typeof el.findInPage === 'function') {
-      el.findInPage(text, options)
+      // Throws if the webview hasn't attached / fired dom-ready yet (e.g. a brand-new tab)
+      try {
+        el.findInPage(text, options)
+      } catch {}
     }
   }, [activeTabId])
 
   const handleStopFind = useCallback((action: any) => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
     if (el && typeof el.stopFindInPage === 'function') {
-      el.stopFindInPage(action)
+      try {
+        el.stopFindInPage(action)
+      } catch {}
     }
     setMatchesCount({ activeMatchOrdinal: 0, matches: 0 })
   }, [activeTabId])
@@ -1052,8 +1044,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   const handleSavePdf = useCallback(async () => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
     if (el && typeof el.getWebContentsId === 'function') {
-      const wcId = el.getWebContentsId()
       try {
+        const wcId = el.getWebContentsId()
         const res = await api.webview?.saveAsPdf(wcId)
         if (res?.success && res.filePath) {
           toast.success('Page saved as PDF', {
@@ -1091,7 +1083,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       const targetId = tabId || activeTabId
       const targetEl = targetId ? webviewsRef.current.get(targetId) : null
       if (targetEl && url && typeof targetEl.loadURL === 'function') {
-        targetEl.loadURL(url).catch(() => {})
+        loadUrlWithRetry(targetEl, url)
       }
     }
 
@@ -1154,6 +1146,78 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }, [handleBack, handleForward, handleReload, handleHardReload, handleZoomIn, handleZoomOut, handleZoomReset, handlePrint, handleSavePdf])
 
+  // "Last used" bookkeeping: lastVisited is stamped when a tab becomes active AND when it is left,
+  // otherwise Memory Saver would put a tab to sleep based on when it was created.
+  useEffect(() => {
+    if (!activeTabId) return
+    const store = useBrowserStore.getState()
+    store.updateTabInStore(activeTabId, { lastVisited: new Date().toISOString() })
+    const leftId = activeTabId
+    return () => {
+      useBrowserStore.getState().updateTabInStore(leftId, { lastVisited: new Date().toISOString() })
+    }
+  }, [activeTabId])
+
+  // Hover-preview thumbnails: capture the visible tab shortly after it shows and then periodically
+  useEffect(() => {
+    if (!activeTabId) return
+    const capture = () => {
+      const el = webviewsRef.current.get(activeTabId)
+      if (!el || typeof el.getWebContentsId !== 'function' || !api.thumbnails?.capture) return
+      let id: number
+      try {
+        id = el.getWebContentsId()
+      } catch {
+        return
+      }
+      api.thumbnails
+        .capture(id)
+        .then((dataUrl) => {
+          if (dataUrl) useThumbnailStore.getState().setThumb(activeTabId, dataUrl)
+        })
+        .catch(() => {})
+    }
+    const first = setTimeout(capture, 1500)
+    const interval = setInterval(capture, 20000)
+    return () => {
+      clearTimeout(first)
+      clearInterval(interval)
+    }
+  }, [activeTabId])
+
+  // Drag a tab from the sidebar onto the page area to open it in split view
+  const [tabDragActive, setTabDragActive] = useState(false)
+  const [dropHover, setDropHover] = useState(false)
+  useEffect(() => {
+    const onStart = () => setTabDragActive(true)
+    const onEnd = () => {
+      setTabDragActive(false)
+      setDropHover(false)
+    }
+    window.addEventListener('tct:tab-drag-start', onStart)
+    window.addEventListener('tct:tab-drag-end', onEnd)
+    return () => {
+      window.removeEventListener('tct:tab-drag-start', onStart)
+      window.removeEventListener('tct:tab-drag-end', onEnd)
+    }
+  }, [])
+
+  const handleSplitDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    const tabId = e.dataTransfer.getData('application/x-tct-tab-id')
+    setTabDragActive(false)
+    setDropHover(false)
+    const store = useBrowserStore.getState()
+    if (!tabId) return
+    if (tabId === store.activeTabId) {
+      toast.info('Drop a different tab to view it side by side')
+      return
+    }
+    store.setSplitTabId(tabId)
+    store.setSplitActivePane('secondary')
+    toast.success('Opened in split view')
+  }
+
   // Memory Saver: hibernate inactive background tabs after 30 minutes
   useEffect(() => {
     const memorySaverEnabled = settings?.memorySaverEnabled ?? true
@@ -1204,7 +1268,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
           spaceId: targetSpace,
           url,
           title: 'Loading...',
-          order: insertOrder
+          order: insertOrder,
+          isPrivate: !!currentActive?.isPrivate
         })
         setActiveTab(newTab.id)
       } catch (err) {
@@ -1240,7 +1305,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       <div
         ref={containerRef}
         style={{ '--split-ratio': `${splitRatio}` } as React.CSSProperties}
-        className={`flex-1 relative w-full h-full overflow-hidden bg-background ${
+        className={`flex-1 min-w-0 min-h-0 relative w-full h-full overflow-hidden bg-background ${
           isDraggingSplit ? 'is-split-resizing select-none' : ''
         }`}
       >
@@ -1345,6 +1410,34 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         {/* Overlay while dragging splitter to keep mouse tracking over webviews */}
         {isDraggingSplit && (
           <div className="fixed inset-0 z-50 cursor-col-resize select-none bg-transparent" />
+        )}
+
+        {/* Drop zone while a sidebar tab is being dragged (webviews swallow drag events, so
+            this overlay covers them for the duration of the drag) */}
+        {tabDragActive && (
+          <div
+            className="absolute inset-0 z-40 flex"
+            onDragOver={(e) => {
+              e.preventDefault()
+              e.dataTransfer.dropEffect = 'move'
+            }}
+          >
+            <div className="flex-1" />
+            <div
+              onDragEnter={() => setDropHover(true)}
+              onDragLeave={() => setDropHover(false)}
+              onDragOver={(e) => {
+                e.preventDefault()
+                e.dataTransfer.dropEffect = 'move'
+              }}
+              onDrop={handleSplitDrop}
+              className={`w-1/2 m-3 rounded-2xl border-2 border-dashed flex items-center justify-center text-sm font-semibold transition-colors ${
+                dropHover ? 'border-primary bg-primary/15 text-primary' : 'border-primary/40 bg-background/60 text-muted-foreground'
+              }`}
+            >
+              Drop to open in split view
+            </div>
+          </div>
         )}
 
         {/* In-Page Search Bar (Ctrl+F) */}

@@ -21,6 +21,7 @@ import { register as registerHistory } from './history'
 import { register as registerNotes } from './notes'
 import { register as registerBookmarks } from './bookmarks'
 import { register as registerSite } from './site'
+import { register as registerFeatures } from './features'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
@@ -41,6 +42,7 @@ export function registerAllIpc(
   registerNotes(ipcMain)
   registerBookmarks(ipcMain)
   registerSite(ipcMain)
+  registerFeatures(ipcMain, getMainWindow)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning

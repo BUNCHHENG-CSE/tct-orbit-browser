@@ -13,6 +13,14 @@ import { ZenControls } from '@/components/ZenMode/ZenControls'
 import { TaskManagerDialog } from '@/components/TaskManager/TaskManagerDialog'
 import { PomodoroDialog } from '@/components/TitleBar/PomodoroDialog'
 import { SmoothScroll } from '@/components/SmoothScroll'
+import { PermissionPrompt } from '@/components/Permissions/PermissionPrompt'
+import { TabSearchDialog } from '@/components/TabSearch/TabSearchDialog'
+import { ShortcutHelpDialog } from '@/components/ShortcutHelp/ShortcutHelpDialog'
+import { OnboardingDialog } from '@/components/Onboarding/OnboardingDialog'
+import { PrivacyReportDialog } from '@/components/PrivacyReport/PrivacyReportDialog'
+import { SpaceTemplatesDialog } from '@/components/SpaceTemplates/SpaceTemplatesDialog'
+import { AppNotices } from '@/components/AppNotices/AppNotices'
+import { LegalDialog } from '@/components/Legal/LegalDialog'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
 import { useSpaces } from '@/hooks/useSpaces'
@@ -53,6 +61,7 @@ export const App: React.FC = () => {
     const unsub = api.onOpenUrl(async (payload) => {
       const url = typeof payload === 'string' ? payload : payload.url
       const isActive = typeof payload === 'object' && payload.active !== undefined ? payload.active : true
+      const isPrivate = typeof payload === 'object' && !!payload.isPrivate
 
       if (!url || url === 'about:blank') return
 
@@ -74,7 +83,8 @@ export const App: React.FC = () => {
           spaceId: targetSpace,
           url,
           title: 'Loading...',
-          order: insertOrder
+          order: insertOrder,
+          isPrivate
         })
 
         store.insertTabNextTo(targetSpace, newTab, store.activeTabId, isActive)
@@ -203,6 +213,15 @@ export const App: React.FC = () => {
       switch (action) {
         case 'new-tab':
           setCommandBarOpen(true, '', 'new-tab')
+          break
+        case 'new-private-tab':
+          window.dispatchEvent(new CustomEvent('tct:new-private-tab'))
+          break
+        case 'tab-search':
+          window.dispatchEvent(new CustomEvent('tct:open-tab-search'))
+          break
+        case 'shortcut-help':
+          window.dispatchEvent(new CustomEvent('tct:open-shortcut-help'))
           break
         case 'close-tab': {
           const store = useBrowserStore.getState()
@@ -399,6 +418,27 @@ export const App: React.FC = () => {
       if ((!isCmdOrCtrl && !shift && !alt && (key === 'f11' || code === 'F11')) || (isCmdOrCtrl && shift && !alt && (key === 'f' || code === 'KeyF'))) {
         e.preventDefault()
         executeShortcutAction('toggle-zen-mode')
+        return
+      }
+
+      // Tab Search across all spaces: Ctrl+Shift+A
+      if (isCmdOrCtrl && shift && !alt && (key === 'a' || code === 'KeyA')) {
+        e.preventDefault()
+        executeShortcutAction('tab-search')
+        return
+      }
+
+      // Shortcut cheat sheet: Ctrl+/
+      if (isCmdOrCtrl && !shift && !alt && (key === '/' || code === 'Slash')) {
+        e.preventDefault()
+        executeShortcutAction('shortcut-help')
+        return
+      }
+
+      // New Private Tab: Alt+Shift+N
+      if (alt && shift && !isCmdOrCtrl && (key === 'n' || code === 'KeyN')) {
+        e.preventDefault()
+        executeShortcutAction('new-private-tab')
         return
       }
 
@@ -676,7 +716,7 @@ export const App: React.FC = () => {
                 ? `fixed top-0 bottom-0 left-0 z-50 transition-transform duration-300 ease-out shadow-2xl ${
                     leftHovered ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
                   }`
-                : 'relative z-10 flex shrink-0 h-full'
+                : 'relative z-30 flex shrink-0 h-full'
             }`}
           >
             <Sidebar />
@@ -713,6 +753,24 @@ export const App: React.FC = () => {
 
         {/* QR Code generator modal */}
         <QrCodeModal />
+
+        {/* Site permission prompts (camera, mic, location, notifications ...) */}
+        <PermissionPrompt />
+
+        {/* Tab search (Ctrl+Shift+A), shortcut cheat sheet (Ctrl+/), first-run tour */}
+        <TabSearchDialog />
+        <ShortcutHelpDialog />
+        <OnboardingDialog />
+
+        {/* Privacy report & space templates */}
+        <PrivacyReportDialog />
+        <SpaceTemplatesDialog />
+
+        {/* Terms of Use & Privacy Policy viewer */}
+        <LegalDialog />
+
+        {/* Session restore, HTTPS fallback & focus-block notices */}
+        <AppNotices />
 
         {/* Sonner toast alerts */}
         <Toaster theme={resolvedTheme} />

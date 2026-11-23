@@ -1,5 +1,5 @@
 import 'dotenv/config'
-import { app, BrowserWindow, ipcMain, session, nativeTheme, Menu, clipboard, dialog, shell, powerSaveBlocker, webContents } from 'electron'
+import { app, BrowserWindow, ipcMain, session, nativeTheme, shell, powerSaveBlocker } from 'electron'
 import { createMainWindow } from './windows/mainWindow'
 import { setupWindowsTaskbar } from './windows/taskbar'
 import { registerAllIpc } from './ipc'
@@ -13,11 +13,15 @@ import { themeManager } from './theme/themeManager'
 import { initAppPaths, runStartupMigration } from './storage/paths'
 import { devtoolsManager } from './devtools/devtoolsManager'
 import { privacyEngine } from './privacy/privacyEngine'
+import { sitePermissions } from './permissions/sitePermissions'
+import { syncService } from './storage/syncService'
+import { PRIVATE_PARTITION } from './privacy/types'
 import { getBrowserLogoPath } from './resources'
 import {
   setupIsolatedTabSession,
   setupWebContentsSecurity,
-  setupWebRTCLeakProtection
+  setupWebRTCLeakProtection,
+  DANGEROUS_PROTOCOLS
 } from './security'
 
 // Early channel, userData paths, and database isolation setup
@@ -235,6 +239,27 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
     if (isCmdOrCtrl && !shift && !alt && (key === '\\' || code === 'Backslash')) {
       event.preventDefault()
       sendShortcut('toggle-split-view')
+      return
+    }
+
+    // New Private Tab: Alt+Shift+N (Ctrl+Shift+N is Space Notes)
+    if (alt && shift && !isCmdOrCtrl && (key === 'n' || code === 'KeyN')) {
+      event.preventDefault()
+      sendShortcut('new-private-tab')
+      return
+    }
+
+    // Tab Search across all spaces: Ctrl+Shift+A
+    if (isCmdOrCtrl && shift && !alt && (key === 'a' || code === 'KeyA')) {
+      event.preventDefault()
+      sendShortcut('tab-search')
+      return
+    }
+
+    // Keyboard shortcut cheat sheet: Ctrl+/
+    if (isCmdOrCtrl && !shift && !alt && (key === '/' || code === 'Slash')) {
+      event.preventDefault()
+      sendShortcut('shortcut-help')
       return
     }
 
@@ -504,7 +529,7 @@ if (!gotSingleInstanceLock) {
       const hasIncognito = commandLine.includes('--incognito')
       const hasNewWindow = commandLine.includes('--new-window')
       if (hasIncognito) {
-        mainWindow.webContents.send('tab:create', { incognito: true })
+        mainWindow.webContents.send('keyboard-shortcut:trigger', 'new-private-tab')
       } else if (hasNewWindow) {
         mainWindow.webContents.send('tab:create', {})
       }
@@ -542,22 +567,9 @@ if (!gotSingleInstanceLock) {
       tabSession.setSpellCheckerEnabled(false)
     } catch {}
 
-    // Periodic memory trimmer to maintain low baseline RAM (clears caches & runs GC)
-    setInterval(() => {
-      try {
-        const tabSess = session.fromPartition('persist:browser-tabs')
-        tabSess.clearHostResolverCache()
-        const allWcs = webContents.getAllWebContents()
-        for (const wc of allWcs) {
-          if (!wc.isDestroyed()) {
-            wc.executeJavaScript('if (window.gc) window.gc();', true).catch(() => {})
-          }
-        }
-        if (typeof (global as any).gc === 'function') {
-          ;(global as any).gc()
-        }
-      } catch {}
-    }, 10 * 60 * 1000)
+    // NOTE: no periodic "memory trimmer". window.gc() does not exist without --expose-gc, and
+    // flushing the DNS cache / running JS in every tab every few minutes only cost CPU and latency.
+    // Chromium already discards memory under pressure on its own.
 
     // Initialize 100% private local storage on user's machine
     localStorageService.init()
@@ -565,6 +577,8 @@ if (!gotSingleInstanceLock) {
     notesService.init()
     downloadsService.init()
     bookmarksService.init()
+    syncService.init()
+    sitePermissions.init(() => mainWindow)
 
     // Sync saved theme preference to Chromium nativeTheme so webviews immediately inherit correct prefers-color-scheme
     const startupState = themeManager.getState()
@@ -576,15 +590,24 @@ if (!gotSingleInstanceLock) {
     // Initialize Privacy Engine before window creation
     await privacyEngine.init()
 
+    // UI notices from the network layer
+    privacyEngine.onHttpsFallback = (info) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('privacy:https-fallback', info)
+    }
+    privacyEngine.onFocusBlocked = (info) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('focus:blocked', info)
+    }
+
     // Webview & window security rules: apply User-Agent, sanitize webPreferences and block dangerous protocols
     app.on('web-contents-created', (_, contents) => {
       contents.setUserAgent(customUserAgent)
-      setupWebRTCLeakProtection(contents)
+      setupWebRTCLeakProtection(contents, privacyEngine.getWebRTCPolicy())
 
       // Intercept and sanitize any attached webview preferences
       contents.on('will-attach-webview', (_event, webPreferences, params) => {
         // Enforce dedicated partition for untrusted web browsing tabs
-        if (!params.partition) {
+        // Only the two tab partitions are allowed (never the UI's default session)
+        if (params.partition !== 'persist:browser-tabs' && params.partition !== PRIVATE_PARTITION) {
           params.partition = 'persist:browser-tabs'
         }
 
@@ -605,6 +628,9 @@ if (!gotSingleInstanceLock) {
 
       // Security rules & minimalist scrollbar injection for webview contents
       if (contents.getType() === 'webview') {
+        // Links, popups and context-menu actions from a private tab must stay private
+        const isPrivateContents = contents.session === session.fromPartition(PRIVATE_PARTITION)
+
         contents.setMaxListeners(50)
         activeWebviewContents.add(contents)
         contents.on('destroyed', () => {
@@ -647,9 +673,10 @@ if (!gotSingleInstanceLock) {
         }
 
         const customScrollbarCss = `
-          :root, html, body {
-            overscroll-behavior: none !important;
-            overscroll-behavior-y: none !important;
+          /* Horizontal only (blocks swipe-back). Vertical 'overscroll-behavior: none' on the root
+             breaks mouse-wheel scrolling on many sites (verified on duckduckgo.com). Pull-to-refresh
+             is already disabled via Chromium switches. */
+          html, body {
             overscroll-behavior-x: none !important;
           }
           :root, html, body, * {
@@ -735,7 +762,7 @@ if (!gotSingleInstanceLock) {
                   parent: mainWindow || undefined,
                   autoHideMenuBar: true,
                   webPreferences: {
-                    partition: 'persist:browser-tabs',
+                    partition: isPrivateContents ? PRIVATE_PARTITION : 'persist:browser-tabs',
                     nodeIntegration: false,
                     nodeIntegrationInWorker: false,
                     contextIsolation: true,
@@ -755,17 +782,24 @@ if (!gotSingleInstanceLock) {
                 mainWindow.webContents.send('tabs:open-url', {
                   url: rawUrl,
                   active: isActive,
-                  sourceWebContentsId: contents.id
+                  sourceWebContentsId: contents.id,
+                  isPrivate: isPrivateContents
                 })
               }
               return { action: 'deny' }
             }
 
-            shell.openExternal(rawUrl).catch(() => {})
+            // Unknown protocol: deny. Never hand arbitrary schemes to the OS (ms-msdt:, search-ms:, ...)
+            console.warn(`[Security] Blocked window.open with unsupported protocol: ${protocol}`)
           } catch (e) {
             console.warn('[Webview] Malformed URL in window open handler:', details.url, e)
           }
           return { action: 'deny' }
+        })
+
+        // Allowed OAuth popups are real BrowserWindows: give them the same popup/navigation guards
+        contents.on('did-create-window', (popup) => {
+          setupWebContentsSecurity(popup.webContents, mainWindow)
         })
 
         // Guard against dangerous schemes without blocking relative or in-page redirection
@@ -773,7 +807,7 @@ if (!gotSingleInstanceLock) {
           try {
             const currentUrl = contents.getURL() || 'http://localhost'
             const parsed = new URL(navigationUrl, currentUrl)
-            if (['file:', 'javascript:', 'vbscript:'].includes(parsed.protocol)) {
+            if (DANGEROUS_PROTOCOLS.has(parsed.protocol)) {
               event.preventDefault()
               console.warn(`[Security] Blocked navigation to dangerous protocol: ${parsed.protocol}`)
               return
@@ -801,6 +835,7 @@ if (!gotSingleInstanceLock) {
           if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('context-menu:open', {
               webContentsId: contents.id,
+              isPrivate: isPrivateContents,
               params: {
                 x: params.x,
                 y: params.y,
@@ -841,6 +876,20 @@ if (!gotSingleInstanceLock) {
     attachKeyboardShortcuts(mainWindow.webContents, false)
     devtoolsManager.init(mainWindow)
 
+    // Surface UI errors in the terminal (otherwise a renderer crash is just a black window)
+    mainWindow.webContents.on('console-message', (details: any) => {
+      const level = details?.level
+      if (level === 'error' || level === 3) {
+        console.error('[UI]', details.message, details.sourceId ? `(${details.sourceId}:${details.lineNumber})` : '')
+      }
+    })
+    mainWindow.webContents.on('render-process-gone', (_e, details) => {
+      console.error('[UI] Renderer process gone:', details.reason, 'exitCode:', details.exitCode)
+    })
+    app.on('child-process-gone', (_e, details) => {
+      console.error('[Main] Child process gone:', details.type, details.reason)
+    })
+
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createMainWindow()
@@ -853,10 +902,26 @@ if (!gotSingleInstanceLock) {
     })
   })
 
+  let shutdownTasksDone = false
   app.on('before-quit', () => {
     try {
       localStorageService.flushSave()
     } catch {}
+    try {
+      historyService.flushSave()
+    } catch {}
+    try {
+      privacyEngine.flushReport()
+    } catch {}
+    // Once per quit (clear-on-exit re-triggers before-quit after its async cleanup)
+    if (!shutdownTasksDone) {
+      shutdownTasksDone = true
+      try {
+        syncService.syncOnExit()
+      } catch {}
+    }
+    // Clean exit: next launch won't report a crash
+    localStorageService.markCleanExit()
   })
 
   app.on('window-all-closed', () => {

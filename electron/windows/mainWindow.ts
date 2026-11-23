@@ -5,6 +5,7 @@ import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { getAppNativeIcon, getBrowserLogoPath } from '../resources'
 import { setupMainWindowSecurity } from '../security'
+import { getInitialWindowState, trackWindowState } from './windowState'
 
 export function createMainWindow(): BrowserWindow {
   const isMac = process.platform === 'darwin'
@@ -17,11 +18,14 @@ export function createMainWindow(): BrowserWindow {
 
   const appIcon = getAppNativeIcon()
 
+  // First launch: maximized. Later launches: last size/position/maximized state.
+  const initialState = getInitialWindowState()
+  const startMaximized = initialState.maximize || initialState.fullScreen
+
   const mainWindow = new BrowserWindow({
     title: paths.channelMeta.displayName,
     icon: appIcon,
-    width: 1280,
-    height: 850,
+    ...initialState.bounds,
     minWidth: 480,
     minHeight: 400,
     show: false,
@@ -63,15 +67,20 @@ export function createMainWindow(): BrowserWindow {
     }
   })
 
-  mainWindow.once('ready-to-show', () => {
+  const showWindow = () => {
+    if (mainWindow.isDestroyed() || mainWindow.isVisible()) return
+    if (startMaximized) {
+      mainWindow.maximize()
+    }
     mainWindow.show()
-  })
+  }
+
+  mainWindow.once('ready-to-show', showWindow)
+  trackWindowState(mainWindow)
 
   // Ensure window always displays even if ready-to-show event is delayed by HMR/compilation
   setTimeout(() => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isVisible()) {
-      mainWindow.show()
-    }
+    showWindow()
   }, 1000)
 
   // In development mode only, provide Inspect UI Element context menu for browser chrome

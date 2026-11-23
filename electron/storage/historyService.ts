@@ -46,16 +46,28 @@ class HistoryService {
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout)
     }
+    // History can hold 10k entries; batch writes so browsing doesn't stall the main process
+    // (which also runs every webRequest/ad-block callback).
     this.saveTimeout = setTimeout(() => {
+      this.saveTimeout = null
       this.persist()
-    }, 400)
+    }, 2000)
+  }
+
+  /** Write pending changes immediately (call on app quit) */
+  public flushSave(): void {
+    if (this.saveTimeout) {
+      clearTimeout(this.saveTimeout)
+      this.saveTimeout = null
+      this.persist()
+    }
   }
 
   private persist(): void {
     if (!this.filePath) return
     try {
       const tmpPath = `${this.filePath}.tmp`
-      fs.writeFileSync(tmpPath, JSON.stringify(this.entries, null, 2), 'utf-8')
+      fs.writeFileSync(tmpPath, JSON.stringify(this.entries), 'utf-8')
       fs.renameSync(tmpPath, this.filePath)
     } catch (err) {
       console.error('[HistoryService] Failed to persist history:', err)

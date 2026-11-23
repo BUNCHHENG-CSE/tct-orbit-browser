@@ -51,6 +51,41 @@ export class BackupService {
     win?: BrowserWindow | null
   ): Promise<ExportBackupResult> {
     try {
+      const { backupFile, itemCounts } = this.buildBackupFile(options)
+
+      // Format current date for file name: YYYY-MM-DD
+      const dateStr = new Date().toISOString().slice(0, 10)
+      const defaultFilename = `tct-orbit-backup-${dateStr}.json`
+
+      const saveResult = await dialog.showSaveDialog(win || undefined as any, {
+        title: 'Export TCT Orbit User Data',
+        defaultPath: path.join(app.getPath('downloads'), defaultFilename),
+        filters: [{ name: 'JSON Backup (*.json)', extensions: ['json'] }]
+      })
+
+      if (saveResult.canceled || !saveResult.filePath) {
+        return { success: false, canceled: true }
+      }
+
+      const filePath = saveResult.filePath
+      fs.writeFileSync(filePath, JSON.stringify(backupFile, null, 2), 'utf-8')
+
+      return { success: true, filePath, itemCounts }
+    } catch (err: any) {
+      console.error('[BackupService] Export failed:', err)
+      return {
+        success: false,
+        error: err?.message || 'Failed to export backup file'
+      }
+    }
+  }
+
+  /** Build the backup payload in memory (used by file export and the encrypted sync file) */
+  public buildBackupFile(options: ExportBackupOptions = {}): {
+    backupFile: BackupV1File
+    itemCounts: NonNullable<ExportBackupResult['itemCounts']>
+  } {
+    {
       const categories = options.categories || ['settings', 'spaces', 'tabs', 'privacy']
       const includeOpenTabs = options.includeOpenTabs !== false
       const includePinnedTabs = options.includePinnedTabs !== false
@@ -177,26 +212,8 @@ export class BackupService {
         data: exportData
       }
 
-      // Format current date for file name: YYYY-MM-DD
-      const dateStr = new Date().toISOString().slice(0, 10)
-      const defaultFilename = `tct-orbit-backup-${dateStr}.json`
-
-      const saveResult = await dialog.showSaveDialog(win || undefined as any, {
-        title: 'Export TCT Orbit User Data',
-        defaultPath: path.join(app.getPath('downloads'), defaultFilename),
-        filters: [{ name: 'JSON Backup (*.json)', extensions: ['json'] }]
-      })
-
-      if (saveResult.canceled || !saveResult.filePath) {
-        return { success: false, canceled: true }
-      }
-
-      const filePath = saveResult.filePath
-      fs.writeFileSync(filePath, JSON.stringify(backupFile, null, 2), 'utf-8')
-
       return {
-        success: true,
-        filePath,
+        backupFile,
         itemCounts: {
           spaces: exportData.spaces?.length || 0,
           tabs: exportedTabsCount,
@@ -205,12 +222,6 @@ export class BackupService {
           hasSettings: Boolean(exportData.settings),
           hasPrivacy: Boolean(exportData.privacy)
         }
-      }
-    } catch (err: any) {
-      console.error('[BackupService] Export failed:', err)
-      return {
-        success: false,
-        error: err?.message || 'Failed to export backup file'
       }
     }
   }
@@ -233,6 +244,11 @@ export class BackupService {
 
       if (!parsed || typeof parsed !== 'object') {
         return this.createInvalidResult('File does not contain a valid JSON object.')
+      }
+
+      // Encrypted sync/backup file: the UI asks for the passphrase, decrypts, then inspects again
+      if (parsed.format === 'tct-orbit-encrypted') {
+        return { ...this.createInvalidResult('This file is encrypted. Enter its passphrase to open it.'), encrypted: true, rawContent }
       }
 
       // Check schema version (Support v1)
@@ -289,7 +305,10 @@ export class BackupService {
     const res = await dialog.showOpenDialog(win || undefined as any, {
       title: 'Select TCT Orbit Backup File',
       defaultPath: app.getPath('downloads'),
-      filters: [{ name: 'JSON Backup (*.json)', extensions: ['json'] }],
+      filters: [
+        { name: 'TCT Orbit backup (*.json, *.orbitsync)', extensions: ['json', 'orbitsync'] },
+        { name: 'All files', extensions: ['*'] }
+      ],
       properties: ['openFile']
     })
 

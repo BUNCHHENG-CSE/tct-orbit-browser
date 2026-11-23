@@ -118,7 +118,9 @@ export function useTabs(spaceId: string | null) {
         url: lastClosed.tab.url,
         title: lastClosed.tab.title,
         favicon: lastClosed.tab.favicon,
-        isPinned: lastClosed.tab.isPinned
+        isPinned: lastClosed.tab.isPinned,
+        // A reopened private tab must stay private (no history, in-memory session)
+        isPrivate: !!lastClosed.tab.isPrivate
       })
       addTabToStore(targetSpaceId, restoredTab)
       setActiveTabId(restoredTab.id)

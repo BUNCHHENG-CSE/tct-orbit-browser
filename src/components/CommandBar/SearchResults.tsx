@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn } from 'lucide-react'
+import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn, AppWindow, EyeOff, LayoutTemplate, ShieldCheck, Keyboard, RotateCcw, FileText } from 'lucide-react'
 import {
   CommandGroup,
   CommandItem,
@@ -63,6 +63,11 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
 }) => {
   const trimmed = query.trim()
   const isInputUrl = isUrl(trimmed)
+
+  const act = (fn: () => void) => () => {
+    useBrowserStore.getState().setCommandBarOpen(false)
+    setTimeout(fn, 0)
+  }
   const engine = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
   const [historyResults, setHistoryResults] = useState<HistoryEntry[]>([])
@@ -129,7 +134,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('open-history'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('open-history')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -149,7 +154,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('open-downloads'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('open-downloads')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -169,7 +174,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('tct:webview-print'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:webview-print')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -189,7 +194,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('tct:webview-save-pdf'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:webview-save-pdf')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -206,7 +211,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('open-bookmarks'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('open-bookmarks')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -223,7 +228,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => window.dispatchEvent(new CustomEvent('tct:toggle-find'))}
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:toggle-find')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
@@ -270,7 +275,142 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            onSelect={() => useBrowserStore.getState().setTaskManagerOpen(true)}
+            value="Search Open Tabs Find any tab in any space"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-tab-search')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <AppWindow className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Search Open Tabs</span>
+              <p className="text-[11px] text-muted-foreground">Find any tab in any space</p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+Shift+A
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            value="New Private Tab No history, wiped when closed"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:new-private-tab')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <EyeOff className="w-4 h-4 text-violet-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">New Private Tab</span>
+              <p className="text-[11px] text-muted-foreground">No history, wiped when closed</p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              Alt+Shift+N
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            value="Space Templates Save or reopen a set of tabs"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-space-templates')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <LayoutTemplate className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Space Templates</span>
+              <p className="text-[11px] text-muted-foreground">Save or reopen a set of tabs</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            value="Privacy Report Trackers and ads blocked this week"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-privacy-report')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-4 h-4 text-emerald-500" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Privacy Report</span>
+              <p className="text-[11px] text-muted-foreground">Trackers and ads blocked this week</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            value="Keyboard Shortcuts Every shortcut on one page"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-shortcut-help')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Keyboard className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Keyboard Shortcuts</span>
+              <p className="text-[11px] text-muted-foreground">Every shortcut on one page</p>
+            </div>
+            <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
+              {modKey}+/
+            </kbd>
+          </CommandItem>
+
+          <CommandItem
+            value="Restore Previous Session Reopen tabs from last time"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:restore-session')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <RotateCcw className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Restore Previous Session</span>
+              <p className="text-[11px] text-muted-foreground">Reopen tabs from last time</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            value="Privacy Policy What TCT Orbit stores and connects to"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-legal', { detail: { doc: 'privacy' } })))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <ShieldCheck className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Privacy Policy</span>
+              <p className="text-[11px] text-muted-foreground">What TCT Orbit stores and connects to</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            value="Terms of Use The rules for using TCT Orbit"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-legal', { detail: { doc: 'terms' } })))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <FileText className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Terms of Use</span>
+              <p className="text-[11px] text-muted-foreground">The rules for using TCT Orbit</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            value="Welcome Tour Replay the quick introduction"
+            onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:open-onboarding')))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">
+              <Sparkles className="w-4 h-4 text-primary" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Welcome Tour</span>
+              <p className="text-[11px] text-muted-foreground">Replay the quick introduction</p>
+            </div>
+          </CommandItem>
+
+          <CommandItem
+            onSelect={act(() => useBrowserStore.getState().setTaskManagerOpen(true))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
             <div className="w-8 h-8 rounded-xl bg-muted/60 text-muted-foreground border border-border flex items-center justify-center shrink-0">

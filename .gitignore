@@ -68,6 +68,11 @@ latest*.yaml
 .parcel-cache/
 *.tsbuildinfo
 
+# Temporary bundled config files left behind when a dev/build run is interrupted
+electron.vite.config.*.mjs
+vite.config.*.timestamp-*.mjs
+vite.config.*.timestamp-*.js
+
 # ==============================================================================
 # 5. Database, SQLite & Local Storage Files (Prisma / JSON Storage)
 # ==============================================================================
@@ -94,9 +99,15 @@ minidumps/
 *.dump
 userData/
 User Data/
-tct-orbit-data.json
-state.json
+# Anchored to the repo root so source files with the same name are never silently ignored
+/tct-orbit-data.json
+/state.json
+/history.json
+/privacy-shield-prefs.json
+/adblocker-cache.bin
 orbit.db*
+# Atomic-write temp files (*.tmp written before rename)
+*.tmp
 
 # ==============================================================================
 # 7. Logs & Diagnostic Files

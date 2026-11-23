@@ -11,9 +11,15 @@ import {
   RotateCw,
   Plus,
   Lock,
+  EyeOff,
   Globe,
-  Search
+  Search,
+  Star,
+  History as HistoryIcon,
+  AppWindow,
+  PictureInPicture2
 } from 'lucide-react'
+import type { BookmarkItem } from '@/types/api'
 import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSettings } from '@/hooks/useSettings'
@@ -55,6 +61,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
 
   const activeTab = activeSpaceId ? tabsBySpace[activeSpaceId]?.find((t) => t.id === activeTabId) : null
   const urlInfo = getDisplayUrlInfo(activeTab?.url || '')
+  // Private tabs always search with DuckDuckGo (no account, no search history profiling)
+  const isPrivateTab = !!activeTab?.isPrivate
   const isSecure = urlInfo.isSecure
 
   // Edge-style inline omnibox state
@@ -63,6 +71,84 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   const [hasActiveDownload, setHasActiveDownload] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+
+  // --- Omnibox suggestions: open tabs, bookmarks, history ---
+  type Suggestion = {
+    kind: 'search' | 'url' | 'tab' | 'bookmark' | 'history'
+    title: string
+    url: string
+    spaceId?: string
+    tabId?: string
+  }
+  const [suggestions, setSuggestions] = useState<Suggestion[]>([])
+  const [selectedIndex, setSelectedIndex] = useState(-1)
+  const bookmarksCacheRef = useRef<BookmarkItem[] | null>(null)
+  const suggestReqRef = useRef(0)
+
+  const suggestionsEnabled = (() => {
+    try {
+      const v = localStorage.getItem('tct_pref_search_suggestions')
+      return v === null ? true : JSON.parse(v) !== false
+    } catch {
+      return true
+    }
+  })()
+
+  useEffect(() => {
+    if (!isFocused) {
+      bookmarksCacheRef.current = null
+      setSuggestions([])
+      setSelectedIndex(-1)
+      return
+    }
+    const q = inputValue.trim()
+    // Typing resets the keyboard selection
+    setSelectedIndex(-1)
+    if (!q || !suggestionsEnabled || q === activeTab?.url) {
+      setSuggestions([])
+      return
+    }
+    const reqId = ++suggestReqRef.current
+    const timer = setTimeout(async () => {
+      const ql = q.toLowerCase()
+      const matches = (title: string, url: string) => title.toLowerCase().includes(ql) || url.toLowerCase().includes(ql)
+      const seen = new Set<string>()
+      const out: Suggestion[] = []
+      const push = (sug: Suggestion, limit: number, countKind: Suggestion['kind']) => {
+        if (seen.has(sug.url) || out.filter((o) => o.kind === countKind).length >= limit) return
+        seen.add(sug.url)
+        out.push(sug)
+      }
+
+      // 1. Open tabs (all spaces): switch instead of opening a duplicate
+      const store = useBrowserStore.getState()
+      for (const [spaceId, list] of Object.entries(store.tabsBySpace)) {
+        for (const t of list) {
+          if (t.id !== store.activeTabId && t.url && matches(t.title || '', t.url)) {
+            push({ kind: 'tab', title: t.title || t.url, url: t.url, spaceId, tabId: t.id }, 3, 'tab')
+          }
+        }
+      }
+
+      // 2. Bookmarks (loaded once per focus)
+      try {
+        if (!bookmarksCacheRef.current) bookmarksCacheRef.current = (await api.bookmarks?.list()) || []
+        for (const b of bookmarksCacheRef.current) {
+          if (matches(b.title || '', b.url)) push({ kind: 'bookmark', title: b.title || b.url, url: b.url }, 3, 'bookmark')
+        }
+      } catch {}
+
+      // 3. History
+      try {
+        const hist = (await api.history?.searchHistory(q, 8)) || []
+        for (const h of hist) push({ kind: 'history', title: h.title || h.url, url: h.url }, 5, 'history')
+      } catch {}
+
+      if (reqId === suggestReqRef.current) setSuggestions(out.slice(0, 8))
+    }, 70)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputValue, isFocused])
 
   // Track active downloads for badge pulse in titlebar
   useEffect(() => {
@@ -246,16 +332,45 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       targetUrl = normalizeUrl(trimmed)
     } else {
       const isDark = resolveIsDark(settings?.theme)
-      const engine = (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
-      targetUrl = buildSearchUrl(trimmed, engine, isDark)
+      targetUrl = buildSearchUrl(trimmed, currentEngine, isDark)
     }
 
     handleNavigateTo(targetUrl, trimmed)
   }
 
+  const activateSuggestion = (sug: Suggestion) => {
+    if (sug.kind === 'tab' && sug.tabId && sug.spaceId) {
+      setIsFocused(false)
+      inputRef.current?.blur()
+      const store = useBrowserStore.getState()
+      if (store.activeSpaceId !== sug.spaceId) {
+        store.setActiveSpaceId(sug.spaceId)
+        for (const sp of store.spaces) store.updateSpaceInStore(sp.id, { isActive: sp.id === sug.spaceId })
+        api.spaces.setActive(sug.spaceId).catch(() => {})
+      }
+      useBrowserStore.getState().setActiveTabId(sug.tabId)
+      return
+    }
+    handleNavigateTo(sug.url, sug.title)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (suggestions.length === 0) return
+      e.preventDefault()
+      setSelectedIndex((i) => {
+        const max = suggestions.length - 1
+        if (e.key === 'ArrowDown') return i >= max ? -1 : i + 1
+        return i <= -1 ? max : i - 1
+      })
+      return
+    }
     if (e.key === 'Enter') {
-      handleSubmit()
+      if (selectedIndex >= 0 && suggestions[selectedIndex]) {
+        activateSuggestion(suggestions[selectedIndex])
+      } else {
+        handleSubmit()
+      }
     } else if (e.key === 'Escape') {
       setIsFocused(false)
       setInputValue(activeTab?.url || '')
@@ -263,7 +378,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     }
   }
 
-  const currentEngine = (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
+  const currentEngine: SearchEngineId = isPrivateTab
+    ? 'duckduckgo'
+    : (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
   const engineMeta = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
   return (
@@ -363,15 +480,28 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             }
           }}
           className={`w-full h-8 flex items-center px-3 rounded-full border transition-colors shadow-2xs group cursor-text ${
-            isFocused
+            isPrivateTab
+              ? isFocused
+                ? 'bg-background border-violet-500 ring-2 ring-violet-500/25 shadow-sm'
+                : 'bg-violet-500/[0.07] hover:bg-violet-500/10 border-violet-500/40'
+              : isFocused
               ? 'bg-background border-primary ring-2 ring-primary/25 shadow-sm'
               : 'bg-omnibox hover:bg-muted/70 border-omnibox-border'
           }`}
         >
           {/* Security / Search Icon on the left */}
+          {isPrivateTab && (
+            <span
+              title="Private tab: no history, cookies wiped when the last private tab closes"
+              className="shrink-0 flex items-center gap-1 mr-2 px-1.5 py-0.5 rounded-full bg-violet-500/15 text-violet-400 text-[10.5px] font-semibold select-none"
+            >
+              <EyeOff className="w-3 h-3" />
+              <span className="hidden md:inline">Private</span>
+            </span>
+          )}
           {isFocused ? (
             <div className="shrink-0 flex items-center mr-2">
-              <Search className="w-3.5 h-3.5 text-primary" />
+              <Search className={`w-3.5 h-3.5 ${isPrivateTab ? 'text-violet-500' : 'text-primary'}`} />
             </div>
           ) : (
             <SiteInfoPopover url={activeTab?.url} />
@@ -381,7 +511,13 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           <input
             ref={inputRef}
             type="text"
-            value={isFocused ? inputValue : (urlInfo.displayText || inputValue)}
+            value={
+              isFocused
+                ? selectedIndex >= 0 && suggestions[selectedIndex]
+                  ? suggestions[selectedIndex].url
+                  : inputValue
+                : urlInfo.displayText || inputValue
+            }
             onChange={(e) => setInputValue(e.target.value)}
             onFocus={() => {
               setIsFocused(true)
@@ -396,7 +532,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               setIsFocused(false)
             }}
             onKeyDown={handleKeyDown}
-            placeholder={`Search with ${engineMeta.name} or enter address...`}
+            placeholder={
+              isPrivateTab
+                ? `Search privately with ${engineMeta.name} or enter address...`
+                : `Search with ${engineMeta.name} or enter address...`
+            }
             spellCheck={false}
             autoComplete="off"
             className="w-full h-full bg-transparent border-none outline-none text-foreground text-[13.5px] font-normal placeholder:text-muted-foreground select-text truncate"
@@ -426,6 +566,20 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             >
               <span>{currentZoom}%</span>
               <X className="w-2.5 h-2.5" />
+            </button>
+          )}
+
+          {/* Picture-in-picture shortcut while the tab is playing media */}
+          {!isFocused && activeTab?.isAudible && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation()
+                window.dispatchEvent(new CustomEvent('tct:toggle-pip'))
+              }}
+              title={`Picture-in-picture (${modKey}+Shift+P)`}
+              className="p-1 mr-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors shrink-0"
+            >
+              <PictureInPicture2 className="w-3.5 h-3.5" />
             </button>
           )}
 
@@ -491,6 +645,36 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
                 <span className="text-[10px] text-muted-foreground shrink-0">Direct URL</span>
               </div>
             )}
+
+            {/* Open tabs, bookmarks & history matches */}
+            {suggestions.length > 0 && <div className="my-1 border-t border-border" />}
+            {suggestions.map((sug, i) => {
+              const Icon = sug.kind === 'tab' ? AppWindow : sug.kind === 'bookmark' ? Star : HistoryIcon
+              return (
+                <div
+                  key={`${sug.kind}-${sug.url}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    activateSuggestion(sug)
+                  }}
+                  onMouseEnter={() => setSelectedIndex(i)}
+                  className={`flex items-center gap-2.5 px-3.5 py-1.5 cursor-pointer transition-colors ${
+                    i === selectedIndex ? 'bg-accent' : 'hover:bg-accent'
+                  }`}
+                >
+                  <Icon
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      sug.kind === 'bookmark' ? 'text-amber-500' : sug.kind === 'tab' ? 'text-primary' : 'text-muted-foreground'
+                    }`}
+                  />
+                  <span className="truncate text-foreground max-w-[45%]">{sug.title}</span>
+                  <span className="truncate flex-1 text-muted-foreground text-[11px]">{sug.url.replace(/^https?:\/\/(www\.)?/, '')}</span>
+                  {sug.kind === 'tab' && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-primary/10 text-primary shrink-0">Switch to tab</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>

@@ -1,3 +1,5 @@
+import { sitePermissions, toPromptable } from './permissions/sitePermissions'
+import { PRIVATE_PARTITION } from './privacy/types'
 import {
   app,
   session,
@@ -165,7 +167,10 @@ export const Schemas = {
     spaceId: z.string().min(1),
     url: z.string().min(1),
     title: z.string().optional(),
-    favicon: z.string().nullable().optional()
+    favicon: z.string().nullable().optional(),
+    isPinned: z.boolean().optional(),
+    order: z.number().optional(),
+    isPrivate: z.boolean().optional()
   }),
   tabUpdate: z.tuple([
     z.string().min(1),
@@ -188,7 +193,10 @@ export const Schemas = {
   spaceCreate: z.object({
     name: z.string().min(1).max(80),
     color: z.string().optional(),
-    icon: z.string().optional()
+    icon: z.string().optional(),
+    order: z.number().optional(),
+    initialUrl: z.string().max(8192).optional(),
+    initialTitle: z.string().max(1000).optional()
   }),
   spaceUpdate: z.tuple([
     z.string().min(1),
@@ -216,12 +224,15 @@ export const Schemas = {
     askWhereToSave: z.boolean().optional(),
     openFolderOnDownload: z.boolean().optional(),
     defaultZoom: z.number().min(50).max(300).optional(),
-    autoArchiveDuration: z.enum(['off', '12h', '24h', '3d', '7d']).optional()
+    autoArchiveDuration: z.enum(['off', '12h', '24h', '3d', '7d']).optional(),
+    memorySaverEnabled: z.boolean().optional(),
+    sleepTimeoutMinutes: z.number().int().min(1).max(1440).optional()
   }),
 
   // Downloads
   downloadsOpenFolder: z.string().optional(),
   downloadsShowInFolder: z.string().min(1),
+  downloadsControl: z.string().min(1).max(200),
   downloadsOpenFile: z.string().min(1),
   downloadsDeleteFile: z.object({
     id: z.string().min(1),
@@ -373,7 +384,31 @@ export const Schemas = {
   }),
 
   // Privacy
-  privacyUpdatePrefs: z.record(z.string(), z.any()),
+  privacyUpdatePrefs: z
+    .object({
+      adBlockerEnabled: z.boolean(),
+      trackerProtection: z.boolean(),
+      fingerprintResistance: z.boolean(),
+      httpsOnlyMode: z.boolean(),
+      dnsOverHttps: z.boolean(),
+      dohProvider: z.enum(['mullvad', 'cloudflare', 'quad9', 'adguard']),
+      webrtcProtection: z.boolean(),
+      globalPrivacyControl: z.boolean(),
+      stripTrackingParams: z.boolean(),
+      blockThirdPartyCookies: z.boolean(),
+      clearCacheOnExit: z.boolean(),
+      blockPings: z.boolean(),
+      strictReferrer: z.boolean(),
+      spoofLanguage: z.boolean(),
+      blockCookieBanners: z.boolean(),
+      proxyMode: z.enum(['off', 'system', 'tor', 'custom']),
+      proxyUrl: z
+        .string()
+        .max(300)
+        .regex(/^(socks5|socks4|http|https):\/\/[a-z0-9.\-_[\]:]+:\d{1,5}$/i, 'Expected scheme://host:port'),
+      whitelistedOrigins: z.array(z.string().max(2048)).max(5000)
+    })
+    .partial(),
   privacyTargetUrl: z.string().min(1),
   privacyToggleOrigin: z.string().min(1)
 }
@@ -386,105 +421,110 @@ export const Schemas = {
  * Configure Chromium WebRTC IP handling policy to prevent leaking private LAN IP
  * addresses and local interfaces when connecting to WebRTC peers or STUN servers.
  */
-export function setupWebRTCLeakProtection(contents: WebContents): void {
+export function setupWebRTCLeakProtection(
+  contents: WebContents,
+  policy: 'disable_non_proxied_udp' | 'default_public_interface_only' = 'disable_non_proxied_udp'
+): void {
   try {
-    contents.setWebRTCIPHandlingPolicy('disable_non_proxied_udp')
+    contents.setWebRTCIPHandlingPolicy(policy)
   } catch (err) {
     console.warn('[Security] Could not apply WebRTC IP handling policy:', err)
   }
 }
 
-/**
- * Strips tracking identifiers and enforces Referer privacy rules on outgoing web requests.
- */
-export function setupWebRequestHardening(ses: Session): void {
-  ses.webRequest.onBeforeSendHeaders({ urls: ['*://*/*'] }, (details, callback) => {
-    const requestHeaders = { ...details.requestHeaders }
-
-    try {
-      const parsed = new URL(details.url)
-
-      // 1. Strip Google Chrome client telemetry and backend tracking identifiers
-      delete requestHeaders['X-Client-Data']
-      delete requestHeaders['x-client-data']
-      delete requestHeaders['X-Google-GFE-Backend-Req-Headers']
-
-      // 2. Send Global Privacy Control & Do Not Track signals
-      requestHeaders['Sec-GPC'] = '1'
-      requestHeaders['DNT'] = '1'
-
-      // 3. Referer Leakage Prevention: Downgrade to origin-only for cross-origin requests
-      if (details.referrer && details.referrer.startsWith('http')) {
-        try {
-          const refUrl = new URL(details.referrer)
-          if (refUrl.origin !== parsed.origin) {
-            requestHeaders['Referer'] = refUrl.origin + '/'
-          }
-        } catch {
-          delete requestHeaders['Referer']
-        }
-      }
-    } catch {}
-
-    callback({ requestHeaders })
-  })
-}
+// NOTE: Request-header hardening (X-Client-Data stripping, GPC/DNT, referrer trimming) lives in
+// PrivacyEngine.setupNetworkFilters. Electron allows only ONE onBeforeSendHeaders listener per
+// session, so registering a second one here would silently replace (or be replaced by) that one.
 
 /**
  * Hardens device, sensor, and media permissions: default-deny all sensitive permissions.
  */
 export function lockDownSessionPermissions(ses: Session): void {
+  // Decisions made in private tabs are kept in memory only
+  const isPrivateSession = ses === session.fromPartition(PRIVATE_PARTITION)
+  // Electron permission names (camera/microphone arrive as 'media')
   const SENSITIVE_PERMISSIONS = new Set([
+    'media',
     'camera',
     'microphone',
+    'display-capture',
     'geolocation',
     'notifications',
     'clipboard-read',
     'midi',
+    'midiSysex',
     'midi-sysex',
     'sensors',
     'accessibility-events',
     'serial',
     'hid',
     'usb',
+    'bluetooth',
     'idle-detection',
     'window-management',
     'local-fonts',
-    'screen-wake-lock'
+    'screen-wake-lock',
+    'speaker-selection'
+  ])
+
+  // Harmless, user-initiated browser features
+  const ALLOWED_PERMISSIONS = new Set([
+    'fullscreen',
+    'pointerLock',
+    'keyboardLock',
+    'mediaKeySystem',
+    'clipboard-sanitized-write',
+    'fileSystem'
   ])
 
   ses.setPermissionRequestHandler((webContents, permission, callback, details) => {
-    const url = webContents.getURL()
+    const url = webContents?.getURL() || ''
     if (url.startsWith('devtools://')) {
       return callback(true)
     }
 
-    if (SENSITIVE_PERMISSIONS.has(permission)) {
-      console.warn(`[Security] Blocked hardware permission request "${permission}" for URL: ${details.requestingUrl || url}`)
+    // External protocol launches (link to mailto:, ms-msdt:, search-ms: ...): only known-safe schemes
+    if (permission === 'openExternal') {
+      const externalURL = (details as { externalURL?: string }).externalURL || ''
+      try {
+        const protocol = new URL(externalURL).protocol
+        if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) return callback(true)
+      } catch {}
+      console.warn(`[Security] Blocked external protocol launch: ${externalURL}`)
       return callback(false)
     }
 
-    // Permit standard browser view operations (fullscreen, pointerLock, DRM/EME, clipboard sanitized write)
-    if (['fullscreen', 'pointerLock', 'mediaKeySystem', 'clipboard-sanitized-write'].includes(permission)) {
-      return callback(true)
+    // Camera, microphone, location, notifications, clipboard, MIDI: ask the user (per site)
+    if (toPromptable(permission, details).length > 0 && ses !== session.defaultSession) {
+      sitePermissions
+        .request(webContents, details.requestingUrl || url, permission, details, isPrivateSession)
+        .then((allow) => callback(allow))
+        .catch(() => callback(false))
+      return
     }
 
-    return callback(false)
+    if (SENSITIVE_PERMISSIONS.has(permission)) {
+      console.warn(`[Security] Blocked permission request "${permission}" for URL: ${details.requestingUrl || url}`)
+      return callback(false)
+    }
+
+    return callback(ALLOWED_PERMISSIONS.has(permission))
   })
 
-  ses.setPermissionCheckHandler((webContents, permission) => {
+  ses.setPermissionCheckHandler((webContents, permission, requestingOrigin) => {
     if (webContents && !webContents.isDestroyed() && webContents.getURL().startsWith('devtools://')) {
       return true
     }
-    if (SENSITIVE_PERMISSIONS.has(permission)) {
-      return false
+    if (toPromptable(permission).length > 0 && ses !== session.defaultSession) {
+      return sitePermissions.check(webContents, requestingOrigin, permission, isPrivateSession)
     }
-    return true
+    return !SENSITIVE_PERMISSIONS.has(permission)
   })
 }
 
 /**
- * Configures the dedicated isolated browsing partition ('persist:browser-tabs')
+ * Configures the dedicated isolated browsing partition ('persist:browser-tabs').
+ * Permissions and network filters are attached by PrivacyEngine.init().
  */
 export function setupIsolatedTabSession(partition = 'persist:browser-tabs'): Session {
   const tabSession = session.fromPartition(partition)
@@ -492,7 +532,6 @@ export function setupIsolatedTabSession(partition = 'persist:browser-tabs'): Ses
     tabSession.setSpellCheckerEnabled(false)
   } catch {}
   lockDownSessionPermissions(tabSession)
-  setupWebRequestHardening(tabSession)
   return tabSession
 }
 
@@ -666,7 +705,8 @@ export function setupWebContentsSecurity(contents: WebContents, mainWindow?: Bro
         return { action: 'deny' }
       }
 
-      shell.openExternal(rawUrl).catch(() => {})
+      // Unknown protocol: deny. Never hand arbitrary schemes to the OS (e.g. ms-msdt:, search-ms:)
+      console.warn(`[Security] Blocked window.open with unknown protocol: ${protocol}`)
     } catch (err) {
       console.warn('[Security] Failed to handle window.open details:', details.url, err)
     }

@@ -33,6 +33,10 @@ export function register(ipcMain: IpcMain): void {
     return privacyEngine.getStats()
   })
 
+  secureHandle(ipcMain, 'privacy:test-proxy', null, async () => {
+    return privacyEngine.testProxy()
+  })
+
   secureHandle(ipcMain, 'privacy:clear-browsing-data', null, async () => {
     return privacyEngine.clearBrowsingData()
   })

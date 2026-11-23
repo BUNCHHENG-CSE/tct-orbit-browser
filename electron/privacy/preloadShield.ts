@@ -3,8 +3,14 @@
  * Implements Mullvad-standard browser fingerprinting resistance and cosmetic ad suppression.
  */
 
-export function getShieldInjectionScript(enabled: boolean, fingerprintingResistance: boolean, isWhitelisted: boolean): string {
-  if (!enabled || isWhitelisted) {
+export function getShieldInjectionScript(
+  enabled: boolean,
+  fingerprintingResistance: boolean,
+  isWhitelisted: boolean,
+  spoofLanguage = false
+): string {
+  // Each protection is independent: turning the ad blocker off must not disable fingerprint protection
+  if (isWhitelisted || (!enabled && !fingerprintingResistance && !spoofLanguage)) {
     return '/* TCT Orbit Shield: Inactive for this site */'
   }
 
@@ -15,6 +21,14 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
       window.__tct_shield_hardened = true;
 
       try {
+        ${spoofLanguage ? `
+        // --- 0. GENERIC LOCALE (matches the spoofed Accept-Language header) ---
+        try {
+          Object.defineProperty(Navigator.prototype, 'language', { get: () => 'en-US', configurable: true });
+          Object.defineProperty(Navigator.prototype, 'languages', { get: () => Object.freeze(['en-US', 'en']), configurable: true });
+        } catch(e) {}
+        ` : ''}
+
         // --- 1. GLOBAL PRIVACY CONTROL & DNT ---
         try {
           Object.defineProperty(navigator, 'globalPrivacyControl', {
@@ -79,17 +93,32 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
             return imgData;
           };
 
+          // Export a noised COPY so the page's own canvas is never modified (repeated calls used to
+          // accumulate drift in drawing apps). Only small canvases (typical fingerprint probes) are noised.
+          // Remember which canvases are 2D (WebGL buffers may already be cleared, so never copy those)
+          const twoDCanvases = new WeakSet();
+          const origGetContext = HTMLCanvasElement.prototype.getContext;
+          HTMLCanvasElement.prototype.getContext = function(type, ...rest) {
+            const ctx = origGetContext.call(this, type, ...rest);
+            if (ctx && type === '2d') twoDCanvases.add(this);
+            return ctx;
+          };
+
           const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
           HTMLCanvasElement.prototype.toDataURL = function(...args) {
             try {
-              const ctx = this.getContext('2d');
-              if (ctx) {
-                const w = Math.min(this.width, 16);
-                const h = Math.min(this.height, 16);
-                if (w > 0 && h > 0) {
-                  const img = ctx.getImageData(0, 0, w, h);
+              const w = this.width, h = this.height;
+              if (twoDCanvases.has(this) && w > 0 && h > 0 && w * h <= 1024 * 256) {
+                const copy = document.createElement('canvas');
+                copy.width = w;
+                copy.height = h;
+                const cctx = origGetContext.call(copy, '2d');
+                if (cctx) {
+                  cctx.drawImage(this, 0, 0);
+                  const img = origGetImageData.call(cctx, 0, 0, Math.min(w, 16), 1);
                   img.data[0] = shiftNoise(img.data[0]);
-                  ctx.putImageData(img, 0, 0);
+                  cctx.putImageData(img, 0, 0);
+                  return origToDataURL.apply(copy, args);
                 }
               }
             } catch(e) {}
@@ -156,8 +185,9 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
         };
 
         // --- 3. YOUTUBE AD SUPPRESSION & AUTO-SKIPPER ---
-        const isYouTube = window.location.hostname.includes('youtube.com');
-        if (isYouTube) {
+        const ADBLOCK_ENABLED = ${enabled ? 'true' : 'false'};
+        const isYouTube = /(^|\\.)youtube\\.com$/.test(window.location.hostname);
+        if (ADBLOCK_ENABLED && isYouTube) {
           // Permanently suppress overlay ads, sponsored cards, bottom banners, and companion ads
           const ytStyle = document.createElement('style');
           ytStyle.id = 'tct-yt-adblock';
@@ -225,8 +255,8 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
                   adVideo.currentTime = adVideo.duration - 0.05;
                 }
 
-                cachedPlayer.classList.remove('ad-showing');
-                cachedPlayer.classList.remove('ad-interrupting');
+                // Do NOT remove 'ad-showing' / 'ad-interrupting' manually: the player owns those classes
+                // and stripping them desyncs its state (black screen / "something went wrong" errors).
 
                 const closeButtons = cachedPlayer.querySelectorAll('.ytp-ad-overlay-close-button');
                 closeButtons.forEach((btn) => {
@@ -247,6 +277,7 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
         }
 
         // --- 4. GENERAL COSMETIC AD CONTAINER REMOVAL ---
+        if (ADBLOCK_ENABLED) {
         const generalAdStyle = document.createElement('style');
         generalAdStyle.id = 'tct-general-adblock';
         generalAdStyle.textContent = \`
@@ -263,53 +294,9 @@ export function getShieldInjectionScript(enabled: boolean, fingerprintingResista
           }
         \`;
         safeAppendStyle(generalAdStyle);
+        }
 
-        // --- 5. MODERN SLIM OVERLAY SCROLLBAR & OVERSCROLL PREVENTION ---
-        const modernScrollbarStyle = document.createElement('style');
-        modernScrollbarStyle.id = 'tct-orbit-modern-scrollbar';
-        modernScrollbarStyle.textContent = \`
-          :root, html, body {
-            overscroll-behavior: none !important;
-            overscroll-behavior-y: none !important;
-            overscroll-behavior-x: none !important;
-          }
-
-          :root, html, body, * {
-            scrollbar-width: thin !important;
-            scrollbar-color: rgba(130, 130, 150, 0.4) transparent !important;
-          }
-
-          ::-webkit-scrollbar {
-            width: 6px !important;
-            height: 6px !important;
-          }
-
-          ::-webkit-scrollbar-track {
-            background: transparent !important;
-          }
-
-          ::-webkit-scrollbar-thumb {
-            background: rgba(130, 130, 150, 0.4) !important;
-            border-radius: 9999px !important;
-            border: 1px solid transparent !important;
-            background-clip: padding-box !important;
-          }
-
-          ::-webkit-scrollbar-thumb:hover {
-            background: rgba(150, 150, 180, 0.7) !important;
-          }
-
-          ::-webkit-scrollbar-corner {
-            background: transparent !important;
-          }
-
-          ::-webkit-scrollbar-button {
-            display: none !important;
-            width: 0 !important;
-            height: 0 !important;
-          }
-        \`;
-        safeAppendStyle(modernScrollbarStyle);
+        // (Scrollbar / overscroll CSS is injected once by the main process on dom-ready.)
 
       } catch(err) {
         console.warn('[TCT Orbit Shield] Preload initialization warning:', err);
