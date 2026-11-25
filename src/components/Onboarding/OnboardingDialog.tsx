@@ -107,7 +107,18 @@ export const OnboardingDialog: React.FC = () => {
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : finish())}>
-      <DialogContent className="w-[92vw] max-w-md p-0 overflow-hidden bg-card border border-border rounded-2xl">
+      <DialogContent
+        className="w-[92vw] max-w-md p-0 overflow-hidden bg-card border border-border rounded-2xl"
+        onKeyDown={(e) => {
+          // Nothing is focused yet: Enter and the arrow keys go through the tour
+          if (e.target !== e.currentTarget) return
+          if (e.key === 'ArrowLeft' && step > 0) setStep(step - 1)
+          else if (e.key === 'Enter' || e.key === 'ArrowRight') {
+            if (!isLast) setStep(step + 1)
+            else if (e.key === 'Enter') finish()
+          }
+        }}
+      >
         <div className="px-6 pt-7 pb-5 text-center">
           <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-primary/10 text-primary flex items-center justify-center">
             {step === 0 ? <img src={browserLogo} alt="" className="w-10 h-10 object-contain" /> : <Icon className="w-7 h-7" />}
