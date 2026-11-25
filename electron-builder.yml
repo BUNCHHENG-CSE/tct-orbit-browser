@@ -156,7 +156,7 @@ dmg:
 # ==============================================================================
 linux:
   executableName: tct-orbit
-  maintainer: TCT <support@tctorbit.com>
+  maintainer: TCT <BUNCHHENG-CSE@users.noreply.github.com>
   category: Network;WebBrowser;
   icon: resources/browser-logo.png
   synopsis: Fast, Clean, and Modern Desktop Web Browser

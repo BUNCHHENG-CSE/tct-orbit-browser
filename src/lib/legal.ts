@@ -8,8 +8,8 @@
 
 export const LEGAL_LAST_UPDATED = 'November 25, 2026'
 export const LEGAL_PUBLISHER = 'TCT'
-export const LEGAL_CONTACT_EMAIL = 'support@tctorbit.com'
-export const LEGAL_WEBSITE = 'https://tctorbit.com'
+/** No support address until the project owns a domain. Issues are public: the texts say so. */
+export const LEGAL_CONTACT = 'github.com/BUNCHHENG-CSE/tct-orbit-browser/issues'
 
 export type LegalBlock = { p: string } | { list: string[] }
 
@@ -35,7 +35,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: '1. Who we are',
       blocks: [
         {
-          p: `TCT Orbit is published by ${LEGAL_PUBLISHER} ("we", "us"). You can reach us at ${LEGAL_CONTACT_EMAIL}. Because the browser does not send your browsing data to us, we are not able to access, sell or share it.`
+          p: `TCT Orbit is published by ${LEGAL_PUBLISHER} ("we", "us"). You can reach us at ${LEGAL_CONTACT}. Issues there are public, so do not include personal information. Because the browser does not send your browsing data to us, we are not able to access, sell or share it.`
         }
       ]
     },
@@ -159,7 +159,7 @@ export const PRIVACY_POLICY: LegalDocument = {
     },
     {
       heading: '13. Contact',
-      blocks: [{ p: `Questions about privacy: ${LEGAL_CONTACT_EMAIL}.` }]
+      blocks: [{ p: `Questions about privacy: ${LEGAL_CONTACT}.` }]
     }
   ]
 }
@@ -273,7 +273,7 @@ export const TERMS_OF_USE: LegalDocument = {
     },
     {
       heading: '13. Contact',
-      blocks: [{ p: `Questions about these terms: ${LEGAL_CONTACT_EMAIL}.` }]
+      blocks: [{ p: `Questions about these terms: ${LEGAL_CONTACT}.` }]
     }
   ]
 }

@@ -3,13 +3,13 @@
   "productName": "TCT Orbit",
   "version": "0.1.2",
   "description": "TCT Orbit",
-  "homepage": "https://tctorbit.com",
+  "homepage": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser",
   "repository": {
     "type": "git",
     "url": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser.git"
   },
   "main": "./out/main/index.js",
-  "author": "TCT <support@tctorbit.com>",
+  "author": "TCT <BUNCHHENG-CSE@users.noreply.github.com>",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=9.0.0"

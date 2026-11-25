@@ -27,7 +27,7 @@ A fast, clean, and modern web browser built for smooth navigation and distractio
 
 ## Publishing an update
 
-Push a `v*` tag. CI attaches the installers and their `latest*.yml` files to the GitHub Release, which installed copies read. The repository (or a separate releases repository set in `electron-builder.yml`) must be **public**, and macOS updates need a signed app.
+Push a `v*` tag. CI attaches the installers and their `latest*.yml` files to the GitHub Release, which installed copies read. The tag must match `version` in `package.json` (e.g. `v0.1.3`). The repository must stay **public**. macOS updates need a signed app.
 
 ---
 

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { FileText, ShieldCheck } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { LEGAL_DOCUMENTS, LEGAL_LAST_UPDATED, LEGAL_CONTACT_EMAIL, type LegalDocument } from '@/lib/legal'
+import { LEGAL_DOCUMENTS, LEGAL_LAST_UPDATED, LEGAL_CONTACT, type LegalDocument } from '@/lib/legal'
 
 /** Open with: window.dispatchEvent(new CustomEvent('tct:open-legal', { detail: { doc: 'terms' | 'privacy' } })) */
 export function openLegal(doc: LegalDocument['id']): void {
@@ -80,7 +80,7 @@ export const LegalDialog: React.FC = () => {
               </section>
             ))}
             <p className="pt-3 border-t border-border text-[11.5px] text-muted-foreground">
-              Contact: <span className="font-mono text-foreground">{LEGAL_CONTACT_EMAIL}</span>
+              Contact: <span className="font-mono text-foreground">{LEGAL_CONTACT}</span>
             </p>
           </article>
         </div>

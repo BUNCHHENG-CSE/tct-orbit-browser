@@ -18,9 +18,9 @@ export const BRAND = {
   name: 'TCT Orbit',
   version: '0.1.2',
   description: 'TCT Orbit (v0.1.2) — A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.',
-  homepage: 'https://tctorbit.com',
+  homepage: 'https://github.com/BUNCHHENG-CSE/tct-orbit-browser',
   repository: 'https://github.com/BUNCHHENG-CSE/tct-orbit-browser',
-  author: 'TCT <support@tctorbit.com>',
+  author: 'TCT <BUNCHHENG-CSE@users.noreply.github.com>',
   defaultChannel: 'stable' as ReleaseChannel
 } as const
 

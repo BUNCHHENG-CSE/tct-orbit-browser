@@ -320,7 +320,6 @@ export class BackupService {
 
       // Construct file payload
       const backupFile: BackupV1File = {
-        $schema: 'https://tctorbit.com/schemas/backup-v1.json',
         version: 1,
         exportedAt: new Date().toISOString(),
         app: {
