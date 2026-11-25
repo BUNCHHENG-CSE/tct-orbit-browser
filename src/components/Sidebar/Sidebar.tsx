@@ -218,7 +218,7 @@ export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) 
           onTogglePin={handleTogglePin}
           onDuplicateTab={handleDuplicateTab}
           onNewTabToRight={(id) => createTabNextTo(id)}
-          onReloadTab={() => window.dispatchEvent(new CustomEvent('tct:webview-reload'))}
+          onReloadTab={(tabId) => window.dispatchEvent(new CustomEvent('tct:webview-reload', { detail: { tabId } }))}
           onCloseOthers={closeOtherTabs}
           onCloseToRight={closeTabsToRight}
         />

@@ -31,6 +31,7 @@ import { updateService } from './essentials/updater'
 import { screenShareService } from './essentials/screenShare'
 import { httpAuthService } from './essentials/httpAuth'
 import { attachLeaveWarning, confirmCloseWindow } from './essentials/unload'
+import { reloadPage } from './essentials/reload'
 import { safeBrowsing } from './essentials/safeBrowsing'
 import { addressService } from './essentials/addresses'
 import { pageTools } from './essentials/pageTools'
@@ -459,8 +460,8 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
     if (isWebview) {
       // These act on the page that has focus, which may be the other half of a split view
       const nav = contents.navigationHistory
-      if (action === 'reload') return contents.reload()
-      if (action === 'hard-reload') return contents.reloadIgnoringCache()
+      if (action === 'reload') return void reloadPage(contents)
+      if (action === 'hard-reload') return void reloadPage(contents, true)
       if (action === 'back') return nav.canGoBack() ? nav.goBack() : undefined
       if (action === 'forward') return nav.canGoForward() ? nav.goForward() : undefined
     }

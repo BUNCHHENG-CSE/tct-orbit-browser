@@ -129,6 +129,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   onFocusPane
 }) => {
   const webviewRef = useRef<any>(null)
+  /** A sleeping tab has no page view until it is opened again */
+  const hasPageView = !tab.isSleeping || isActive
   const [loadError, setLoadError] = useState<LoadError | null>(null)
   const hasError = loadError !== null
   /** Address that failed, until the next navigation. Chromium "finishes loading" its own error page. */
@@ -707,7 +709,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       useBrowserStore.getState().setTabLoading(tab.id, false)
       offUnsafe?.()
     }
-  }, [tab.id, registerWebviewRef, unregisterWebviewRef])
+    // A tab that slept gets a new page view: everything above must move to it
+  }, [tab.id, hasPageView, registerWebviewRef, unregisterWebviewRef])
 
   // Wake up sleeping tab when it becomes active
   useEffect(() => {
@@ -874,7 +877,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       )}
 
       {/* If tab is sleeping and inactive, unmount webview to completely destroy renderer RAM */}
-      {(!tab.isSleeping || isActive) && (
+      {hasPageView && (
         <webview
           ref={webviewRef}
           src={initialUrlRef.current}
@@ -1380,21 +1383,30 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }, [activeTabId])
 
-  const handleReload = useCallback(() => {
-    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
-    if (el && typeof el.reload === 'function') {
-      el.reload()
+  const reloadTab = useCallback((tabId: string | null | undefined, hard = false) => {
+    if (!tabId) return
+    const store = useBrowserStore.getState()
+    const target = Object.values(store.tabsBySpace).flat().find((t) => t.id === tabId)
+    const el = webviewsRef.current.get(tabId)
+    if (!el) {
+      if (target?.isSleeping) store.setTabSleeping(tabId, false)
+      return
     }
-  }, [activeTabId])
+    try {
+      const live = el.getURL()
+      // Stopped before anything was shown: there is nothing to reload yet
+      if ((!live || live === 'about:blank') && target && /^https?:/i.test(target.url)) {
+        loadUrlWithRetry(el, target.url)
+        return
+      }
+      void api.webview.call(el.getWebContentsId(), hard ? 'reloadIgnoringCache' : 'reload')
+    } catch {
+      // The page view is not ready yet: it is loading anyway
+    }
+  }, [])
 
-  const handleHardReload = useCallback(() => {
-    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
-    if (el && typeof el.reloadIgnoringCache === 'function') {
-      el.reloadIgnoringCache()
-    } else if (el && typeof el.reload === 'function') {
-      el.reload()
-    }
-  }, [activeTabId])
+  const handleReload = useCallback((tabId?: string) => reloadTab(tabId ?? activeTabId), [activeTabId, reloadTab])
+  const handleHardReload = useCallback(() => reloadTab(activeTabId, true), [activeTabId, reloadTab])
 
   const handlePrint = useCallback(() => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
@@ -1457,7 +1469,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
   useEffect(() => {
     const onBack = () => handleBack()
     const onForward = () => handleForward()
-    const onReload = () => handleReload()
+    const onReload = (e: Event) => handleReload((e as CustomEvent).detail?.tabId)
     const onHardReload = () => handleHardReload()
     const onPrint = () => handlePrint()
     const onSavePdf = () => handleSavePdf()

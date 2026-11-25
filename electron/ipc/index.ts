@@ -1,3 +1,4 @@
+import { reloadPage } from '../essentials/reload'
 import {
   app,
   shell,
@@ -321,6 +322,11 @@ export function registerAllIpc(
 
       // Saving a link or image: web addresses only (data: images are fine, file: is not)
       if (method === 'downloadURL' && !/^(https?:|data:image\/|blob:)/i.test(String(args[0] ?? ''))) return false
+
+      if (method === 'reload' || method === 'reloadIgnoringCache') {
+        void reloadPage(wc, method === 'reloadIgnoringCache')
+        return true
+      }
 
       if (typeof (wc as any)[method] === 'function') {
         try {

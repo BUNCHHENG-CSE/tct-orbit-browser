@@ -282,6 +282,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     }
   }, [])
 
+  // Window buttons don't take the keyboard focus from the page (and show no outline after a click)
+  const keepPageFocus = (e: React.MouseEvent) => e.preventDefault()
   const handleMinimize = () => api.window.minimize()
   const handleMaximize = async () => {
     await api.window.maximize()
@@ -788,6 +790,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         {!isMac && !topBarTabs && (
           <div className="flex items-center gap-0.5 pl-1">
             <button
+              onMouseDown={keepPageFocus}
               onClick={handleMinimize}
               className="w-8 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title="Minimize"
@@ -795,6 +798,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               <Minus className="w-3.5 h-3.5" />
             </button>
             <button
+              onMouseDown={keepPageFocus}
               onClick={handleMaximize}
               className="w-8 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               title={isMaximized ? 'Restore' : 'Maximize'}
@@ -802,6 +806,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               {isMaximized ? <Copy className="w-3 h-3" /> : <Square className="w-3 h-3" />}
             </button>
             <button
+              onMouseDown={keepPageFocus}
               onClick={handleClose}
               className="w-8 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-destructive-foreground hover:bg-destructive transition-colors"
               title="Close"
