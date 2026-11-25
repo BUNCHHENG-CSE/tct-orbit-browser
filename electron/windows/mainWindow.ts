@@ -1,4 +1,4 @@
-import { app, BrowserWindow, nativeTheme } from 'electron'
+import { app, BrowserWindow, nativeTheme, Menu, type MenuItemConstructorOptions } from 'electron'
 import { join } from 'path'
 import { existsSync } from 'fs'
 import { getAppPaths } from '../storage/paths'
@@ -106,20 +106,28 @@ export function createMainWindow(options: CreateWindowOptions = {}): BrowserWind
     showWindow()
   }, 1000)
 
-  // In development mode only, provide Inspect UI Element context menu for browser chrome
-  if (!app.isPackaged) {
-    mainWindow.webContents.on('context-menu', (_event, params) => {
-      const { Menu, MenuItem } = require('electron')
-      const menu = new Menu()
-      menu.append(
-        new MenuItem({
-          label: 'Inspect UI Element',
-          click: () => mainWindow.webContents.inspectElement(params.x, params.y)
-        })
+  // Cut / Copy / Paste in the browser's own text boxes (address bar, search, notes ...)
+  mainWindow.webContents.on('context-menu', (_event, params) => {
+    const items: MenuItemConstructorOptions[] = []
+    const { editFlags } = params
+    if (params.isEditable) {
+      items.push(
+        { role: 'undo', enabled: editFlags.canUndo },
+        { type: 'separator' },
+        { role: 'cut', enabled: editFlags.canCut },
+        { role: 'copy', enabled: editFlags.canCopy },
+        { role: 'paste', enabled: editFlags.canPaste },
+        { type: 'separator' },
+        { role: 'selectAll', label: 'Select all', enabled: editFlags.canSelectAll }
       )
-      menu.popup()
-    })
-  }
+    } else if (params.selectionText.trim()) {
+      items.push({ role: 'copy' })
+    }
+    if (!app.isPackaged) {
+      items.push({ label: 'Inspect UI Element', click: () => mainWindow.webContents.inspectElement(params.x, params.y) })
+    }
+    if (items.length > 0) Menu.buildFromTemplate(items).popup({ window: mainWindow })
+  })
 
   // Load renderer via dev server URL (with HMR) or production HTML
   const query: Record<string, string> = {}

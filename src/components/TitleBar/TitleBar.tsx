@@ -259,6 +259,10 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       inputRef.current?.blur()
     }
 
+    // Another app or the page is in front: only close the suggestions. The cursor must still be in the
+    // address bar when the user comes back to paste what they copied there.
+    const handleWindowBlur = () => setIsFocused(false)
+
     const handleOutsideClick = (e: MouseEvent) => {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         handleCloseOmnibox()
@@ -268,7 +272,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     window.addEventListener('mousedown', handleOutsideClick)
     window.addEventListener('pointerdown', handleOutsideClick)
     window.addEventListener('tct:close-omnibox', handleCloseOmnibox)
-    window.addEventListener('blur', handleCloseOmnibox)
+    window.addEventListener('blur', handleWindowBlur)
 
     // Listen to IPC event from main process when webview gains focus or receives clicks
     const unsubscribeOmnibox = api.omnibox?.onClose ? api.omnibox.onClose(handleCloseOmnibox) : undefined
@@ -277,7 +281,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       window.removeEventListener('mousedown', handleOutsideClick)
       window.removeEventListener('pointerdown', handleOutsideClick)
       window.removeEventListener('tct:close-omnibox', handleCloseOmnibox)
-      window.removeEventListener('blur', handleCloseOmnibox)
+      window.removeEventListener('blur', handleWindowBlur)
       if (unsubscribeOmnibox) unsubscribeOmnibox()
     }
   }, [])
