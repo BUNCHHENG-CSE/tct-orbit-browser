@@ -5,9 +5,17 @@ import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { getAppNativeIcon, getBrowserLogoPath } from '../resources'
 import { setupMainWindowSecurity } from '../security'
+import { devServerUrl } from '../appUi'
 import { getInitialWindowState, trackWindowState } from './windowState'
+import { PRIVATE_WINDOW_QUERY } from '../../shared/privateWindow'
 
-export function createMainWindow(): BrowserWindow {
+export interface CreateWindowOptions {
+  /** Private window: only private tabs, own size, no saved window position */
+  private?: boolean
+}
+
+export function createMainWindow(options: CreateWindowOptions = {}): BrowserWindow {
+  const isPrivate = !!options.private
   const isMac = process.platform === 'darwin'
   const paths = getAppPaths()
   const startupTheme = themeManager.getStartupTheme()
@@ -20,12 +28,17 @@ export function createMainWindow(): BrowserWindow {
 
   // First launch: maximized. Later launches: last size/position/maximized state.
   const initialState = getInitialWindowState()
-  const startMaximized = initialState.maximize || initialState.fullScreen
+  const startMaximized = !isPrivate && (initialState.maximize || initialState.fullScreen)
+  // Private windows open a bit smaller, centered (like Edge InPrivate)
+  const bounds = isPrivate
+    ? { width: Math.max(900, Math.round((initialState.bounds.width || 1280) * 0.85)), height: Math.max(640, Math.round((initialState.bounds.height || 800) * 0.85)) }
+    : initialState.bounds
 
   const mainWindow = new BrowserWindow({
-    title: paths.channelMeta.displayName,
+    title: isPrivate ? `${paths.channelMeta.displayName} — Private` : paths.channelMeta.displayName,
     icon: appIcon,
-    ...initialState.bounds,
+    ...bounds,
+    ...(isPrivate ? { center: true } : {}),
     minWidth: 480,
     minHeight: 400,
     show: false,
@@ -60,12 +73,14 @@ export function createMainWindow(): BrowserWindow {
   themeManager.updateWindowChrome(mainWindow, startupTheme.resolved)
 
   // Keep window native background synchronized to active theme
-  nativeTheme.on('updated', () => {
+  const onThemeUpdated = () => {
     if (!mainWindow.isDestroyed()) {
       const currentResolved = themeManager.resolveTheme(themeManager.getState().mode)
       themeManager.updateWindowChrome(mainWindow, currentResolved)
     }
-  })
+  }
+  nativeTheme.on('updated', onThemeUpdated)
+  mainWindow.once('closed', () => nativeTheme.removeListener('updated', onThemeUpdated))
 
   const showWindow = () => {
     if (mainWindow.isDestroyed() || mainWindow.isVisible()) return
@@ -76,7 +91,8 @@ export function createMainWindow(): BrowserWindow {
   }
 
   mainWindow.once('ready-to-show', showWindow)
-  trackWindowState(mainWindow)
+  // Only the main window remembers its size and position
+  if (!isPrivate) trackWindowState(mainWindow)
 
   // Ensure window always displays even if ready-to-show event is delayed by HMR/compilation
   setTimeout(() => {
@@ -99,10 +115,13 @@ export function createMainWindow(): BrowserWindow {
   }
 
   // Load renderer via dev server URL (with HMR) or production HTML
-  if (process.env['ELECTRON_RENDERER_URL']) {
-    mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
+  const devUrl = devServerUrl()
+  if (devUrl) {
+    const url = new URL(devUrl)
+    if (isPrivate) url.searchParams.set('window', PRIVATE_WINDOW_QUERY)
+    mainWindow.loadURL(url.toString())
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'), isPrivate ? { query: { window: PRIVATE_WINDOW_QUERY } } : undefined)
   }
 
   return mainWindow

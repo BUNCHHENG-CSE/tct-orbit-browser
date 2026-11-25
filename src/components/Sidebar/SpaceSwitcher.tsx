@@ -24,7 +24,8 @@ import {
   Bookmark,
   Zap,
   Terminal,
-  Folder
+  Folder,
+  UserRound
 } from 'lucide-react'
 import { useSpaces } from '@/hooks/useSpaces'
 import { useSettings } from '@/hooks/useSettings'
@@ -47,6 +48,7 @@ import {
 } from '@/components/ui/context-menu'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
 import type { Space } from '@/types/api'
@@ -84,6 +86,21 @@ const ICONS_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   Folder
 }
 
+/** "Separate profile" switch: the space gets its own cookies, logins and site storage */
+const ProfileToggle: React.FC<{ checked: boolean; onChange: (v: boolean) => void }> = ({ checked, onChange }) => (
+  <label className="flex items-start gap-3 p-3 rounded-xl border border-border bg-muted/30 cursor-pointer">
+    <UserRound className="w-4 h-4 mt-0.5 text-primary shrink-0" />
+    <span className="flex-1 min-w-0">
+      <span className="block text-xs font-semibold text-foreground">Separate profile</span>
+      <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5">
+        Own logins, cookies and site data, kept apart from your other spaces. Use it to stay signed in to a work and a
+        personal account at the same time.
+      </span>
+    </span>
+    <Switch checked={checked} onCheckedChange={onChange} className="mt-0.5" />
+  </label>
+)
+
 interface SpaceSwitcherProps {
   collapsed?: boolean
 }
@@ -91,13 +108,28 @@ interface SpaceSwitcherProps {
 export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false }) => {
   const { spaces, activeSpaceId, setActive, createSpace, updateSpace, removeSpace } = useSpaces()
   const { settings } = useSettings()
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
+  // A string of counts (stable while counts don't change), not the tab objects themselves
+  const tabCountsKey = useBrowserStore((s) => Object.entries(s.tabsBySpace).map(([id, list]) => `${id}:${list.length}`).join('|'))
+  const tabCounts = React.useMemo(() => {
+    const m: Record<string, number> = {}
+    for (const part of tabCountsKey ? tabCountsKey.split('|') : []) {
+      const at = part.lastIndexOf(':')
+      m[part.slice(0, at)] = Number(part.slice(at + 1))
+    }
+    return m
+  }, [tabCountsKey])
 
   const currentEngine = (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
   const engineMeta = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
+  // Top-bar tab layout: the strip's space menu opens the same "New space" dialog
+  React.useEffect(() => {
+    const open = () => setCreateDialogOpen(true)
+    window.addEventListener('tct:new-space', open)
+    return () => window.removeEventListener('tct:new-space', open)
+  }, [])
   const [editDialogOpen, setEditDialogOpen] = useState(false)
   const [spacesHubOpen, setSpacesHubOpen] = useState(false)
   const [editingSpace, setEditingSpace] = useState<Space | null>(null)
@@ -107,18 +139,20 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
   const [name, setName] = useState('')
   const [selectedColor, setSelectedColor] = useState(PRESET_COLORS[0])
   const [selectedIcon, setSelectedIcon] = useState('Layers')
+  const [isolated, setIsolated] = useState(false)
 
   // Edit form state
   const [editName, setEditName] = useState('')
   const [editColor, setEditColor] = useState(PRESET_COLORS[0])
   const [editIcon, setEditIcon] = useState('Layers')
+  const [editIsolated, setEditIsolated] = useState(false)
 
   const [isSubmitting, setIsSubmitting] = useState(false)
   const lastWheelTimeRef = useRef(0)
 
   // Helper: tab count for a given space
   const getTabCount = (space: Space): number => {
-    return tabsBySpace[space.id]?.length ?? space.tabs?.length ?? 0
+    return tabCounts[space.id] ?? space.tabs?.length ?? 0
   }
 
   // Smooth mouse-wheel cycle across spaces when hovering over the dock
@@ -172,14 +206,16 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
         name: name.trim(),
         color: selectedColor,
         icon: selectedIcon,
-        initialUrl: engineMeta.homeUrl,
-        initialTitle: engineMeta.name
+        // New spaces open on the start page unless the user prefers the command bar
+        ...(settings?.newTabPage === 'command-bar' ? { initialUrl: engineMeta.homeUrl, initialTitle: engineMeta.name } : {}),
+        isolated
       })
       await setActive(newSpace.id)
       if (newSpace.tabs && newSpace.tabs.length > 0) {
         useBrowserStore.getState().setActiveTabId(newSpace.tabs[0].id)
       }
       setName('')
+      setIsolated(false)
       setCreateDialogOpen(false)
       toast.success(`Space "${newSpace.name}" created`)
     } catch (err) {
@@ -195,6 +231,7 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
     setEditName(space.name)
     setEditColor(space.color)
     setEditIcon(space.icon)
+    setEditIsolated(!!space.isolated)
     setEditDialogOpen(true)
   }
 
@@ -204,12 +241,20 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
 
     try {
       setIsSubmitting(true)
+      const profileChanged = !!editingSpace.isolated !== editIsolated
       await updateSpace(editingSpace.id, {
         name: editName.trim(),
         color: editColor,
-        icon: editIcon
+        icon: editIcon,
+        isolated: editIsolated
       })
-      toast.success('Space updated')
+      toast.success(
+        profileChanged
+          ? editIsolated
+            ? 'Space now has its own profile. Its tabs reload; sign in again inside this space.'
+            : 'Space now uses the shared profile. Its tabs reload with your shared logins.'
+          : 'Space updated'
+      )
       setEditDialogOpen(false)
     } catch (err) {
       console.error('Failed to update space:', err)
@@ -650,6 +695,8 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                 </div>
               </div>
 
+              <ProfileToggle checked={isolated} onChange={setIsolated} />
+
               <DialogFooter className="pt-2">
                 <Button
                   type="button"
@@ -731,6 +778,8 @@ export const SpaceSwitcher: React.FC<SpaceSwitcherProps> = ({ collapsed = false 
                   })}
                 </div>
               </div>
+
+              <ProfileToggle checked={editIsolated} onChange={setEditIsolated} />
 
               <DialogFooter className="pt-2 flex items-center justify-between sm:justify-between w-full">
                 {editingSpace && (

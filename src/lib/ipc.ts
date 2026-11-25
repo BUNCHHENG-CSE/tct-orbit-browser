@@ -1,4 +1,5 @@
 import type { ElectronAPI, AppInfo } from '@/types/api'
+import { isPrivateWindow, PRIVATE_SPACE, PRIVATE_WINDOW_SPACE_ID } from '@/lib/privateWindow'
 
 export const getApi = (): ElectronAPI => {
   if (typeof window !== 'undefined' && window.api) {
@@ -19,10 +20,49 @@ export const api = {
     }
   },
   get tabs() {
-    return getApi().tabs
+    const tabs = getApi().tabs
+    if (!isPrivateWindow) return tabs
+    // Private window: every tab is private and lives in the private window's own space
+    return {
+      ...tabs,
+      create: (data: Parameters<typeof tabs.create>[0]) =>
+        tabs.create({ ...data, spaceId: PRIVATE_WINDOW_SPACE_ID, isPrivate: true, isPinned: false, groupId: null }),
+      update: (id: string, data: Parameters<typeof tabs.update>[1]) =>
+        tabs.update(id, { ...data, ...(data.spaceId ? { spaceId: PRIVATE_WINDOW_SPACE_ID } : {}) })
+    }
   },
   get spaces() {
-    return getApi().spaces
+    const spaces = getApi().spaces
+    if (!isPrivateWindow) return spaces
+    // Private window: one virtual "Private" space; spaces can't be created or switched here
+    return {
+      ...spaces,
+      list: async () => [{ ...PRIVATE_SPACE }],
+      setActive: async () => ({ ...PRIVATE_SPACE }),
+      update: async () => ({ ...PRIVATE_SPACE }),
+      create: async () => {
+        throw new Error('Spaces are not available in a private window')
+      },
+      remove: async () => false
+    }
+  },
+  get passwords() {
+    return getApi().passwords
+  },
+  get search() {
+    return getApi().search
+  },
+  get defaultBrowser() {
+    return getApi().defaultBrowser
+  },
+  get extensions() {
+    return getApi().extensions
+  },
+  get groups() {
+    return getApi().groups
+  },
+  get splits() {
+    return getApi().splits
   },
   get settings() {
     return getApi().settings
@@ -89,6 +129,9 @@ export const api = {
   },
   get thumbnails() {
     return getApi().thumbnails
+  },
+  get smart() {
+    return getApi().smart
   },
   get browserImport() {
     return getApi().browserImport

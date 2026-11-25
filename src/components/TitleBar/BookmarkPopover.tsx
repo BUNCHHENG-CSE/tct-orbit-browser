@@ -1,10 +1,27 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Star, Check, Trash2, X, BookmarkCheck, BookMarked } from 'lucide-react'
-import { api } from '@/lib/ipc'
-import { useBrowserStore } from '@/store/useBrowserStore'
-import { useSpaces } from '@/hooks/useSpaces'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
+import { Star, X, Folder, ChevronDown, Check } from 'lucide-react'
 import { toast } from 'sonner'
+import { api } from '@/lib/ipc'
+import {
+  FAVORITES_BAR,
+  FOLDER_SEP,
+  OTHER_FAVORITES,
+  READING_LIST,
+  addFavorite,
+  barOrder,
+  ensureFavoritesLoaded,
+  folderName,
+  useFavorites
+} from '@/lib/favorites'
 import { modKey } from '@/lib/platform'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger
+} from '@/components/ui/dropdown-menu'
+import { EditFavoriteDialog, type EditTarget } from '@/components/Favorites/EditFavoriteDialog'
+import type { BookmarkItem } from '@/types/api'
 
 interface BookmarkPopoverProps {
   url?: string
@@ -12,115 +29,170 @@ interface BookmarkPopoverProps {
   favicon?: string | null
 }
 
-export const BookmarkPopover: React.FC<BookmarkPopoverProps> = ({
-  url,
-  title = '',
-  favicon
-}) => {
-  const [isOpen, setIsOpen] = useState(false)
-  const [isBookmarked, setIsBookmarked] = useState(false)
-  const [bookmarkTitle, setBookmarkTitle] = useState(title)
-  const [folder, setFolder] = useState<'Bookmarks' | 'Reading List'>('Bookmarks')
-  const { spaces, activeSpaceId } = useSpaces()
+const inBar = (folder: string) => folder === FAVORITES_BAR || folder.startsWith(FAVORITES_BAR + FOLDER_SEP)
+const folderLabel = (path: string) => (path === OTHER_FAVORITES ? 'Other favorites' : folderName(path))
 
+/**
+ * Star in the address bar, Edge style: one click saves the page to the Favorites bar right away
+ * and shows "Favorite added" to rename it, pick another folder, open the full editor (More) or
+ * remove it. Clicking the filled star again edits the existing favorite. Ctrl+D does the same.
+ */
+export const BookmarkPopover: React.FC<BookmarkPopoverProps> = ({ url, title = '', favicon }) => {
+  const [isOpen, setIsOpen] = useState(false)
+  const [justAdded, setJustAdded] = useState(false)
+  const [name, setName] = useState('')
+  const [folder, setFolder] = useState(FAVORITES_BAR)
+  const [itemId, setItemId] = useState<string | null>(null)
+  const [editing, setEditing] = useState<EditTarget | null>(null)
+  const items = useFavorites((s) => s.items)
   const popoverRef = useRef<HTMLDivElement>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
+  const nameRef = useRef<HTMLInputElement>(null)
 
-  // Check if current URL is bookmarked
-  useEffect(() => {
-    if (!url || !api.bookmarks?.isBookmarked) {
-      setIsBookmarked(false)
-      return
+  useEffect(() => ensureFavoritesLoaded(), [])
+
+  const existing = useMemo(
+    () => (url ? items.find((b) => b.url === url && !b.isReadingList && b.folder !== READING_LIST) : undefined),
+    [items, url]
+  )
+  const isFavorite = !!existing
+
+  // Folder picker: Favorites bar, Other favorites and imported roots, each with subfolders (indented)
+  const folders = useMemo(() => {
+    const set = new Set<string>([FAVORITES_BAR, OTHER_FAVORITES])
+    for (const b of items) {
+      if (!b.folder || b.isReadingList || b.folder === READING_LIST) continue
+      const parts = b.folder.split(FOLDER_SEP)
+      for (let i = 1; i <= parts.length; i++) set.add(parts.slice(0, i).join(FOLDER_SEP))
     }
-    let active = true
-    api.bookmarks.isBookmarked(url).then((res) => {
-      if (active) setIsBookmarked(Boolean(res))
-    }).catch(() => {})
-    return () => {
-      active = false
-    }
-  }, [url])
+    const rank = (p: string) => (p.startsWith(FAVORITES_BAR) ? 0 : p.startsWith(OTHER_FAVORITES) ? 1 : 2)
+    return [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
+  }, [items])
 
-  // Sync title when URL changes
-  useEffect(() => {
-    setBookmarkTitle(title || url || '')
-  }, [title, url])
+  const openFor = (item: BookmarkItem, added: boolean) => {
+    setItemId(item.id)
+    setName(item.title || item.url)
+    setFolder(item.folder || OTHER_FAVORITES)
+    setJustAdded(added)
+    setIsOpen(true)
+    // Edge selects the name so you can type a new one right away
+    setTimeout(() => nameRef.current?.select(), 30)
+  }
 
-  // Global toggle-bookmark shortcut listener (Ctrl+D)
-  useEffect(() => {
-    const handleToggle = () => {
-      setIsOpen((prev) => !prev)
-    }
-    window.addEventListener('tct:toggle-bookmark', handleToggle)
-    return () => window.removeEventListener('tct:toggle-bookmark', handleToggle)
-  }, [])
-
-  // Click outside to dismiss
-  useEffect(() => {
-    if (!isOpen) return
-
-    const handleClickOutside = (e: MouseEvent) => {
-      if (
-        popoverRef.current &&
-        !popoverRef.current.contains(e.target as Node) &&
-        buttonRef.current &&
-        !buttonRef.current.contains(e.target as Node)
-      ) {
-        setIsOpen(false)
+  /** Remove the favorite for this page (filled star clicked again), with Undo */
+  const removeFavorite = async (item: BookmarkItem) => {
+    setIsOpen(false)
+    await api.bookmarks.delete(item.id)
+    toast('Removed from favorites', {
+      action: {
+        label: 'Undo',
+        onClick: () =>
+          void addFavorite({ url: item.url, title: item.title, favicon: item.favicon ?? null }, item.folder || FAVORITES_BAR)
       }
+    })
+  }
+
+  /**
+   * Star click: not a favorite → add it to the favorites bar and show the editor;
+   * already a favorite (filled star) → remove it.
+   * Ctrl+D (`edit`): add, or open the editor for an existing favorite.
+   */
+  const handleStar = async (edit = false) => {
+    if (!url) return
+    const current = itemId ? useFavorites.getState().items.find((b) => b.id === itemId) : undefined
+    if (isOpen) {
+      if (edit) return void applyAndClose()
+      // Star clicked again while "Favorite added" is showing: undo the add
+      return current ? void removeFavorite(current) : setIsOpen(false)
     }
-
-    window.addEventListener('mousedown', handleClickOutside)
-    return () => window.removeEventListener('mousedown', handleClickOutside)
-  }, [isOpen])
-
-  const handleSave = async () => {
-    if (!url || !api.bookmarks?.add) return
+    if (existing) return edit ? openFor(existing, false) : void removeFavorite(existing)
     try {
-      await api.bookmarks.add({
-        url,
-        title: bookmarkTitle.trim() || url,
-        favicon: favicon || null,
-        spaceId: activeSpaceId || undefined,
-        folder,
-        isReadingList: folder === 'Reading List'
-      })
-      setIsBookmarked(true)
-      setIsOpen(false)
-      toast.success(folder === 'Reading List' ? 'Added to Reading List' : 'Saved to Bookmarks')
+      const item = await addFavorite({ url, title: title || url, favicon: favicon ?? null }, FAVORITES_BAR)
+      if (item) openFor(item, true)
     } catch {
-      toast.error('Failed to save bookmark')
+      toast.error('Could not add favorite')
+    }
+  }
+
+  /** Save name / folder changes (Done, Enter, or clicking away) */
+  const applyAndClose = async () => {
+    setIsOpen(false)
+    const item = itemId ? useFavorites.getState().items.find((b) => b.id === itemId) : undefined
+    if (!item) return
+    const newTitle = name.trim() || item.url
+    const changes: { title?: string; folder?: string } = {}
+    if (newTitle !== item.title) changes.title = newTitle
+    if (folder !== item.folder) changes.folder = folder
+    if (!Object.keys(changes).length) return
+    await api.bookmarks.update?.(item.id, changes)
+    // Moved onto the bar: put it at the end
+    if (changes.folder && inBar(folder)) {
+      await api.bookmarks.reorder?.([...barOrder(useFavorites.getState().items).filter((id) => id !== item.id), item.id])
     }
   }
 
   const handleRemove = async () => {
-    if (!url || !api.bookmarks?.deleteByUrl) return
-    try {
-      await api.bookmarks.deleteByUrl(url)
-      setIsBookmarked(false)
-      setIsOpen(false)
-      toast.success('Removed bookmark')
-    } catch {
-      toast.error('Failed to remove bookmark')
-    }
+    setIsOpen(false)
+    if (itemId) await api.bookmarks.delete(itemId)
+    toast.success('Favorite removed')
   }
 
-  if (!url || url === 'about:blank') return null
+  const handleMore = () => {
+    const item = itemId ? useFavorites.getState().items.find((b) => b.id === itemId) : undefined
+    setIsOpen(false)
+    if (item) setEditing({ kind: 'link', item: { ...item, title: name.trim() || item.title, folder } })
+  }
+
+  // Ctrl+D
+  const starRef = useRef(handleStar)
+  starRef.current = handleStar
+  useEffect(() => {
+    const onToggle = () => void starRef.current(true)
+    window.addEventListener('tct:toggle-bookmark', onToggle)
+    return () => window.removeEventListener('tct:toggle-bookmark', onToggle)
+  }, [])
+
+  // Clicking away saves (menus opened from the popover, like the folder picker, don't count)
+  const applyRef = useRef(applyAndClose)
+  applyRef.current = applyAndClose
+  useEffect(() => {
+    if (!isOpen) return
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as HTMLElement
+      if (popoverRef.current?.contains(t) || buttonRef.current?.contains(t) || t.closest?.('[data-radix-popper-content-wrapper]')) return
+      void applyRef.current()
+    }
+    // Clicking into the web page doesn't reach this window: it just loses focus
+    const onBlur = () => void applyRef.current()
+    window.addEventListener('mousedown', onDown)
+    window.addEventListener('blur', onBlur)
+    return () => {
+      window.removeEventListener('mousedown', onDown)
+      window.removeEventListener('blur', onBlur)
+    }
+  }, [isOpen])
+
+  // Different page: close without carrying over the editor
+  useEffect(() => {
+    setIsOpen(false)
+  }, [url])
+
+  if (!url || !/^(https?|file):/i.test(url)) return null
 
   return (
     <div className="relative flex items-center">
       <button
         ref={buttonRef}
         type="button"
-        onClick={() => setIsOpen(!isOpen)}
-        className="shrink-0 flex items-center justify-center p-1 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-        title={isBookmarked ? `Bookmarked (${modKey}+D to edit)` : `Bookmark this tab (${modKey}+D)`}
+        onClick={() => void handleStar()}
+        className={`shrink-0 flex items-center justify-center w-6 h-6 rounded-md transition-colors cursor-pointer ${
+          isOpen ? 'bg-primary/15' : 'hover:bg-muted'
+        }`}
+        title={isFavorite ? `Remove from favorites · ${modKey}+D to edit` : `Add this page to favorites (${modKey}+D)`}
       >
         <Star
           className={`w-3.5 h-3.5 transition-transform active:scale-90 ${
-            isBookmarked
-              ? 'fill-amber-400 text-amber-500 scale-105'
-              : 'text-muted-foreground hover:text-foreground'
+            isFavorite ? 'fill-primary text-primary' : 'text-muted-foreground hover:text-foreground'
           }`}
         />
       </button>
@@ -128,85 +200,91 @@ export const BookmarkPopover: React.FC<BookmarkPopoverProps> = ({
       {isOpen && (
         <div
           ref={popoverRef}
-          className="absolute right-0 top-full mt-2 w-80 rounded-2xl bg-popover border border-border shadow-2xl p-4 z-50 text-foreground animate-in fade-in zoom-in-95 duration-150 select-none text-xs"
+          role="dialog"
+          aria-label={justAdded ? 'Favorite added' : 'Edit favorite'}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setIsOpen(false)
+          }}
+          className="absolute right-0 top-full mt-2 w-[300px] rounded-xl bg-popover border border-border shadow-2xl p-4 z-50 text-foreground animate-in fade-in zoom-in-95 duration-150 select-none text-[13px]"
         >
-          {/* Header */}
-          <div className="flex items-center justify-between pb-3 border-b border-border">
-            <div className="flex items-center gap-2">
-              <BookMarked className="w-4 h-4 text-primary" />
-              <span className="font-semibold text-foreground text-sm">
-                {isBookmarked ? 'Edit Bookmark' : 'Bookmark Added'}
-              </span>
-            </div>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[15px] font-semibold">{justAdded ? 'Favorite added' : 'Edit favorite'}</span>
             <button
-              onClick={() => setIsOpen(false)}
-              className="p-1 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              onClick={() => void applyAndClose()}
+              className="w-7 h-7 -mr-1.5 flex items-center justify-center rounded-md hover:bg-muted text-muted-foreground hover:text-foreground"
+              title="Close"
             >
-              <X className="w-3.5 h-3.5" />
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          {/* Form */}
-          <div className="py-3 space-y-3">
-            {/* Title */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                Name
-              </label>
-              <input
-                type="text"
-                value={bookmarkTitle}
-                onChange={(e) => setBookmarkTitle(e.target.value)}
-                className="w-full h-8 px-2.5 rounded-xl bg-background border border-border text-foreground text-xs outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all font-medium"
-              />
-            </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              void applyAndClose()
+            }}
+          >
+            <label className="block text-xs font-medium text-foreground mb-1">Name</label>
+            <input
+              ref={nameRef}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              className="w-full h-8 px-2.5 rounded-md bg-background border border-border text-[13px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/30 select-text"
+            />
 
-            {/* Folder / Destination */}
-            <div>
-              <label className="text-[11px] font-medium text-muted-foreground block mb-1">
-                Destination
-              </label>
-              <select
-                value={folder}
-                onChange={(e) => setFolder(e.target.value as any)}
-                className="w-full h-8 px-2 rounded-xl bg-background border border-border text-foreground text-xs outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all cursor-pointer font-medium"
+            <label className="block text-xs font-medium text-foreground mt-3 mb-1">Folder</label>
+            <DropdownMenu modal={false}>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  className="w-full h-8 px-2.5 flex items-center gap-2 rounded-md bg-background border border-border hover:border-muted-foreground/50 text-left"
+                >
+                  <Folder className="w-4 h-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">{folderLabel(folder)}</span>
+                  <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent
+                align="start"
+                sideOffset={4}
+                className="w-[268px] max-h-[min(320px,var(--radix-dropdown-menu-content-available-height))] overflow-y-auto rounded-lg p-1 z-[60]"
               >
-                <option value="Bookmarks">Bookmarks</option>
-                <option value="Reading List">Reading List (Read Later)</option>
-              </select>
-            </div>
-          </div>
+                {folders.map((f) => {
+                  const depth = f.split(FOLDER_SEP).length - 1
+                  return (
+                    <DropdownMenuItem
+                      key={f}
+                      onClick={() => setFolder(f)}
+                      className="text-[13px] rounded-md cursor-pointer gap-2"
+                      style={{ paddingLeft: 8 + depth * 16 }}
+                    >
+                      <Folder className="w-4 h-4 shrink-0 text-muted-foreground" />
+                      <span className="flex-1 truncate">{folderLabel(f)}</span>
+                      {f === folder && <Check className="w-3.5 h-3.5 text-primary" />}
+                    </DropdownMenuItem>
+                  )
+                })}
+              </DropdownMenuContent>
+            </DropdownMenu>
 
-          {/* Actions */}
-          <div className="pt-2 border-t border-border flex items-center justify-between gap-2">
-            {isBookmarked ? (
-              <button
-                onClick={handleRemove}
-                className="py-1.5 px-3 rounded-xl border border-destructive/30 hover:bg-destructive/15 text-destructive font-medium flex items-center gap-1 transition-colors cursor-pointer text-xs"
-              >
-                <Trash2 className="w-3 h-3" />
-                <span>Remove</span>
+            <div className="flex items-center justify-between mt-4">
+              <button type="button" onClick={handleMore} className="h-8 px-3.5 rounded-md bg-muted hover:bg-muted/70 font-medium">
+                More
               </button>
-            ) : <div />}
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setIsOpen(false)}
-                className="py-1.5 px-3 rounded-xl border border-border hover:bg-muted font-medium transition-colors cursor-pointer text-xs"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                className="py-1.5 px-3.5 rounded-xl bg-primary text-primary-foreground font-semibold hover:opacity-90 transition-opacity cursor-pointer text-xs flex items-center gap-1 shadow-xs"
-              >
-                <Check className="w-3.5 h-3.5" />
-                <span>Done</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button type="submit" className="h-8 px-4 rounded-md bg-primary text-primary-foreground font-semibold hover:bg-primary/90">
+                  Done
+                </button>
+                <button type="button" onClick={() => void handleRemove()} className="h-8 px-3.5 rounded-md bg-muted hover:bg-muted/70 font-medium">
+                  Remove
+                </button>
+              </div>
             </div>
-          </div>
+          </form>
         </div>
       )}
+
+      <EditFavoriteDialog target={editing} onClose={() => setEditing(null)} barOrderIds={barOrder(items)} />
     </div>
   )
 }

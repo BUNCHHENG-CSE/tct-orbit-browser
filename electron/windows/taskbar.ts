@@ -10,7 +10,8 @@ import { getAppIconPath } from '../resources'
  * when right-clicked on the Windows taskbar in both development and production.
  */
 export function setupWindowsTaskbar(appId: string, displayName: string): void {
-  if (process.platform !== 'win32') return
+  // Microsoft Store package: Windows creates the Start menu entry and taskbar identity itself
+  if (process.platform !== 'win32' || process.windowsStore) return
 
   // 1. Explicitly associate the current process with the application's unique AppUserModelID
   app.setAppUserModelId(appId)
@@ -27,7 +28,7 @@ export function setupWindowsTaskbar(appId: string, displayName: string): void {
 
       const target = process.execPath
       const args = isPackaged ? '' : `"${process.cwd()}"`
-      const cwd = process.cwd()
+      const cwd = isPackaged ? path.dirname(process.execPath) : process.cwd()
 
       const exists = fs.existsSync(shortcutPath)
       const op = exists ? 'update' : 'create'

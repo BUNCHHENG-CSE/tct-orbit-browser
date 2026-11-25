@@ -18,7 +18,10 @@ import {
 } from './types'
 import { getShieldInjectionScript } from './preloadShield'
 import { lockDownSessionPermissions } from '../security'
+import { isAppUiFile } from '../appUi'
+import { downloadsService } from '../storage/downloadsService'
 import { sitePermissions } from '../permissions/sitePermissions'
+import { SHARED_TAB_PARTITION, getProfileSessions, onTabSessionCreated } from '../sessions'
 
 // Tracking query parameters stripped from top-level navigations
 const TRACKING_QUERY_PARAMS = new Set([
@@ -131,6 +134,42 @@ function isSameSiteOrRelated(targetHostname: string, topHostname: string): boole
     }
   }
   return false
+}
+
+/**
+ * Sign-in / single sign-on providers. Their cookies are allowed in a third-party context (like
+ * Chrome's and Firefox's login exceptions) so "Sign in with ...", Microsoft 365 and company SSO
+ * keep working while third-party cookies stay blocked for everything else.
+ */
+const SIGN_IN_HOSTS = [
+  'accounts.google.com',
+  'login.microsoftonline.com',
+  'login.microsoft.com',
+  'login.live.com',
+  'login.windows.net',
+  'account.live.com',
+  'appleid.apple.com',
+  'idmsa.apple.com',
+  'account.apple.com',
+  'okta.com',
+  'oktapreview.com',
+  'okta-emea.com',
+  'auth0.com',
+  'onelogin.com',
+  'duosecurity.com',
+  'pingidentity.com',
+  'pingone.com',
+  'login.salesforce.com',
+  'my.salesforce.com',
+  'jumpcloud.com',
+  'cloudflareaccess.com',
+  'clerk.accounts.dev',
+  'b2clogin.com'
+]
+
+export function isSignInHost(hostname: string): boolean {
+  const h = hostname.toLowerCase()
+  return SIGN_IN_HOSTS.some((d) => h === d || h.endsWith(`.${d}`))
 }
 
 function isYouTubeHost(hostname: string): boolean {
@@ -271,9 +310,14 @@ export class PrivacyEngine {
   /** Which prebuilt list set the current engine was built from */
   private engineVariant: 'ads-tracking' | 'full' | null = null
 
-  /** All browsing sessions the shield protects (UI default, persistent tabs, private tabs) */
+  /** All browsing sessions the shield protects (UI default, persistent tabs, private tabs, space profiles) */
   private getSessions(): Session[] {
-    return [session.defaultSession, session.fromPartition('persist:browser-tabs'), session.fromPartition(PRIVATE_PARTITION)]
+    return [
+      session.defaultSession,
+      session.fromPartition(SHARED_TAB_PARTITION),
+      session.fromPartition(PRIVATE_PARTITION),
+      ...getProfileSessions()
+    ]
   }
 
   private get wantedVariant(): 'ads-tracking' | 'full' {
@@ -299,9 +343,6 @@ export class PrivacyEngine {
     // Load cached filter engine synchronously (fast, ~tens of ms). Never block startup on the network:
     // downloading lists happens in the background and the engine is hot-swapped when ready.
     const cacheFresh = this.loadCachedEngine()
-    if (!cacheFresh) {
-      void this.refreshFilterLists()
-    }
 
     for (const ses of this.getSessions()) {
       // NOTE: Electron supports exactly ONE listener per webRequest event and ONE permission
@@ -314,8 +355,22 @@ export class PrivacyEngine {
       session.fromPartition(PRIVATE_PARTITION).setSpellCheckerEnabled(false)
     } catch {}
 
+    // Space profiles (separate cookies/logins) are created lazily: protect them the same way
+    onTabSessionCreated((ses) => {
+      this.setupNetworkFilters(ses)
+      lockDownSessionPermissions(ses)
+      try {
+        ses.setSpellCheckerEnabled(false)
+      } catch {}
+      void ses.setProxy(this.getProxyConfig()).catch((err) => {
+        console.error('[PrivacyEngine] Failed to apply proxy to profile session:', err)
+      })
+    })
+
     this.applySecureDns()
     await this.applyProxy()
+    // Only once the proxy is in place: with Tor on, this download must not reveal the real IP
+    if (!cacheFresh) void this.refreshFilterLists()
 
     // Clear-on-exit: before-quit does not wait for async listeners, so hold the quit until done
     let clearing = false
@@ -378,10 +433,14 @@ export class PrivacyEngine {
   private async refreshFilterLists(): Promise<void> {
     if (this.refreshingLists) return
     this.refreshingLists = true
-    // Node's built-in fetch (undici). Replaces cross-fetch/node-fetch@2, which triggered the
-    // DEP0040 (punycode) and DEP0169 (url.parse) deprecation warnings.
+    // Through the browser's own network stack, so proxy / Tor and secure DNS settings apply
+    // (Node's fetch would connect directly and reveal the real IP address)
     const timedFetch = (input: RequestInfo | URL, init: RequestInit = {}) =>
-      globalThis.fetch(input, { ...init, signal: AbortSignal.timeout(LIST_FETCH_TIMEOUT_MS) })
+      session.defaultSession.fetch(input instanceof URL ? input.toString() : (input as string), {
+        ...init,
+        credentials: 'omit',
+        signal: AbortSignal.timeout(LIST_FETCH_TIMEOUT_MS)
+      } as RequestInit) as Promise<any>
     const variant = this.wantedVariant
     try {
       // 'full' adds EasyList Cookie (consent banners) + annoyance lists on top of ads & tracking
@@ -421,15 +480,16 @@ export class PrivacyEngine {
   }
 
   /** Route every browsing session through the configured proxy (no bypass except loopback) */
-  private async applyProxy(): Promise<void> {
-    let config: Electron.ProxyConfig
-    if (this.prefs.proxyMode === 'system') {
-      config = { mode: 'system' }
-    } else if (this.isProxyActive) {
-      config = { mode: 'fixed_servers', proxyRules: this.getProxyRules(), proxyBypassRules: '<-loopback>' }
-    } else {
-      config = { mode: 'direct' }
+  private getProxyConfig(): Electron.ProxyConfig {
+    if (this.prefs.proxyMode === 'system') return { mode: 'system' }
+    if (this.isProxyActive) {
+      return { mode: 'fixed_servers', proxyRules: this.getProxyRules(), proxyBypassRules: '<-loopback>' }
     }
+    return { mode: 'direct' }
+  }
+
+  private async applyProxy(): Promise<void> {
+    const config = this.getProxyConfig()
     for (const ses of this.getSessions()) {
       try {
         await ses.setProxy(config)
@@ -443,7 +503,7 @@ export class PrivacyEngine {
 
   /** Fetch the public exit IP through the tab session (honors proxy + filters) */
   public async testProxy(): Promise<ProxyTestResult> {
-    const ses = session.fromPartition('persist:browser-tabs')
+    const ses = session.fromPartition(SHARED_TAB_PARTITION)
     try {
       const res = await ses.fetch('https://check.torproject.org/api/ip', {
         signal: AbortSignal.timeout(15_000),
@@ -466,6 +526,8 @@ export class PrivacyEngine {
   public async clearPrivateSession(): Promise<void> {
     const ses = session.fromPartition(PRIVATE_PARTITION)
     sitePermissions.clearPrivate()
+    downloadsService.clearEphemeral()
+    this.forgetPrivateTraces()
     try {
       await ses.clearStorageData()
       await ses.clearCache()
@@ -475,6 +537,12 @@ export class PrivacyEngine {
     } catch (err) {
       console.warn('[PrivacyEngine] Failed to clear private session:', err)
     }
+  }
+
+  /** Hosts remembered in memory by the HTTPS upgrade */
+  private forgetPrivateTraces(): void {
+    this.httpsUpgradeAttempts.clear()
+    this.recentHttpsUpgrades.clear()
   }
 
   /** Apply DNS-over-HTTPS. 'automatic' falls back to system DNS so sites never fail to resolve. */
@@ -538,12 +606,21 @@ export class PrivacyEngine {
    */
   public setupNetworkFilters(ses: Session): void {
     // 1. onBeforeRequest: Ad/Tracker blocking, HTTPS upgrade, tracking-parameter stripping
-    ses.webRequest.onBeforeRequest({ urls: ['*://*/*'] }, (details, callback) => {
+    const isUiSession = ses === session.defaultSession
+    const isPrivate = ses === session.fromPartition(PRIVATE_PARTITION)
+    ses.webRequest.onBeforeRequest({ urls: ['*://*/*', 'file://*/*'] }, (details, callback) => {
       let parsed: URL
       try {
         parsed = new URL(details.url)
       } catch {
         return callback({})
+      }
+
+      // Local files. The UI may only read its own files, and nothing may reach a network share:
+      // on Windows, loading \\server\x (e.g. as a tab icon) sends the user's login hash to that server.
+      if (parsed.protocol === 'file:') {
+        const remote = parsed.hostname !== '' || parsed.pathname.startsWith('//')
+        return callback({ cancel: remote || (isUiSession && !isAppUiFile(details.url)) })
       }
 
       const hostname = parsed.hostname.toLowerCase()
@@ -564,7 +641,7 @@ export class PrivacyEngine {
 
       // Hyperlink auditing (<a ping>) and navigator.sendBeacon(): pure tracking, never needed
       if (this.prefs.blockPings && details.resourceType === 'ping') {
-        this.recordBlocked(pageOrigin, 'trackers')
+        this.recordBlocked(pageOrigin, 'trackers', isPrivate)
         return callback({ cancel: true })
       }
 
@@ -611,7 +688,7 @@ export class PrivacyEngine {
             const { match, redirect } = this.blocker.match(req)
             if (match) {
               const isTracker = details.resourceType === 'ping' || (details.resourceType === 'xhr' && req.isThirdParty)
-              this.recordBlocked(pageOrigin, isTracker ? 'trackers' : 'ads')
+              this.recordBlocked(pageOrigin, isTracker ? 'trackers' : 'ads', isPrivate)
               if (redirect && redirect.dataUrl) {
                 return callback({ redirectURL: redirect.dataUrl })
               }
@@ -622,7 +699,7 @@ export class PrivacyEngine {
           }
         } else if (FALLBACK_AD_HOSTS.some((h) => hostMatchesSuffix(hostname, h))) {
           // B. Engine still loading: block the most common ad networks by exact host suffix
-          this.recordBlocked(pageOrigin, 'ads')
+          this.recordBlocked(pageOrigin, 'ads', isPrivate)
           return callback({ cancel: true })
         }
       }
@@ -638,7 +715,7 @@ export class PrivacyEngine {
           }
         }
         if (stripped) {
-          this.recordBlocked(pageOrigin || parsed.origin, 'trackers')
+          this.recordBlocked(pageOrigin || parsed.origin, 'trackers', isPrivate)
           return callback({ redirectURL: parsed.toString() })
         }
       }
@@ -687,7 +764,11 @@ export class PrivacyEngine {
           const isFrameNav = details.resourceType === 'mainFrame' || details.resourceType === 'subFrame'
           if (this.prefs.blockThirdPartyCookies && !isFrameNav && pageUrl.startsWith('http')) {
             const hostname = parsed.hostname.toLowerCase()
-            if (!hostMatchesSuffix(hostname, 'googlevideo.com') && !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)) {
+            if (
+              !hostMatchesSuffix(hostname, 'googlevideo.com') &&
+              !isSignInHost(hostname) &&
+              !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)
+            ) {
               delete requestHeaders['Cookie']
               delete requestHeaders['cookie']
             }
@@ -732,7 +813,11 @@ export class PrivacyEngine {
         const pageUrl = getPageUrl(details)
         if (pageUrl.startsWith('http') && !this.isPageWhitelisted(pageUrl)) {
           const hostname = new URL(details.url).hostname.toLowerCase()
-          if (!hostMatchesSuffix(hostname, 'googlevideo.com') && !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)) {
+          if (
+            !hostMatchesSuffix(hostname, 'googlevideo.com') &&
+            !isSignInHost(hostname) &&
+            !isSameSiteOrRelated(hostname, new URL(pageUrl).hostname)
+          ) {
             const responseHeaders = { ...details.responseHeaders }
             let changed = false
             for (const key of Object.keys(responseHeaders)) {
@@ -798,12 +883,13 @@ export class PrivacyEngine {
     })
   }
 
-  private recordBlocked(pageOrigin: string, type: 'ads' | 'trackers'): void {
+  private recordBlocked(pageOrigin: string, type: 'ads' | 'trackers', isPrivate: boolean): void {
     if (type === 'ads') this.stats.adsBlockedTotal++
     else this.stats.trackersBlockedTotal++
     this.bumpDaily(type)
 
-    if (!pageOrigin) return
+    // Sites visited in private tabs are counted in the totals but never remembered by name
+    if (!pageOrigin || isPrivate) return
     // Persistent per-site totals for the privacy report (bounded)
     let total = this.siteTotals[pageOrigin]
     if (!total) {

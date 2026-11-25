@@ -34,6 +34,7 @@ import {
 } from 'lucide-react'
 import { cleanUrl } from '@/lib/urlCleaner'
 import { api } from '@/lib/ipc'
+import { isPrivateWindow, openPrivateWindow } from '@/lib/privateWindow'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { useSettings } from '@/hooks/useSettings'
@@ -91,12 +92,11 @@ export const BrowserContextMenu: React.FC = () => {
 
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
   const setQrModal = useBrowserStore((s) => s.setQrModal)
   const setDevToolsOpen = useBrowserStore((s) => s.setDevToolsOpen)
   const { settings } = useSettings()
 
-  const activeTab = activeSpaceId ? tabsBySpace[activeSpaceId]?.find((t) => t.id === activeTabId) : null
+  const activeTab = useBrowserStore((s) => (activeSpaceId ? s.tabsBySpace[activeSpaceId]?.find((t) => t.id === s.activeTabId) ?? null : null))
 
   // Close context menu
   const closeMenu = useCallback(() => {
@@ -393,6 +393,8 @@ export const BrowserContextMenu: React.FC = () => {
 
   const handleOpenLinkInPrivateTab = async () => {
     closeMenu()
+    // Main window: the link opens in the private window
+    if (menu.linkURL && !isPrivateWindow) return openPrivateWindow(menu.linkURL)
     if (menu.linkURL && activeSpaceId) {
       const newTab = await api.tabs.create({
         spaceId: activeSpaceId,
@@ -570,7 +572,7 @@ export const BrowserContextMenu: React.FC = () => {
           />
           <MenuItem
             icon={<EyeOff className="w-4 h-4 text-violet-500" />}
-            label="Open link in private tab"
+            label={isPrivateWindow ? 'Open link in new tab' : 'Open link in private window'}
             onClick={handleOpenLinkInPrivateTab}
           />
           <MenuItem

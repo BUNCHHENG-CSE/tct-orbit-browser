@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { motion } from 'framer-motion'
-import { Plus, Settings, History, Download, Star, EyeOff } from 'lucide-react'
+import { Settings, UserRound } from 'lucide-react'
 import { SpaceSwitcher } from './SpaceSwitcher'
 import { TabList } from './TabList'
 import { TabTidyPopover } from '../TabTidy/TabTidyPopover'
@@ -11,14 +11,15 @@ import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { toast } from 'sonner'
-import { api } from '@/lib/ipc'
-import { modKey } from '@/lib/platform'
+import { PRIVATE_START_URL, PRIVATE_START_TITLE } from '@/lib/startPage'
+import { isPrivateWindow, openPrivateWindow } from '@/lib/privateWindow'
+import { PrivateWindowBadge } from '@/components/PrivateWindow/PrivateWindowBadge'
 import type { Tab } from '@/types/api'
 
 const SIDEBAR_EXPANDED_W = 260
 const SIDEBAR_COLLAPSED_W = 60
 
-export const Sidebar: React.FC = () => {
+export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) => {
   const { spaces, activeSpace, activeSpaceId } = useSpaces()
   const {
     tabs,
@@ -46,7 +47,30 @@ export const Sidebar: React.FC = () => {
   const [isCollapsed, setIsCollapsed] = useState(targetCollapsed)
   const [spacerCollapsed, setSpacerCollapsed] = useState(targetCollapsed)
 
+  // Horizon → Rail switch: fade the rail in instead of popping it (skipped on app start)
+  const prevHideTabs = React.useRef(hideTabs)
+  // Read at render time: `initial` is only honoured on the render that mounts the rail
+  const enterFromTopbar = prevHideTabs.current && !hideTabs
+
+  const finishToggle = React.useCallback(() => {
+    // Idempotent: called from onAnimationComplete and from a fallback timer
+    setIsCollapsed(targetCollapsed)
+    setSpacerCollapsed(targetCollapsed)
+  }, [targetCollapsed])
+
   React.useLayoutEffect(() => {
+    const cameFromTopbar = prevHideTabs.current && !hideTabs
+    prevHideTabs.current = hideTabs
+
+    // No rail mounted (Horizon layout) or the rail is just appearing: there is no width
+    // animation to wait for, so sync both states immediately. Without this, toggling the
+    // collapse flag while in Horizon left the rail at 60px with 260px content inside.
+    if (hideTabs || cameFromTopbar) {
+      setIsCollapsed(targetCollapsed)
+      setSpacerCollapsed(targetCollapsed)
+      return
+    }
+
     if (targetCollapsed) {
       // Collapsing: page reclaims the space immediately (hidden under the still-wide sidebar),
       // content keeps its full layout until the shrink animation ends.
@@ -56,20 +80,19 @@ export const Sidebar: React.FC = () => {
       // the page gives up the space when the animation ends.
       setIsCollapsed(false)
     }
-  }, [targetCollapsed])
+    // Safety net: onAnimationComplete may not fire (animation interrupted / no-op target)
+    const t = window.setTimeout(finishToggle, 260)
+    return () => window.clearTimeout(t)
+  }, [targetCollapsed, hideTabs, finishToggle])
 
-  const handleWidthAnimationComplete = () => {
-    if (targetCollapsed) {
-      setIsCollapsed(true)
-    } else {
-      setSpacerCollapsed(false)
-    }
-  }
+  const handleWidthAnimationComplete = finishToggle
 
   // Private tab: in-memory session, no history, wiped when the last private tab closes
   const handleNewPrivateTab = React.useCallback(async () => {
+    // Private browsing happens in its own window (Edge InPrivate style)
+    if (!isPrivateWindow) return openPrivateWindow()
     try {
-      await createTab({ url: 'https://duckduckgo.com/', title: 'Private Tab', isPrivate: true })
+      await createTab({ url: PRIVATE_START_URL, title: PRIVATE_START_TITLE, isPrivate: true })
       toast('Private tab opened', { description: 'Nothing from this tab is saved after you close it.' })
     } catch {
       toast.error('Could not open a private tab')
@@ -81,20 +104,6 @@ export const Sidebar: React.FC = () => {
     window.addEventListener('tct:new-private-tab', onNewPrivate)
     return () => window.removeEventListener('tct:new-private-tab', onNewPrivate)
   }, [handleNewPrivateTab])
-
-  // Active downloads count for the badge on the Downloads button
-  const [activeDownloads, setActiveDownloads] = useState(0)
-  React.useEffect(() => {
-    const refresh = () => {
-      api.downloads
-        ?.list()
-        .then((list) => setActiveDownloads(list?.filter((d) => d.state === 'progressing').length ?? 0))
-        .catch(() => {})
-    }
-    refresh()
-    const unsubs = [api.downloads?.onStarted?.(refresh), api.downloads?.onCompleted?.(refresh), api.downloads?.onFailed?.(refresh)]
-    return () => unsubs.forEach((u) => u?.())
-  }, [])
 
   const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined)
   React.useEffect(() => {
@@ -127,8 +136,17 @@ export const Sidebar: React.FC = () => {
     }
   }
 
-  const handleOpenCommandBar = () => {
-    setCommandBarOpen(true, '', 'new-tab')
+  // Top-bar tab layout: tabs live in <TabStrip />; keep only the dialogs and listeners
+  if (hideTabs) {
+    return (
+      <>
+        {/* Invisible: provides the create / edit space dialogs used by the tab strip's space menu */}
+        <div className="hidden">
+          <SpaceSwitcher collapsed />
+        </div>
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} initialTab={settingsInitialTab} />
+      </>
+    )
   }
 
   return (
@@ -144,13 +162,16 @@ export const Sidebar: React.FC = () => {
         className="absolute inset-y-0 left-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border select-none z-30"
       >
       {/* Fixed-width content: does not re-layout while the aside width animates */}
-      <div
+      <motion.div
+        initial={enterFromTopbar ? { opacity: 0, x: -12 } : false}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.18, ease: [0.4, 0, 0.2, 1] }}
         className="h-full flex flex-col"
         style={{ width: (isCollapsed ? SIDEBAR_COLLAPSED_W : SIDEBAR_EXPANDED_W) - 1 }}
       >
         {/* Space Switcher Top Header */}
         <div className={`pt-2 ${isCollapsed ? 'px-0 flex flex-col items-center' : 'px-1'}`}>
-          <SpaceSwitcher collapsed={isCollapsed} />
+          {isPrivateWindow ? <PrivateWindowBadge collapsed={isCollapsed} /> : <SpaceSwitcher collapsed={isCollapsed} />}
         </div>
 
         {/* Current Space Title & Active Indicator */}
@@ -164,6 +185,11 @@ export const Sidebar: React.FC = () => {
               <span className="truncate text-xs text-sidebar-foreground font-semibold tracking-tight">
                 {activeSpace.name}
               </span>
+              {activeSpace.isolated && (
+                <span title="Separate profile: own logins and cookies" className="shrink-0 flex">
+                  <UserRound className="w-3 h-3 text-primary" />
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1.5 shrink-0">
               <span className="text-[11px] tracking-normal font-medium text-muted-foreground">
@@ -192,128 +218,8 @@ export const Sidebar: React.FC = () => {
           onCloseToRight={closeTabsToRight}
         />
 
-        {/* Bottom Actions: New Tab + Settings Gear */}
+        {/* Bottom action: Settings (new tabs: + in the toolbar / tab list, Ctrl+T, ⋯ menu) */}
         <div className={`p-2 border-t border-sidebar-border ${isCollapsed ? 'flex flex-col items-center gap-1.5 px-0' : 'space-y-1'}`}>
-          {/* + New Tab button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={handleOpenCommandBar}
-                className={
-                  isCollapsed
-                    ? 'w-9 h-9 rounded-xl flex items-center justify-center bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 hover:border-primary/50 shadow-sm transition-all hover:scale-105 active:scale-95'
-                    : 'w-full flex items-center gap-2 py-2 px-3 rounded-xl bg-sidebar-accent hover:bg-sidebar-accent/80 text-sidebar-foreground transition-colors text-[13.5px] font-semibold border border-sidebar-border shadow-2xs'
-                }
-              >
-                <Plus className="w-4 h-4 shrink-0 text-primary" />
-                {!isCollapsed && <span>New Tab</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" sideOffset={10}>
-                <p>New Tab ({modKey}+T)</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-
-          {/* New Private Tab button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => void handleNewPrivateTab()}
-                className={
-                  isCollapsed
-                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-violet-500 hover:bg-violet-500/10 transition-colors border border-transparent hover:border-violet-500/30'
-                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-violet-500/10 text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
-                }
-              >
-                <EyeOff className="w-4 h-4 shrink-0 text-violet-500" />
-                {!isCollapsed && <span>New Private Tab</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" sideOffset={10}>
-                <p>New Private Tab (Alt+Shift+N)</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-
-          {/* History button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('open-history'))}
-                className={
-                  isCollapsed
-                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
-                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
-                }
-              >
-                <History className="w-4 h-4 shrink-0" />
-                {!isCollapsed && <span>History</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" sideOffset={10}>
-                <p>History ({modKey}+H)</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-
-          {/* Downloads button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('open-downloads'))}
-                className={
-                  isCollapsed
-                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
-                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
-                }
-              >
-                <span className="relative shrink-0 flex">
-                  <Download className="w-4 h-4" />
-                  {activeDownloads > 0 && (
-                    <span className="absolute -top-1.5 -right-1.5 min-w-[14px] h-[14px] px-0.5 rounded-full bg-primary text-primary-foreground text-[9px] font-bold leading-[14px] text-center">
-                      {activeDownloads}
-                    </span>
-                  )}
-                </span>
-                {!isCollapsed && <span>Downloads</span>}
-                {!isCollapsed && activeDownloads > 0 && (
-                  <span className="ml-auto text-[10.5px] text-primary font-semibold">{activeDownloads} active</span>
-                )}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" sideOffset={10}>
-                <p>Downloads ({modKey}+J)</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-
-          {/* Bookmarks & Reading List button */}
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <button
-                onClick={() => window.dispatchEvent(new CustomEvent('open-bookmarks'))}
-                className={
-                  isCollapsed
-                    ? 'w-9 h-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors border border-transparent hover:border-sidebar-border'
-                    : 'w-full flex items-center gap-2 py-1.5 px-3 rounded-xl hover:bg-sidebar-accent text-muted-foreground hover:text-sidebar-foreground transition-colors text-[13px] font-medium'
-                }
-              >
-                <Star className="w-4 h-4 shrink-0" />
-                {!isCollapsed && <span>Bookmarks</span>}
-              </button>
-            </TooltipTrigger>
-            {isCollapsed && (
-              <TooltipContent side="right" sideOffset={10}>
-                <p>Bookmarks & Reading List</p>
-              </TooltipContent>
-            )}
-          </Tooltip>
-
           {/* Settings button */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -337,8 +243,7 @@ export const Sidebar: React.FC = () => {
           </Tooltip>
         </div>
 
-        {/* Settings Dialog */}
-      </div>
+      </motion.div>
       </motion.aside>
       </div>
       {/* Settings Dialog (portaled; kept outside the clipped aside) */}

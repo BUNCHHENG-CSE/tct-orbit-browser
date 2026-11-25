@@ -6,6 +6,7 @@ import { localStorageService } from '../storage/localStorage'
 import { privacyEngine } from '../privacy/privacyEngine'
 import { syncService, decryptText } from '../storage/syncService'
 import { detectSources, runImport, importBookmarksHtmlFile } from '../storage/browserImport'
+import { detectArc, runArcImport } from '../storage/arcImport'
 
 const S = {
   permissionRespond: z.object({ id: z.string().min(1).max(100), allow: z.boolean(), remember: z.boolean() }),
@@ -118,4 +119,6 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
     return runImport(data.sourceId, { bookmarks: data.bookmarks, history: data.history })
   })
   secureHandle(ipcMain, 'import:bookmarks-html', null, async () => importBookmarksHtmlFile(getMainWindow()))
+  secureHandle(ipcMain, 'import:arc-detect', null, async () => detectArc())
+  secureHandle(ipcMain, 'import:arc-run', null, async () => runArcImport())
 }

@@ -16,6 +16,11 @@ files:
   - "!**/*.md"
   - "!**/tsconfig*.json"
 
+extraResources:
+  # Extensions that ship with the browser (see electron/builtinExtensions.ts)
+  - from: resources/builtin-extensions
+    to: builtin-extensions
+
 asar: true
 compression: maximum
 electronLanguages:
@@ -70,6 +75,8 @@ win:
         - x64
 
 nsis:
+  # Asks on uninstall whether to also delete the user's browser data (see build/installer.nsh)
+  include: build/installer.nsh
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

@@ -4,7 +4,7 @@ import { toast } from 'sonner'
 import { Switch } from '@/components/ui/switch'
 import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
-import type { ImportSource, SyncConfig } from '@/types/api'
+import type { ArcImportInfo, ImportSource, SyncConfig } from '@/types/api'
 
 const inputCls =
   'h-8 px-3 rounded-lg bg-background border border-border text-xs outline-none focus:border-primary placeholder:text-muted-foreground'
@@ -20,8 +20,13 @@ export const BrowserImportPanel: React.FC = () => {
   const [withBookmarks, setWithBookmarks] = useState(true)
   const [withHistory, setWithHistory] = useState(true)
   const [busy, setBusy] = useState(false)
+  const [arc, setArc] = useState<ArcImportInfo | null>(null)
 
   useEffect(() => {
+    api.browserImport
+      ?.arcDetect?.()
+      .then(setArc)
+      .catch(() => setArc(null))
     api.browserImport
       ?.detect()
       .then((list) => {
@@ -49,6 +54,28 @@ export const BrowserImportPanel: React.FC = () => {
       }
     } catch (err: any) {
       toast.error('Import failed', { description: err?.message })
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Arc: spaces, folders (as nested groups), pinned and unpinned tabs
+  const handleArcImport = async () => {
+    setBusy(true)
+    try {
+      const res = await api.browserImport.arcImport()
+      if (res.success) {
+        useBrowserStore.getState().setSpaces(await api.spaces.list())
+        toast.success('Imported from Arc', {
+          description: `${res.spaces} space${res.spaces === 1 ? '' : 's'}, ${res.tabs} tab${res.tabs === 1 ? '' : 's'} and ${res.groups} folder${
+            res.groups === 1 ? '' : 's'
+          }. Imported tabs load when you open them.`
+        })
+      } else {
+        toast.error('Arc import failed', { description: res.error })
+      }
+    } catch (err: any) {
+      toast.error('Arc import failed', { description: err?.message })
     } finally {
       setBusy(false)
     }
@@ -82,7 +109,7 @@ export const BrowserImportPanel: React.FC = () => {
           <Loader2 className="w-3 h-3 animate-spin" /> Looking for installed browsers…
         </p>
       ) : sources.length === 0 ? (
-        <p className="text-[11px] text-muted-foreground">No Chrome, Edge, Brave, Vivaldi, Opera or Firefox profile found.</p>
+        <p className="text-[11px] text-muted-foreground">No Arc, Chrome, Edge, Brave, Vivaldi, Opera or Firefox profile found.</p>
       ) : (
         <>
           <select value={selected} onChange={(e) => setSelected(e.target.value)} className={`${inputCls} w-full cursor-pointer`}>
@@ -111,6 +138,20 @@ export const BrowserImportPanel: React.FC = () => {
           <FileCode2 className="w-3.5 h-3.5" /> Import bookmarks HTML file…
         </button>
       </div>
+
+      {arc?.found && (
+        <div className="pt-3 border-t border-border space-y-2">
+          <p className="text-xs font-semibold text-foreground">Arc spaces & tabs</p>
+          <p className="text-[11px] text-muted-foreground">
+            {arc.spaces > 0
+              ? `Found ${arc.spaces} space${arc.spaces === 1 ? '' : 's'} with ${arc.tabs} tab${arc.tabs === 1 ? '' : 's'}. Each Arc space becomes a new space; folders become tab groups; Favorites, pinned and unpinned tabs are all included.`
+              : 'Arc is installed, but no spaces with tabs were found.'}
+          </p>
+          <button onClick={handleArcImport} disabled={busy || arc.spaces === 0} className={primaryBtnCls}>
+            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />} Import Arc spaces
+          </button>
+        </div>
+      )}
     </div>
   )
 }

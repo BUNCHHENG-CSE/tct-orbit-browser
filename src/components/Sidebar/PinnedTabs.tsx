@@ -1,6 +1,7 @@
 import React from 'react'
 import { Pin } from 'lucide-react'
 import { TabItem } from './TabItem'
+import { useBrowserStore } from '@/store/useBrowserStore'
 import type { Tab } from '@/types/api'
 
 interface PinnedTabsProps {
@@ -16,6 +17,8 @@ interface PinnedTabsProps {
   onReloadTab?: (tabId: string) => void
   onCloseOthers?: (tabId: string) => void
   onCloseToRight?: (tabId: string) => void
+  /** Custom renderer (TabList wraps tabs so they can be dragged to reorder) */
+  renderTab?: (tab: Tab) => React.ReactNode
 }
 
 export const PinnedTabs: React.FC<PinnedTabsProps> = ({
@@ -30,8 +33,10 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
   onNewTabToRight,
   onReloadTab,
   onCloseOthers,
-  onCloseToRight
+  onCloseToRight,
+  renderTab
 }) => {
+  const splitTabId = useBrowserStore((s) => s.splitTabId)
   const pinnedTabs = tabs.filter((t) => t.isPinned)
 
   if (pinnedTabs.length === 0) return null
@@ -45,11 +50,14 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
         </div>
       )}
       <div className={`space-y-0.5 w-full min-w-0 ${collapsed ? 'flex flex-col items-center gap-1' : ''}`}>
-        {pinnedTabs.map((tab) => (
+        {pinnedTabs.map((tab) =>
+          renderTab ? (
+            renderTab(tab)
+          ) : (
           <TabItem
             key={tab.id}
             tab={tab}
-            isActive={tab.id === activeTabId}
+            isActive={tab.id === activeTabId || tab.id === splitTabId}
             accentColor={accentColor}
             collapsed={collapsed}
             onSelect={() => onSelectTab(tab.id)}
@@ -61,7 +69,8 @@ export const PinnedTabs: React.FC<PinnedTabsProps> = ({
             onCloseOthers={onCloseOthers ? () => onCloseOthers(tab.id) : undefined}
             onCloseToRight={onCloseToRight ? () => onCloseToRight(tab.id) : undefined}
           />
-        ))}
+          )
+        )}
       </div>
       <div className={`my-2 border-b border-sidebar-border ${collapsed ? 'w-7 mx-auto' : 'mx-2'}`} />
     </div>

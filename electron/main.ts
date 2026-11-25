@@ -1,8 +1,12 @@
-import 'dotenv/config'
-import { app, BrowserWindow, ipcMain, session, nativeTheme, shell, powerSaveBlocker } from 'electron'
+import dotenv from 'dotenv'
+import os from 'os'
+import { app, BrowserWindow, ipcMain, session, nativeTheme, powerSaveBlocker } from 'electron'
 import { createMainWindow } from './windows/mainWindow'
 import { setupWindowsTaskbar } from './windows/taskbar'
 import { registerAllIpc } from './ipc'
+import { smartService } from './smart/smartService'
+import { pageIndex } from './smart/pageIndex'
+import { secureHandle } from './security'
 import { localStorageService } from './storage/localStorage'
 import { historyService } from './storage/historyService'
 import { notesService } from './storage/notesService'
@@ -16,13 +20,35 @@ import { privacyEngine } from './privacy/privacyEngine'
 import { sitePermissions } from './permissions/sitePermissions'
 import { syncService } from './storage/syncService'
 import { PRIVATE_PARTITION } from './privacy/types'
-import { getBrowserLogoPath } from './resources'
+import { PRIVATE_WINDOW_SPACE_ID, PRIVATE_START } from '../shared/privateWindow'
+import { queueLaunchUrl, isOpenableUrl } from './launchUrls'
+import { extensionManager } from './extensions'
+import { passwordManager } from './passwords'
+import {
+  SHARED_TAB_PARTITION,
+  resolveTabPartition,
+  partitionOfSession,
+  setProfileValidator,
+  onTabSessionCreated,
+  ensureProfileSession,
+  profilePartitionFor
+} from './sessions'
+import { getAppNativeIcon, getBrowserLogoPath } from './resources'
 import {
   setupIsolatedTabSession,
   setupWebContentsSecurity,
   setupWebRTCLeakProtection,
+  trackUserInput,
+  hasRecentUserInput,
+  openExternalFromPage,
+  SAFE_EXTERNAL_PROTOCOLS,
   DANGEROUS_PROTOCOLS
 } from './security'
+import { isAppUiUrl } from './appUi'
+
+// Development only. dotenv reads .env from the CURRENT FOLDER: an installed browser started by
+// opening a file in Downloads would otherwise load a .env planted there (proxy, TLS, data folder).
+if (!app.isPackaged) dotenv.config({ quiet: true })
 
 // Early channel, userData paths, and database isolation setup
 const appPaths = initAppPaths()
@@ -86,8 +112,19 @@ app.commandLine.appendSwitch('disable-default-apps')
 // Disable PullToRefreshEffect, OverscrollHistoryNavigation and SlideToNavigate so pages only refresh via F5 or Refresh button
 app.commandLine.appendSwitch(
   'disable-features',
-  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication,PullToRefreshEffect,OverscrollHistoryNavigation,SlideToNavigate'
+  'PreconnectToSearch,Prerender2,CalculateNativeWinOcclusion,AutofillServerCommunication,PullToRefreshEffect,OverscrollHistoryNavigation,SlideToNavigate' +
+    (os.totalmem() / 1024 ** 3 <= 8.5 ? ',BackForwardCache' : '')
 )
+
+// --- Low/medium RAM devices: trade a little speed for a much smaller footprint ---
+const totalRamGb = os.totalmem() / 1024 ** 3
+const isLowRamDevice = totalRamGb <= 8.5
+if (isLowRamDevice) {
+  // (BackForwardCache is also disabled above: it keeps whole pages alive after navigating away)
+  // Cap the HTTP disk cache, and ask V8 to favour a smaller heap over peak speed
+  app.commandLine.appendSwitch('disk-cache-size', String(128 * 1024 * 1024))
+  app.commandLine.appendSwitch('js-flags', '--optimize-for-size')
+}
 
 const enabledFeatures = [
   'OverlayScrollbar',
@@ -111,7 +148,8 @@ if (process.platform === 'linux') {
 // - D3D11 hardware video decoding for smooth 4K/60fps YouTube playback
 // - Hardware rasterization for high-framerate rendering without DWM black screen glitches
 if (process.platform === 'win32') {
-  app.setAppUserModelId(appPaths.channelMeta.appId)
+  // The Microsoft Store package brings its own identity; a different id would break its taskbar entry
+  if (!process.windowsStore) app.setAppUserModelId(appPaths.channelMeta.appId)
   app.commandLine.appendSwitch('use-angle', 'd3d11')
   app.commandLine.appendSwitch('enable-gpu-rasterization')
   enabledFeatures.push('D3D11VideoDecoder')
@@ -136,12 +174,17 @@ if (process.platform === 'darwin') {
 
 app.commandLine.appendSwitch('enable-features', enabledFeatures.join(','))
 
-// Register custom protocol client for default browser integration
-if (!app.isDefaultProtocolClient(appPaths.channelMeta.userDataDirName)) {
-  app.setAsDefaultProtocolClient(appPaths.channelMeta.userDataDirName)
-}
-if (appPaths.channelMeta.userDataDirName !== 'tct-orbit' && !app.isDefaultProtocolClient('tct-orbit')) {
-  app.setAsDefaultProtocolClient('tct-orbit')
+// Register custom protocol client for default browser integration.
+// Installed app only: a dev run would register the bare electron.exe, which treats the link as an
+// app to launch. "--" stops a crafted link from smuggling command-line switches into the browser.
+// The Store package declares its links in its manifest (build/store/appxmanifest.xml).
+if (app.isPackaged && !process.windowsStore) {
+  const args = process.platform === 'win32' ? ['--'] : []
+  for (const scheme of new Set([appPaths.channelMeta.userDataDirName, 'tct-orbit'])) {
+    if (!app.isDefaultProtocolClient(scheme, process.execPath, args)) {
+      app.setAsDefaultProtocolClient(scheme, process.execPath, args)
+    }
+  }
 }
 
 // Global exception handling for production stability
@@ -158,6 +201,57 @@ process.on('unhandledRejection', (reason: any) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+/** Open private windows (Edge InPrivate style) */
+const privateWindows = new Set<BrowserWindow>()
+
+/**
+ * Browser window that owns some web contents: a webview's host window, or the window itself.
+ * Events from a tab (right-click menu, shortcuts, links opening new tabs) go back to the window
+ * the tab lives in, so the private window handles its own tabs.
+ */
+function windowFor(contents: Electron.WebContents | null | undefined): BrowserWindow | null {
+  if (!contents || contents.isDestroyed()) return mainWindow
+  const host = (contents as any).hostWebContents as Electron.WebContents | undefined
+  const win = BrowserWindow.fromWebContents(host && !host.isDestroyed() ? host : contents)
+  return win && !win.isDestroyed() ? win : mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+}
+
+/**
+ * Open the private window (only private tabs; everything is wiped when it closes). There is one
+ * private window: asking again focuses it and opens a new tab (or the given link) in it.
+ */
+function openPrivateWindow(url?: string): BrowserWindow {
+  const safeUrl = url && /^https?:\/\//i.test(url) ? url : undefined
+  const existing = [...privateWindows].find((w) => !w.isDestroyed())
+  if (existing) {
+    if (existing.isMinimized()) existing.restore()
+    existing.show()
+    existing.focus()
+    if (safeUrl) existing.webContents.send('tabs:open-url', { url: safeUrl, active: true, isPrivate: true })
+    else existing.webContents.send('keyboard-shortcut:trigger', 'new-tab')
+    return existing
+  }
+  // First tab exists before the window loads, so the window never starts empty
+  if (localStorageService.listTabs(PRIVATE_WINDOW_SPACE_ID).length === 0) {
+    localStorageService.createTab({
+      spaceId: PRIVATE_WINDOW_SPACE_ID,
+      url: safeUrl ?? PRIVATE_START.url,
+      title: safeUrl ? 'Loading...' : PRIVATE_START.title,
+      isPrivate: true
+    })
+  }
+  const win = createMainWindow({ private: true })
+  privateWindows.add(win)
+  attachKeyboardShortcuts(win.webContents, false)
+  win.on('closed', () => {
+    privateWindows.delete(win)
+    // Closing the window closes its tabs; the last private tab gone wipes the private session
+    const hadPrivate = localStorageService.hasPrivateTabs()
+    for (const tab of localStorageService.listTabs(PRIVATE_WINDOW_SPACE_ID)) localStorageService.removeTab(tab.id)
+    if (hadPrivate && !localStorageService.hasPrivateTabs()) void privacyEngine.clearPrivateSession()
+  })
+  return win
+}
 const activeWebviewContents = new Set<Electron.WebContents>()
 let mediaPowerSaveBlockerId: number | null = null
 
@@ -223,9 +317,8 @@ function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: bool
     const alt = !!input.alt
 
     const sendShortcut = (action: string) => {
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('keyboard-shortcut:trigger', action)
-      }
+      const win = windowFor(contents)
+      if (win) win.webContents.send('keyboard-shortcut:trigger', action)
     }
 
     // 1. DevTools: F12 or Ctrl+Shift+I
@@ -511,6 +604,17 @@ nativeTheme.on('updated', () => {
   }
 })
 
+// Every window carries the app icon: popups opened by popups, DevTools and helpers don't set their own
+if (process.platform !== 'darwin') {
+  app.on('browser-window-created', (_event, win) => {
+    try {
+      win.setIcon(getAppNativeIcon())
+    } catch (err) {
+      console.warn('[Window] Could not set the app icon:', err)
+    }
+  })
+}
+
 // Enforce single instance lock to prevent data corruption in local JSON storage
 const gotSingleInstanceLock = app.requestSingleInstanceLock()
 
@@ -526,18 +630,16 @@ if (!gotSingleInstanceLock) {
       mainWindow.focus()
 
       // Handle Windows JumpList tasks or CLI flags
-      const hasIncognito = commandLine.includes('--incognito')
+      const hasIncognito = commandLine.includes('--incognito') || commandLine.includes('--inprivate')
       const hasNewWindow = commandLine.includes('--new-window')
       if (hasIncognito) {
-        mainWindow.webContents.send('keyboard-shortcut:trigger', 'new-private-tab')
+        openPrivateWindow()
       } else if (hasNewWindow) {
         mainWindow.webContents.send('tab:create', {})
       }
 
       // Forward any URL passed via CLI argument (e.g. tct-orbit https://example.com)
-      const urlArg = commandLine.find(
-        (arg) => arg.startsWith('http://') || arg.startsWith('https://')
-      )
+      const urlArg = commandLine.find(isOpenableUrl)
       if (urlArg) {
         mainWindow.webContents.send('tab:create-from-external', urlArg)
       }
@@ -550,16 +652,23 @@ if (!gotSingleInstanceLock) {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
       mainWindow.focus()
-      mainWindow.webContents.send('tab:create-from-external', url)
+      // Web addresses only: never file: or other schemes handed over by another app
+      if (isOpenableUrl(url)) mainWindow.webContents.send('tab:create-from-external', url)
+    } else {
+      // Launched by clicking a link: open it once the UI is up
+      queueLaunchUrl(url)
     }
   })
 
   app.whenReady().then(async () => {
+    // Cold start with a link (Orbit is the default browser, or `tct-orbit https://...`)
+    for (const arg of process.argv.slice(1)) queueLaunchUrl(arg)
+
     // Initialize Windows Taskbar identity, Start Menu shortcut, and JumpList
     setupWindowsTaskbar(appPaths.channelMeta.appId, appPaths.channelMeta.displayName)
 
     // Initialize dedicated isolated browsing partition ('persist:browser-tabs')
-    const tabSession = setupIsolatedTabSession('persist:browser-tabs')
+    const tabSession = setupIsolatedTabSession(SHARED_TAB_PARTITION)
     tabSession.setUserAgent(customUserAgent)
     session.defaultSession.setUserAgent(customUserAgent)
     try {
@@ -573,12 +682,14 @@ if (!gotSingleInstanceLock) {
 
     // Initialize 100% private local storage on user's machine
     localStorageService.init()
+    passwordManager.init(() => mainWindow)
     historyService.init()
     notesService.init()
     downloadsService.init()
     bookmarksService.init()
     syncService.init()
     sitePermissions.init(() => mainWindow)
+    smartService.init(() => mainWindow)
 
     // Sync saved theme preference to Chromium nativeTheme so webviews immediately inherit correct prefers-color-scheme
     const startupState = themeManager.getState()
@@ -586,9 +697,32 @@ if (!gotSingleInstanceLock) {
 
     // Register all IPC handlers
     registerAllIpc(ipcMain, () => mainWindow)
+    secureHandle(ipcMain, 'window:open-private', null, async (_event, url?: unknown) => {
+      openPrivateWindow(typeof url === 'string' && url.length < 4096 ? url : undefined)
+      return true
+    })
+    secureHandle(ipcMain, 'window:is-private', null, async (event) => {
+      const win = BrowserWindow.fromWebContents(event.sender)
+      return !!win && privateWindows.has(win)
+    })
+
+    // Space profiles: only spaces marked "isolated" get their own session
+    setProfileValidator((spaceId) => localStorageService.isSpaceIsolated(spaceId))
+    onTabSessionCreated((ses) => {
+      ses.setUserAgent(customUserAgent)
+    })
 
     // Initialize Privacy Engine before window creation
     await privacyEngine.init()
+
+    // Create every isolated space's profile now, so clear-data, proxy and panic wipe cover all of
+    // them (not only the ones whose tabs were opened this run)
+    for (const space of localStorageService.listSpaces()) {
+      if (space.isolated) ensureProfileSession(profilePartitionFor(space.id))
+    }
+
+    // Chrome extensions the user added (Tools > Extensions)
+    await extensionManager.init()
 
     // UI notices from the network layer
     privacyEngine.onHttpsFallback = (info) => {
@@ -604,16 +738,30 @@ if (!gotSingleInstanceLock) {
       setupWebRTCLeakProtection(contents, privacyEngine.getWebRTCPolicy())
 
       // Intercept and sanitize any attached webview preferences
-      contents.on('will-attach-webview', (_event, webPreferences, params) => {
-        // Enforce dedicated partition for untrusted web browsing tabs
-        // Only the two tab partitions are allowed (never the UI's default session)
-        if (params.partition !== 'persist:browser-tabs' && params.partition !== PRIVATE_PARTITION) {
-          params.partition = 'persist:browser-tabs'
+      contents.on('will-attach-webview', (event, webPreferences, params) => {
+        // Only the browser UI may host tabs
+        if (!isAppUiUrl(contents.getURL())) {
+          event.preventDefault()
+          return
         }
+
+        // Enforce dedicated partition for untrusted web browsing tabs: shared, private, or the
+        // profile of an isolated space. Never the UI's default session.
+        // Electron creates the guest from webPreferences; params.partition alone has no effect.
+        const partition = resolveTabPartition(webPreferences.partition ?? params.partition)
+        params.partition = partition
+        webPreferences.partition = partition
+        delete webPreferences.session
 
         // Never allow untrusted web tabs to share the UI preload script
         delete webPreferences.preload
         delete (webPreferences as any).preloadURL
+        delete webPreferences.enableBlinkFeatures
+        webPreferences.nodeIntegrationInSubFrames = false
+        webPreferences.webviewTag = false
+        webPreferences.experimentalFeatures = false
+
+        if (/^\s*(javascript|vbscript|data):/i.test(params.src || '')) params.src = 'about:blank'
 
         // Strict process isolation & sandbox enforcement
         webPreferences.nodeIntegration = false
@@ -626,10 +774,18 @@ if (!gotSingleInstanceLock) {
         webPreferences.backgroundThrottling = true
       })
 
+      // Baseline for every other window (extension helpers, page watchers): no popups.
+      // The UI window and sign-in popups replace this handler with their own.
+      if (contents.getType() === 'window') {
+        contents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      }
+
       // Security rules & minimalist scrollbar injection for webview contents
       if (contents.getType() === 'webview') {
         // Links, popups and context-menu actions from a private tab must stay private
         const isPrivateContents = contents.session === session.fromPartition(PRIVATE_PARTITION)
+        // Popups (OAuth) must stay in the same profile as the tab that opened them
+        const contentsPartition = partitionOfSession(contents.session)
 
         contents.setMaxListeners(50)
         activeWebviewContents.add(contents)
@@ -645,20 +801,27 @@ if (!gotSingleInstanceLock) {
         // Inject Mullvad-standard Privacy Shield hardening & ad suppression
         privacyEngine.injectShieldScript(contents)
 
+        // Password manager: offer to save logins, fill saved ones (isolated world)
+        passwordManager.attach(contents)
+
         // Close context menu and omnibox dropdown whenever webview gains focus or is clicked
         contents.on('focus', () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('context-menu:close')
-            mainWindow.webContents.send('omnibox:close')
+          const win = windowFor(contents)
+          if (win) {
+            win.webContents.send('context-menu:close')
+            win.webContents.send('omnibox:close')
           }
         })
 
         // Also dismiss on user mouse clicks anywhere on the webpage
+        // Last real click / keypress: popups opened right after one are user-initiated
+        trackUserInput(contents)
         contents.on('input-event', (_event, input) => {
           if (input.type === 'mouseDown') {
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('context-menu:close')
-              mainWindow.webContents.send('omnibox:close')
+            const win = windowFor(contents)
+            if (win) {
+              win.webContents.send('context-menu:close')
+              win.webContents.send('omnibox:close')
             }
           }
         })
@@ -744,25 +907,30 @@ if (!gotSingleInstanceLock) {
             const protocol = parsed ? parsed.protocol : ''
 
             // External OS protocols -> delegate safely to shell.openExternal
-            if (['mailto:', 'tel:', 'magnet:', 'slack:', 'discord:', 'zoommtg:'].includes(protocol)) {
-              shell.openExternal(rawUrl).catch(() => {})
+            if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) {
+              openExternalFromPage(contents, rawUrl)
               return { action: 'deny' }
             }
 
-            // Small explicit OAuth / sign-in popups (width/height defined)
-            const isSmallPopup = details.features && (details.features.includes('width=') || details.features.includes('height='))
-            const isAuthFlow = rawUrl.includes('accounts.google.com') || rawUrl.includes('/oauth') || rawUrl.includes('/auth') || rawUrl.includes('login') || rawUrl.includes('signin')
-            if (isSmallPopup && isAuthFlow) {
+            // Popup windows (window.open with a size, or disposition "new-window") stay real windows
+            // that share the tab's session and keep window.opener, so "Sign in with Google / Apple /
+            // Microsoft / Facebook ..." can report back to the page. Allowed for known sign-in URLs,
+            // or for any popup opened right after the user clicked/typed (blocks popup spam).
+            const isSmallPopup = !!details.features && (details.features.includes('width=') || details.features.includes('height='))
+            const wantsPopupWindow = isSmallPopup || details.disposition === 'new-window'
+            const isAuthFlow = /accounts\.google\.com|\/oauth|\/auth|login|signin|sign-in|sso|saml/i.test(rawUrl)
+            const userInitiated = hasRecentUserInput(contents)
+            if (wantsPopupWindow && (isAuthFlow || userInitiated) && ['http:', 'https:', 'about:'].includes(protocol)) {
               const startupTheme = themeManager.getStartupTheme()
               return {
                 action: 'allow',
                 overrideBrowserWindowOptions: {
                   icon: getBrowserLogoPath(),
                   backgroundColor: startupTheme.backgroundColor,
-                  parent: mainWindow || undefined,
+                  parent: windowFor(contents) || undefined,
                   autoHideMenuBar: true,
                   webPreferences: {
-                    partition: isPrivateContents ? PRIVATE_PARTITION : 'persist:browser-tabs',
+                    partition: contentsPartition,
                     nodeIntegration: false,
                     nodeIntegrationInWorker: false,
                     contextIsolation: true,
@@ -778,8 +946,9 @@ if (!gotSingleInstanceLock) {
             // Standard web URLs: http, https, about, view-source
             if (['http:', 'https:', 'about:', 'view-source:'].includes(protocol) || !parsed) {
               const isActive = details.disposition !== 'background-tab'
-              if (mainWindow && !mainWindow.isDestroyed()) {
-                mainWindow.webContents.send('tabs:open-url', {
+              const ownerWin = windowFor(contents)
+              if (ownerWin) {
+                ownerWin.webContents.send('tabs:open-url', {
                   url: rawUrl,
                   active: isActive,
                   sourceWebContentsId: contents.id,
@@ -799,7 +968,9 @@ if (!gotSingleInstanceLock) {
 
         // Allowed OAuth popups are real BrowserWindows: give them the same popup/navigation guards
         contents.on('did-create-window', (popup) => {
-          setupWebContentsSecurity(popup.webContents, mainWindow)
+          setupWebContentsSecurity(popup.webContents, windowFor(contents))
+          // "Sign in with ..." popups get saved-password fill too
+          passwordManager.attach(popup.webContents)
         })
 
         // Guard against dangerous schemes without blocking relative or in-page redirection
@@ -832,8 +1003,9 @@ if (!gotSingleInstanceLock) {
             return
           }
 
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('context-menu:open', {
+          const menuWin = windowFor(contents)
+          if (menuWin) {
+            menuWin.webContents.send('context-menu:open', {
               webContentsId: contents.id,
               isPrivate: isPrivateContents,
               params: {
@@ -873,6 +1045,9 @@ if (!gotSingleInstanceLock) {
 
     // Create main window
     mainWindow = createMainWindow()
+    mainWindow.once('closed', () => {
+      mainWindow = null
+    })
     attachKeyboardShortcuts(mainWindow.webContents, false)
     devtoolsManager.init(mainWindow)
 
@@ -893,6 +1068,9 @@ if (!gotSingleInstanceLock) {
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
         mainWindow = createMainWindow()
+        mainWindow.once('closed', () => {
+          mainWindow = null
+        })
         attachKeyboardShortcuts(mainWindow.webContents, false)
       } else if (mainWindow) {
         if (mainWindow.isMinimized()) mainWindow.restore()
@@ -909,6 +1087,10 @@ if (!gotSingleInstanceLock) {
     } catch {}
     try {
       historyService.flushSave()
+    } catch {}
+    try {
+      smartService.dispose()
+      pageIndex.flushSave()
     } catch {}
     try {
       privacyEngine.flushReport()

@@ -1,5 +1,5 @@
 import type { IpcMain } from 'electron'
-import type { CreateTabData, UpdateTabData } from '../../src/types/api'
+import type { CreateTabData, UpdateTabData, CreateTabGroupData, UpdateTabGroupData, SaveSplitData } from '../../src/types/api'
 import { localStorageService } from '../storage/localStorage'
 import { secureHandle, Schemas } from '../security'
 import { privacyEngine } from '../privacy/privacyEngine'
@@ -56,4 +56,37 @@ export function register(ipcMain: IpcMain): void {
       return localStorageService.reorderTabs(spaceId, orderedIds)
     }
   )
+
+  // --- Tab groups (nestable, up to 8 levels) ---
+  secureHandle(ipcMain, 'groups:list', Schemas.groupList, async (_, spaceId: string) => {
+    return localStorageService.listGroups(spaceId)
+  })
+
+  secureHandle(ipcMain, 'groups:create', Schemas.groupCreate, async (_, data: CreateTabGroupData) => {
+    return localStorageService.createGroup(data)
+  })
+
+  secureHandle(ipcMain, 'groups:update', Schemas.groupUpdate, async (_, id: string, data: UpdateTabGroupData) => {
+    return localStorageService.updateGroup(id, data)
+  })
+
+  secureHandle(ipcMain, 'groups:remove', Schemas.groupRemove, async (_, id: string, closeTabs?: boolean) => {
+    const hadPrivate = localStorageService.hasPrivateTabs()
+    const result = localStorageService.removeGroup(id, !!closeTabs)
+    if (hadPrivate && !localStorageService.hasPrivateTabs()) {
+      void privacyEngine.clearPrivateSession()
+    }
+    return result
+  })
+
+  // --- Saved split layouts ---
+  secureHandle(ipcMain, 'splits:list', null, async () => localStorageService.listSavedSplits())
+
+  secureHandle(ipcMain, 'splits:save', Schemas.splitSave, async (_, data: SaveSplitData) => {
+    return localStorageService.saveSplit(data)
+  })
+
+  secureHandle(ipcMain, 'splits:remove', Schemas.splitRemove, async (_, id: string) => {
+    return localStorageService.removeSavedSplit(id)
+  })
 }

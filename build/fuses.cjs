@@ -49,8 +49,8 @@ module.exports = async function (context) {
   }
 
   if (!fs.existsSync(executablePath)) {
-    console.warn(`[Fuses] Executable not found at ${executablePath}, skipping fuses.`)
-    return
+    // Never ship a build without its security fuses
+    throw new Error(`[Fuses] Executable not found at ${executablePath}`)
   }
 
   console.log(`[Fuses] Applying production Electron security fuses to: ${executablePath}`)

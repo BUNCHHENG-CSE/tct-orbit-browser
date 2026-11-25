@@ -6,7 +6,9 @@ import {
   ArrowLeftRight,
   X,
   Moon,
-  Zap
+  Zap,
+  BookOpen,
+  ShieldBan
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTabs } from '@/hooks/useTabs'
@@ -17,14 +19,56 @@ import { useThumbnailStore } from '@/store/useThumbnailStore'
 import { modKey } from '@/lib/platform'
 import { getThemeSyncScript, resolveIsDark } from '@/lib/theme'
 import { api } from '@/lib/ipc'
+import { isStartPageUrl, isPrivateStartUrl, openNewTab } from '@/lib/startPage'
+import { groupForNewTab } from '@/lib/tabGroups'
+import { StartPage } from '@/components/StartPage/StartPage'
+import { PrivateStartPage } from '@/components/StartPage/PrivateStartPage'
 import { ReaderModeOverlay } from '@/components/ReaderMode/ReaderModeOverlay'
 import { FindInPageBar } from '@/components/FindInPage/FindInPageBar'
 import { READABILITY_EXTRACTION_SCRIPT, PICTURE_IN_PICTURE_SCRIPT } from '@/lib/readability'
 import { getDomainZoom, setDomainZoom, getNextZoomIn, getNextZoomOut, extractDomain } from '@/lib/domainZoom'
+import { PROGRESS_SCRIPT, PROGRESS_MSG, PAGE_TEXT_SCRIPT, scrollToRatioScript } from '@/lib/pageScripts'
+import { saveReadingPosition, getReadingPosition } from '@/lib/readingProgress'
+import { webviewRegistry } from '@/lib/webviewRegistry'
+import { useSmartStore, focusBlockFor } from '@/store/useSmartStore'
+import { useMeetingStore } from '@/store/useMeetingStore'
+import { CompareToolbar } from '@/components/Smart/CompareToolbar'
+import { installTabDragGuard } from '@/lib/tabDragGuard'
+import { safeImageUrl } from '@/lib/sanitizeHtml'
+
+// Drag overlays (split-view drop zone, sidebar drop zones) must never get stuck after a drag
+installTabDragGuard()
 import type { Tab } from '@/types/api'
+
+/** URL -> last time its text was sent to the "pages you've read" index (this session) */
+const indexedThisSession = new Map<string, number>()
+const REINDEX_MS = 6 * 3600_000
+
+/** Send the page's readable text to the local full-text index (never for private tabs) */
+function indexPageText(el: any, url: string, title: string, favicon: string | null, spaceId: string) {
+  const last = indexedThisSession.get(url)
+  if (last && Date.now() - last < REINDEX_MS) return
+  indexedThisSession.set(url, Date.now())
+  if (indexedThisSession.size > 2000) indexedThisSession.clear()
+  // Give dynamic pages a moment to render their content
+  setTimeout(() => {
+    try {
+      if (typeof el.getURL !== 'function' || el.getURL() !== url) return
+      el.executeJavaScript(PAGE_TEXT_SCRIPT)
+        .then((text: unknown) => {
+          if (typeof text === 'string' && text.length >= 200) {
+            api.smart?.pageIndex({ url, title, favicon, spaceId, text }).catch(() => {})
+          }
+        })
+        .catch(() => {})
+    } catch {}
+  }, 2500)
+}
 
 interface SingleWebViewProps {
   tab: Tab
+  /** Session partition: shared, private, or the space's own profile. Fixed for the webview's life. */
+  partition: string
   isActive: boolean
   isDark: boolean
   defaultZoom?: number
@@ -61,6 +105,7 @@ function loadUrlWithRetry(el: any, url: string, attempt = 0): void {
 
 const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   tab,
+  partition,
   isActive,
   isDark,
   defaultZoom = 100,
@@ -79,10 +124,18 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   const [hasError, setHasError] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  // Focus rule for this space blocked a navigation: { domain, url }
+  const [blocked, setBlocked] = useState<{ domain: string; url: string } | null>(null)
+  // Saved reading position offered as "Continue reading"
+  const [resumeAt, setResumeAt] = useState<number | null>(null)
+  const resumeAtRef = useRef<number | null>(null)
+  resumeAtRef.current = resumeAt
+  const tabRef = useRef(tab)
+  tabRef.current = tab
   const initialUrlRef = useRef(tab.url)
   // A webview's partition can never change after it navigates (Electron throws, which would
-  // crash the whole UI). Freeze it at mount.
-  const partitionRef = useRef(tab.isPrivate ? 'private-tabs' : 'persist:browser-tabs')
+  // crash the whole UI). Freeze it at mount; the parent remounts us (new key) when it changes.
+  const partitionRef = useRef(partition)
   const currentNavUrlRef = useRef(tab.url)
   const lastNavigatedFromWebviewUrlRef = useRef<string>(tab.url)
 
@@ -340,6 +393,13 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
               spaceId
             }).catch(() => {})
           }
+
+          if (!tab.isPrivate) {
+            // Search pages you've read, Meeting mode link catcher, "Continue reading"
+            indexPageText(el, currentUrl, currentTitle, favicon, spaceId)
+            useMeetingStore.getState().captureLink(currentUrl, currentTitle, tab.id)
+            setResumeAt(getReadingPosition(currentUrl))
+          }
         }
       } catch (e) {
         console.error('Error on did-finish-load:', e)
@@ -347,9 +407,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     }
 
     const handleFaviconUpdated = (e: any) => {
-      if (e.favicons && e.favicons.length > 0) {
-        onUpdateTabRef.current(tab.id, { favicon: e.favicons[0] })
-      }
+      // The page picks these addresses: never let the UI load file: or network-share icons
+      const favicon = (Array.isArray(e.favicons) ? e.favicons : []).map(safeImageUrl).find(Boolean)
+      if (favicon) onUpdateTabRef.current(tab.id, { favicon })
     }
 
     const handleTitleUpdated = (e: any) => {
@@ -420,9 +480,49 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       }
     }
 
+    // Per-space focus rules: stop blocked sites before they load
+    const handleStartNavigation = (e: any) => {
+      if (!e || e.isMainFrame === false || e.isInPlace) return
+      const domain = focusBlockFor(tabRef.current.spaceId, e.url)
+      if (domain) {
+        try {
+          el.stop()
+        } catch {}
+        setBlocked({ domain, url: e.url })
+        setIsLoading(false)
+        return
+      }
+      setBlocked(null)
+      setResumeAt(null)
+      useSmartStore.getState().setProgress(tab.id, null)
+    }
+
+    // Reading progress reported by PROGRESS_SCRIPT (console.debug from the page)
+    const handleConsoleMessage = (e: any) => {
+      const msg: unknown = e?.message
+      if (typeof msg !== 'string' || !msg.startsWith(PROGRESS_MSG)) return
+      const ratio = Number(msg.slice(PROGRESS_MSG.length))
+      if (!Number.isFinite(ratio)) return
+      useSmartStore.getState().setProgress(tab.id, ratio < 0 ? null : ratio)
+      if (ratio < 0) return
+      window.dispatchEvent(new CustomEvent('tct:page-scrolled', { detail: { tabId: tab.id, ratio } }))
+      const pending = resumeAtRef.current
+      if (pending !== null) {
+        // Reached the saved spot on their own: drop the offer
+        if (ratio >= pending - 0.02) setResumeAt(null)
+        return
+      }
+      if (!tab.isPrivate && ratio >= 0.05) {
+        try {
+          saveReadingPosition(el.getURL(), ratio)
+        } catch {}
+      }
+    }
+
     const handleDomReady = () => {
       syncTheme()
       try {
+        el.executeJavaScript(PROGRESS_SCRIPT).catch(() => {})
         // Link click interceptor in capture phase to guarantee target="_blank", Ctrl+click, and middle-click open tabs reliably
         el.executeJavaScript(`
           (function() {
@@ -496,6 +596,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     }
 
     el.addEventListener('dom-ready', handleDomReady)
+    el.addEventListener('did-start-navigation', handleStartNavigation)
+    el.addEventListener('console-message', handleConsoleMessage)
     el.addEventListener('focus', handleWebviewFocus)
     el.addEventListener('found-in-page', handleFoundInPage)
     el.addEventListener('media-started-playing', handleMediaPlaying)
@@ -512,6 +614,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
     return () => {
       unregisterWebviewRef(tab.id)
+      useSmartStore.getState().setProgress(tab.id, null)
+      el.removeEventListener('did-start-navigation', handleStartNavigation)
+      el.removeEventListener('console-message', handleConsoleMessage)
       el.removeEventListener('dom-ready', handleDomReady)
       el.removeEventListener('focus', handleWebviewFocus)
       el.removeEventListener('found-in-page', handleFoundInPage)
@@ -535,6 +640,42 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       useBrowserStore.getState().setTabSleeping(tab.id, false)
     }
   }, [isActive, tab.isSleeping, tab.id])
+
+  // "Continue reading" offer disappears on its own after a while
+  useEffect(() => {
+    if (resumeAt === null) return
+    const t = setTimeout(() => setResumeAt(null), 12000)
+    return () => clearTimeout(t)
+  }, [resumeAt])
+
+  const handleResume = () => {
+    const el = webviewRef.current
+    const at = resumeAt
+    setResumeAt(null)
+    if (el && at !== null) el.executeJavaScript(scrollToRatioScript(at, true)).catch(() => {})
+  }
+
+  const handleAllowBlocked = (minutes: number) => {
+    if (!blocked) return
+    useSmartStore.getState().allowTemporarily(blocked.domain, minutes)
+    const url = blocked.url
+    setBlocked(null)
+    loadUrlWithRetry(webviewRef.current, url)
+  }
+
+  const handleLeaveBlocked = () => {
+    const el = webviewRef.current
+    setBlocked(null)
+    try {
+      if (el && el.canGoBack()) {
+        el.goBack()
+        return
+      }
+    } catch {}
+    // Nothing to go back to (the tab was opened on the blocked site): close it
+    useBrowserStore.getState().removeTabFromStore(tab.id)
+    api.tabs.remove(tab.id).catch(() => {})
+  }
 
   const handleRetry = () => {
     setHasError(false)
@@ -640,6 +781,51 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         </div>
       )}
 
+      {/* Focus rule for this space blocked the site */}
+      {blocked && (
+        <div className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-20 select-none">
+          <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-500 flex items-center justify-center mb-4 ring-1 ring-amber-500/20">
+            <ShieldBan className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground mb-1">Back to work?</h3>
+          <p className="text-xs text-muted-foreground max-w-sm mb-4">
+            <span className="font-semibold text-foreground">{blocked.domain}</span> is on this space&apos;s focus list. You can change
+            that in Tools &rsaquo; Smart Tools &rsaquo; Focus rules.
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleLeaveBlocked}
+              className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold transition-colors shadow-sm cursor-pointer"
+            >
+              Take me back
+            </button>
+            <button
+              onClick={() => handleAllowBlocked(10)}
+              className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium transition-colors border border-border cursor-pointer"
+            >
+              Allow for 10 minutes
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Continue where you left off */}
+      {resumeAt !== null && isActive && !blocked && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1 pl-3 pr-1 py-1 rounded-full bg-popover/95 backdrop-blur border border-border shadow-xl text-xs animate-in fade-in slide-in-from-bottom-2 duration-200 select-none">
+          <BookOpen className="w-3.5 h-3.5 text-primary shrink-0" />
+          <button onClick={handleResume} className="px-2 py-1 font-semibold text-foreground hover:text-primary cursor-pointer">
+            Continue reading at {Math.round(resumeAt * 100)}%
+          </button>
+          <button
+            onClick={() => setResumeAt(null)}
+            className="w-6 h-6 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
+            aria-label="Dismiss"
+          >
+            <X className="w-3 h-3" />
+          </button>
+        </div>
+      )}
+
       {/* Loading bar */}
       {isLoading && (
         <div className="absolute top-0 left-0 right-0 h-0.5 bg-primary/20 overflow-hidden z-20">
@@ -687,6 +873,8 @@ interface WebViewContainerProps {
 export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) => {
   const { tabs, activeTab, activeTabId, updateTab, createTab, setActiveTab } = useTabs(spaceId)
   const { settings } = useSettings()
+  // Isolated space = separate profile: its own cookies, logins and storage
+  const spaceIsolated = useBrowserStore((s) => !!s.spaces.find((sp) => sp.id === spaceId)?.isolated)
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
 
   // Split View Store Accessors
@@ -792,10 +980,11 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
           store.openReaderMode({
             tabId: store.activeTabId!,
             url: typeof el.getURL === 'function' ? el.getURL() : '',
-            title: res.title,
-            byline: res.byline,
-            contentHtml: res.contentHtml,
-            readingTime: res.readingTime
+            // Returned by the page's own world: force plain strings (objects would crash React)
+            title: String(res.title ?? '').slice(0, 1000),
+            byline: String(res.byline ?? '').slice(0, 500),
+            contentHtml: String(res.contentHtml),
+            readingTime: String(res.readingTime ?? '').slice(0, 50)
           })
         } else {
           toast.info('No readable article found on this page.')
@@ -816,7 +1005,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         if (res && res.success) {
           toast.success(res.active ? 'Picture-in-Picture active' : 'Picture-in-Picture closed')
         } else {
-          toast.info(res?.reason || 'No video found on this page.')
+          toast.info(String(res?.reason || 'No video found on this page.').slice(0, 300))
         }
       } catch (err) {
         console.warn('[PiP] Error:', err)
@@ -886,9 +1075,11 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
 
   const registerWebviewRef = useCallback((tabId: string, el: any) => {
     webviewsRef.current.set(tabId, el)
+    webviewRegistry.set(tabId, el)
   }, [])
 
   const unregisterWebviewRef = useCallback((tabId: string) => {
+    webviewRegistry.delete(tabId, webviewsRef.current.get(tabId))
     webviewsRef.current.delete(tabId)
   }, [])
 
@@ -1099,6 +1290,23 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       }
     }
 
+    // Extension toolbar click (no popup): run it against the active tab's page
+    const onExtensionAction = (e: any) => {
+      const { id, name } = e.detail || {}
+      const targetId = useBrowserStore.getState().activeTabId
+      const el = targetId ? webviewsRef.current.get(targetId) : null
+      if (!id || !el || typeof el.getWebContentsId !== 'function') return
+      let wcId: number
+      try {
+        wcId = el.getWebContentsId()
+      } catch {
+        return
+      }
+      void api.extensions?.click(id, wcId).then((res) => {
+        if (!res.ok) toast.error(`${name || 'Extension'} could not run on this page`, { description: res.error })
+      })
+    }
+
     const onToggleMuteTab = (e: any) => {
       const { tabId } = e.detail || {}
       if (!tabId) return
@@ -1128,8 +1336,10 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     window.addEventListener('tct:toggle-find', onToggleFind)
     window.addEventListener('tct:found-in-page', onFoundInPage)
     window.addEventListener('tct:toggle-mute-tab', onToggleMuteTab)
+    window.addEventListener('tct:extension-action', onExtensionAction)
 
     return () => {
+      window.removeEventListener('tct:extension-action', onExtensionAction)
       window.removeEventListener('tct:webview-back', onBack)
       window.removeEventListener('tct:webview-forward', onForward)
       window.removeEventListener('tct:webview-reload', onReload)
@@ -1178,7 +1388,10 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         .catch(() => {})
     }
     const first = setTimeout(capture, 1500)
-    const interval = setInterval(capture, 20000)
+    // Thumbnails are data URLs held in memory: refresh rarely, and never while the window is hidden
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') capture()
+    }, 60000)
     return () => {
       clearTimeout(first)
       clearInterval(interval)
@@ -1218,34 +1431,45 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     toast.success('Opened in split view')
   }
 
-  // Memory Saver: hibernate inactive background tabs after 30 minutes
+  // Memory Saver: hibernate idle background tabs, and on low/medium RAM devices also cap how many
+  // background tabs stay awake (least-recently-used go to sleep first). A sleeping tab's webview is
+  // unmounted, which frees its whole renderer process.
   useEffect(() => {
     const memorySaverEnabled = settings?.memorySaverEnabled ?? true
     if (!memorySaverEnabled || !spaceId) return
 
-    const interval = setInterval(() => {
+    const deviceGb = (navigator as any).deviceMemory as number | undefined
+    const maxAwakeBackground = !deviceGb ? 8 : deviceGb <= 2 ? 2 : deviceGb <= 4 ? 4 : deviceGb < 8 ? 6 : 10
+    const lowRam = !!deviceGb && deviceGb <= 4
+
+    const check = () => {
       const store = useBrowserStore.getState()
       const currentTabs = store.tabsBySpace[spaceId] || []
-      const timeoutMs = (settings?.sleepTimeoutMinutes || 30) * 60 * 1000
+      let timeoutMs = (settings?.sleepTimeoutMinutes || 30) * 60 * 1000
+      if (lowRam) timeoutMs = Math.min(timeoutMs, 10 * 60 * 1000)
       const now = Date.now()
 
-      currentTabs.forEach((t) => {
-        if (
-          t.id !== store.activeTabId &&
-          !t.isPinned &&
-          !t.isAudible &&
-          !t.isSleeping
-        ) {
-          const lastVisitedTime = new Date(t.lastVisited || t.createdAt).getTime()
-          if (now - lastVisitedTime > timeoutMs) {
-            store.setTabSleeping(t.id, true)
-          }
-        }
-      })
-    }, 60000)
+      const candidates = currentTabs
+        .filter(
+          (t) =>
+            t.id !== store.activeTabId &&
+            t.id !== store.splitTabId &&
+            !t.isPinned &&
+            !t.isAudible &&
+            !t.isSleeping
+        )
+        .map((t) => ({ t, last: new Date(t.lastVisited || t.createdAt).getTime() || 0 }))
+        .sort((a, b) => b.last - a.last)
 
+      candidates.forEach(({ t, last }, i) => {
+        if (now - last > timeoutMs || i >= maxAwakeBackground) store.setTabSleeping(t.id, true)
+      })
+    }
+
+    check()
+    const interval = setInterval(check, 30000)
     return () => clearInterval(interval)
-  }, [spaceId, settings?.memorySaverEnabled, settings?.sleepTimeoutMinutes])
+  }, [spaceId, settings?.memorySaverEnabled, settings?.sleepTimeoutMinutes, activeTabId])
 
   const lastOpenedUrlRef = useRef<{ url: string; time: number }>({ url: '', time: 0 })
 
@@ -1269,7 +1493,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
           url,
           title: 'Loading...',
           order: insertOrder,
-          isPrivate: !!currentActive?.isPrivate
+          isPrivate: !!currentActive?.isPrivate,
+          groupId: groupForNewTab(currentActive, store.groupsBySpace[targetSpace] || [])
         })
         setActiveTab(newTab.id)
       } catch (err) {
@@ -1285,13 +1510,8 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     )
 
     const handleSwapSplit = useCallback(() => {
-      const curSplitId = useBrowserStore.getState().splitTabId
-      const curActiveId = useBrowserStore.getState().activeTabId
-      if (curSplitId) {
-        setActiveTab(curSplitId)
-        setSplitTabId(curActiveId)
-      }
-    }, [setActiveTab, setSplitTabId])
+      useBrowserStore.getState().swapSplit()
+    }, [])
 
     const handleFocusPrimary = useCallback(() => {
       useBrowserStore.getState().setSplitActivePane('primary')
@@ -1319,7 +1539,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
               Press {modKey}+T or click below to search the web or enter a URL.
             </p>
             <button
-              onClick={() => setCommandBarOpen(true, '', 'new-tab')}
+              onClick={() => void openNewTab()}
               className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium transition-colors shadow-sm"
             >
               Open New Tab
@@ -1356,10 +1576,41 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
               }
             }
 
+            // Start page is rendered by the UI itself, never inside a webview
+            if (isPrivateStartUrl(tab.url)) {
+              return (
+                <PrivateStartPage
+                  key={`${tab.id}:private-start`}
+                  tab={tab}
+                  isActive={isPaneActive}
+                  paneStyle={paneStyle}
+                  onFocusPane={splitRole === 'secondary' ? handleFocusSecondary : handleFocusPrimary}
+                />
+              )
+            }
+            if (isStartPageUrl(tab.url)) {
+              return (
+                <StartPage
+                  key={`${tab.id}:start`}
+                  tab={tab}
+                  isActive={isPaneActive}
+                  paneStyle={paneStyle}
+                  onFocusPane={splitRole === 'secondary' ? handleFocusSecondary : handleFocusPrimary}
+                />
+              )
+            }
+
+            const partition = tab.isPrivate
+              ? 'private-tabs'
+              : spaceIsolated
+              ? `persist:space-${tab.spaceId}`
+              : 'persist:browser-tabs'
+
             return (
               <SingleWebView
-                key={tab.id}
+                key={`${tab.id}:${partition}`}
                 tab={tab}
+                partition={partition}
                 isActive={isPaneActive}
                 isDark={isDark}
                 defaultZoom={settings?.defaultZoom || 100}
@@ -1406,6 +1657,9 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
             />
           </div>
         )}
+
+        {/* Split view: sync scroll + compare the two pages */}
+        {isSplitActive && !isDraggingSplit && <CompareToolbar />}
 
         {/* Overlay while dragging splitter to keep mouse tracking over webviews */}
         {isDraggingSplit && (

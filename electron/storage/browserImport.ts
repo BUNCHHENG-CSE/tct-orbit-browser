@@ -5,6 +5,7 @@ import path from 'path'
 import { bookmarksService } from './bookmarksService'
 import { historyService } from './historyService'
 import type { HistoryEntry } from '../../src/types/api'
+import { findArcDir } from './arcImport'
 
 /**
  * Import bookmarks and history from Chrome, Edge, Brave, Vivaldi, Opera (Chromium family)
@@ -42,6 +43,13 @@ function isWebUrl(url: unknown): url is string {
 }
 
 function chromiumRoots(): Array<{ browser: string; dir: string }> {
+  // Arc is Chromium-based: its bookmarks and history import like Chrome's
+  const arcDir = findArcDir()
+  const arc = arcDir ? [{ browser: 'Arc', dir: path.join(arcDir, 'User Data') }] : []
+  return [...arc, ...chromiumRootsBase()]
+}
+
+function chromiumRootsBase(): Array<{ browser: string; dir: string }> {
   const home = os.homedir()
   if (process.platform === 'win32') {
     const local = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
@@ -190,17 +198,38 @@ function queryAll(file: string, sql: string): any[] {
 
 type RawBookmark = { url: string; title: string; folder: string }
 
+/** Root folder names other browsers use for their bar ("Bookmarks bar", "Favorites bar", Firefox "toolbar") */
+const BAR_ROOTS = new Set(['bookmarks bar', 'favorites bar', 'favourites bar', 'bookmarks toolbar', 'toolbar', 'personal toolbar folder'])
+const FAVORITES_BAR = 'Favorites bar'
+
 function addBookmarks(items: RawBookmark[], sourceLabel: string): number {
   let added = 0
   const seen = new Set<string>()
+  // Fill our favorites bar from the other browser's bar, but only if ours is still empty
+  const barIsEmpty = !bookmarksService
+    .list()
+    .some((b) => !b.isReadingList && (b.folder === FAVORITES_BAR || b.folder?.startsWith(`${FAVORITES_BAR} / `)))
+  const barIds = new Map<string, number>()
+
   // Insert oldest-first so the newest end up on top (add() prepends)
-  for (const b of [...items].reverse()) {
+  const ordered = [...items]
+  for (let i = ordered.length - 1; i >= 0; i--) {
+    const b = ordered[i]
     if (!isWebUrl(b.url) || seen.has(b.url) || bookmarksService.isBookmarked(b.url)) continue
     seen.add(b.url)
-    const folder = b.folder ? `${sourceLabel} / ${b.folder}` : sourceLabel
-    bookmarksService.add({ url: b.url, title: (b.title || b.url).slice(0, 500), folder: folder.slice(0, 200) })
+    const [root, ...rest] = (b.folder || '').split(' / ')
+    const toBar = barIsEmpty && BAR_ROOTS.has(root.trim().toLowerCase())
+    const folder = toBar
+      ? [FAVORITES_BAR, ...rest].join(' / ')
+      : b.folder
+      ? `${sourceLabel} / ${b.folder}`
+      : sourceLabel
+    const item = bookmarksService.add({ url: b.url, title: (b.title || b.url).slice(0, 500), folder: folder.slice(0, 200) })
+    if (toBar) barIds.set(item.id, i)
     added++
   }
+  // Keep the other browser's left-to-right order on the bar
+  if (barIds.size) bookmarksService.reorder([...barIds.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id))
   return added
 }
 

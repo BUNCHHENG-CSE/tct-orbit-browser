@@ -10,6 +10,7 @@ import {
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import { TabLayoutSettings } from './TabLayoutSettings'
 import { Badge } from '@/components/ui/badge'
 import { useSettings } from '@/hooks/useSettings'
 import { useSpaces } from '@/hooks/useSpaces'
@@ -56,6 +57,8 @@ import {
 import { toast } from 'sonner'
 import { BackupSettings } from './BackupSettings'
 import { SiteSettingsPanel } from './SiteSettingsPanel'
+import { DefaultBrowserCard } from './DefaultBrowserCard'
+import { SearchSuggestionsToggle } from './SearchSuggestionsToggle'
 import { BrowserImportPanel, EncryptedSyncPanel } from './DataSyncPanels'
 import { ALL_SHORTCUTS } from '@/lib/shortcuts'
 import { openLegal } from '@/components/Legal/LegalDialog'
@@ -393,7 +396,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     { id: 'appearance', label: 'Appearance', icon: Palette },
     { id: 'startup', label: 'Start & New Tab', icon: Home },
     { id: 'search', label: 'Search Engine', icon: Search },
-    { id: 'tabs', label: 'Spaces & Dock', icon: Layers },
+    { id: 'tabs', label: 'Tabs & Spaces', icon: Layers },
     { id: 'downloads', label: 'Downloads', icon: Download },
     { id: 'privacy', label: 'Privacy & Shield', icon: Shield },
     { id: 'sites', label: 'Site Settings', icon: Globe },
@@ -774,6 +777,51 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </p>
                 </div>
 
+                <DefaultBrowserCard />
+
+                <div className="space-y-2.5">
+                  <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    New tab opens
+                  </h4>
+                  <div className="rounded-2xl border border-border bg-muted/20 p-3 space-y-2">
+                    {([
+                      {
+                        id: 'command-bar',
+                        label: 'Command bar',
+                        hint: 'Type a search or address right away, then the page opens in a new tab.'
+                      },
+                      {
+                        id: 'start-page',
+                        label: 'Orbit start page',
+                        hint: 'Clock, search, most visited sites, saved split layouts, space notes and recent downloads. All local.'
+                      }
+                    ] as const).map((opt) => {
+                      const selected = (settings?.newTabPage || 'start-page') === opt.id
+                      return (
+                        <div
+                          key={opt.id}
+                          onClick={() => void updateSettings({ newTabPage: opt.id })}
+                          className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all ${
+                            selected ? 'bg-card border border-primary/40 shadow-xs' : 'border border-transparent hover:bg-muted/40'
+                          }`}
+                        >
+                          <input
+                            type="radio"
+                            name="new-tab-page"
+                            checked={selected}
+                            onChange={() => void updateSettings({ newTabPage: opt.id })}
+                            className="mt-0.5 text-primary focus:ring-primary h-4 w-4 cursor-pointer"
+                          />
+                          <div className="flex-1 select-none">
+                            <div className="text-xs font-medium text-foreground">{opt.label}</div>
+                            <div className="text-[11px] text-muted-foreground mt-0.5">{opt.hint}</div>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 <div className="space-y-2.5">
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     On startup
@@ -939,6 +987,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 2. SEARCH ENGINE TAB */}
             {activeTab === 'search' && (
               <div className="space-y-6">
+                <SearchSuggestionsToggle />
+
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">
                     Default Search Engine
@@ -1012,6 +1062,8 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 3. SPACES & DOCK TAB */}
             {activeTab === 'tabs' && (
               <div className="space-y-6">
+                <TabLayoutSettings />
+
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Quick Spaces in Dock

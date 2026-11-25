@@ -1,5 +1,9 @@
-import React, { useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2 } from 'lucide-react'
+import React, { useContext, useState } from 'react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2, FolderPlus, Folder, FolderMinus, Home } from 'lucide-react'
+import { getUnreadCount, stripUnreadPrefix } from '@/lib/liveTabs'
+import { isStartPageUrl, isPrivateStartUrl } from '@/lib/startPage'
+import { groupById, groupPathLabel, resolveGroupColor } from '@/lib/tabGroups'
+import { TabGroupContext, TAB_DRAG_TYPE } from './TabGroupContext'
 import { useThumbnailStore } from '@/store/useThumbnailStore'
 import { cleanUrl } from '@/lib/urlCleaner'
 import { toast } from 'sonner'
@@ -8,11 +12,16 @@ import {
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
   ContextMenuTrigger
 } from '@/components/ui/context-menu'
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { modKey } from '@/lib/platform'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { useSmartStore } from '@/store/useSmartStore'
+import { SnoozeMenu } from '@/components/Smart/SnoozeMenu'
 import type { Tab } from '@/types/api'
 
 interface TabItemProps {
@@ -46,12 +55,26 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
 }) => {
   const [faviconError, setFaviconError] = useState(false)
   const thumbnail = useThumbnailStore((s) => s.thumbs[tab.id]?.dataUrl)
+  // Reading progress of the page (thin bar under the title); only while partly read
+  const progress = useSmartStore((s) => s.progress[tab.id])
+  const showProgress = progress !== undefined && progress > 0.03 && progress < 0.97
+  const groupCtx = useContext(TabGroupContext)
+  const isStart = isStartPageUrl(tab.url)
+  // Live Work badge: unread count from titles like "(3) Slack" or "Inbox (12)"
+  const unread = getUnreadCount(tab.title)
+  const displayTitle = unread ? stripUnreadPrefix(tab.title) : tab.title
+
+  const addToNewGroup = async () => {
+    if (!groupCtx) return
+    const created = await groupCtx.createGroup({ name: 'New Group', tabIds: [tab.id], parentId: tab.groupId ?? null })
+    if (created) groupCtx.setEditingGroupId(created.id)
+  }
 
   // Drag onto the page area to open in split view (see WebViewContainer drop zone)
   const dragProps = {
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
-      e.dataTransfer.setData('application/x-tct-tab-id', tab.id)
+      e.dataTransfer.setData(TAB_DRAG_TYPE, tab.id)
       e.dataTransfer.setData('text/uri-list', tab.url)
       e.dataTransfer.effectAllowed = 'move'
       window.dispatchEvent(new CustomEvent('tct:tab-drag-start', { detail: { tabId: tab.id } }))
@@ -78,7 +101,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
 
   // Favicon calculation
   let faviconSrc = tab.favicon
-  if (!faviconSrc && tab.url) {
+  if (!faviconSrc && tab.url && !isStart) {
     try {
       const urlObj = new URL(tab.url)
       faviconSrc = `${urlObj.origin}/favicon.ico`
@@ -132,15 +155,21 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="w-3.5 h-3.5 object-contain rounded-xs"
             onError={() => setFaviconError(true)}
           />
+        ) : isStart ? (
+          isPrivateStartUrl(tab.url) ? <EyeOff className="w-3.5 h-3.5 text-violet-500" /> : <Home className="w-3.5 h-3.5 text-primary" />
         ) : (
           <Globe className="w-3.5 h-3.5 opacity-60 text-muted-foreground" />
         )}
       </div>
 
-      {/* Subtle pinned indicator dot */}
-      {tab.isPinned && (
+      {/* Live Work unread badge, else subtle pinned indicator dot */}
+      {unread ? (
+        <span className="absolute -top-0.5 -right-0.5 min-w-[15px] h-[15px] px-[3px] rounded-full bg-rose-500 text-white text-[9px] font-bold leading-[15px] text-center shadow-sm">
+          {unread}
+        </span>
+      ) : tab.isPinned ? (
         <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-amber-400/80" />
-      )}
+      ) : null}
     </div>
   ) : (
     <div
@@ -178,6 +207,8 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="w-3.5 h-3.5 object-contain rounded-xs"
             onError={() => setFaviconError(true)}
           />
+        ) : isStart ? (
+          isPrivateStartUrl(tab.url) ? <EyeOff className="w-3.5 h-3.5 text-violet-500" /> : <Home className="w-3.5 h-3.5 text-primary" />
         ) : (
           <Globe className="w-3.5 h-3.5 opacity-60 text-muted-foreground" />
         )}
@@ -187,8 +218,18 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
       <span className={`flex-1 min-w-0 truncate tracking-tight text-[13.5px] font-medium leading-none ${
         tab.isSleeping && !isActive ? 'opacity-60 italic' : ''
       }`}>
-        {tab.title || 'New Tab'}
+        {displayTitle || 'New Tab'}
       </span>
+
+      {/* Live Work unread badge */}
+      {unread && (
+        <span
+          className="shrink-0 min-w-[18px] h-[16px] px-1 rounded-full bg-rose-500 text-white text-[10px] font-bold leading-[16px] text-center tabular-nums"
+          title={`${unread} unread`}
+        >
+          {unread}
+        </span>
+      )}
 
       {/* Private tab indicator */}
       {tab.isPrivate && (
@@ -226,9 +267,14 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
         </button>
       )}
 
-      {/* Pin indicator badge */}
-      {tab.isPinned && (
-        <Pin className="w-3 h-3 text-muted-foreground shrink-0 transform rotate-45" />
+
+      {showProgress && (
+        <span className="pointer-events-none absolute left-3.5 right-3 bottom-[3px] h-[2px] rounded-full bg-muted-foreground/10 overflow-hidden" aria-hidden>
+          <span
+            className="block h-full rounded-full transition-[width] duration-300"
+            style={{ width: `${Math.round(progress! * 100)}%`, backgroundColor: `${accentColor}b3` }}
+          />
+        </span>
       )}
 
       {/* Close button (visible on hover) */}
@@ -325,6 +371,47 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             <span>Open in Split View</span>
           </ContextMenuItem>
         )}
+        {groupCtx && (
+          <ContextMenuSub>
+            <ContextMenuSubTrigger className="text-xs rounded-lg cursor-pointer">
+              <FolderPlus className="w-3.5 h-3.5 mr-2" />
+              <span>Add to group</span>
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-56 max-h-80 overflow-y-auto bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl p-1">
+              <ContextMenuItem onClick={() => void addToNewGroup()} className="text-xs rounded-lg cursor-pointer">
+                <FolderPlus className="w-3.5 h-3.5 mr-2 text-primary" />
+                <span>New group</span>
+              </ContextMenuItem>
+              {groupCtx.groups.length > 0 && <ContextMenuSeparator className="my-1 bg-border" />}
+              {(() => {
+                const byId = groupById(groupCtx.groups)
+                return groupCtx.groups
+                  .map((g) => ({ g, label: groupPathLabel(g, byId) }))
+                  .sort((a, b) => a.label.localeCompare(b.label))
+                  .map(({ g, label }) => (
+                    <ContextMenuItem
+                      key={g.id}
+                      disabled={g.id === tab.groupId}
+                      onClick={() => void groupCtx.moveTabToGroup(tab.id, g.id)}
+                      className="text-xs rounded-lg cursor-pointer"
+                    >
+                      <Folder className="w-3.5 h-3.5 mr-2 shrink-0" style={{ color: resolveGroupColor(g, byId) }} />
+                      <span className="truncate">{label}</span>
+                    </ContextMenuItem>
+                  ))
+              })()}
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+        )}
+        {groupCtx && tab.groupId && (
+          <ContextMenuItem
+            onClick={() => void groupCtx.moveTabToGroup(tab.id, null)}
+            className="text-xs rounded-lg cursor-pointer"
+          >
+            <FolderMinus className="w-3.5 h-3.5 mr-2" />
+            <span>Remove from group</span>
+          </ContextMenuItem>
+        )}
         {onDuplicate && (
           <ContextMenuItem onClick={onDuplicate} className="text-xs rounded-lg cursor-pointer">
             <Copy className="w-3.5 h-3.5 mr-2" />
@@ -357,9 +444,10 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="text-xs rounded-lg cursor-pointer"
           >
             <Moon className="w-3.5 h-3.5 mr-2 text-indigo-400" />
-            <span>Snooze Tab (Save RAM)</span>
+            <span>Sleep Tab (Save RAM)</span>
           </ContextMenuItem>
         )}
+        <SnoozeMenu tab={tab} onClose={onClose} />
         <ContextMenuItem onClick={onTogglePin} className="text-xs rounded-lg cursor-pointer">
           {tab.isPinned ? (
             <>
@@ -421,4 +509,18 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
       </ContextMenuContent>
     </ContextMenu>
   )
-})
+}, tabItemPropsEqual)
+
+/**
+ * Parents pass fresh inline callbacks (() => onSelectTab(tab.id)) on every render, which made
+ * React.memo useless: every row (with its tooltip and context menu) re-rendered whenever ANY tab
+ * changed. The callbacks only close over the tab id / tab object and stable handlers, so a row
+ * only needs to re-render when its data changes or a callback appears / disappears.
+ */
+function tabItemPropsEqual(prev: TabItemProps, next: TabItemProps): boolean {
+  if (prev.tab !== next.tab || prev.isActive !== next.isActive || prev.accentColor !== next.accentColor || prev.collapsed !== next.collapsed) {
+    return false
+  }
+  const optional: Array<keyof TabItemProps> = ['onDuplicate', 'onNewTabToRight', 'onReload', 'onCloseOthers', 'onCloseToRight']
+  return optional.every((k) => !!prev[k] === !!next[k])
+}

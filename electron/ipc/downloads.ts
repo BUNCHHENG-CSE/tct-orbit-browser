@@ -1,7 +1,9 @@
-import { app, dialog, shell, session, type BrowserWindow, type IpcMain, type DownloadItem, type WebContents } from 'electron'
+import { app, dialog, shell, session, BrowserWindow, type IpcMain, type DownloadItem, type WebContents } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { secureHandle, Schemas } from '../security'
+import { SHARED_TAB_PARTITION, onTabSessionCreated } from '../sessions'
+import { PRIVATE_PARTITION } from '../privacy/types'
 import { localStorageService } from '../storage/localStorage'
 import { downloadsService } from '../storage/downloadsService'
 
@@ -23,6 +25,39 @@ function getUniqueFilePath(directory: string, filename: string): string {
   return candidate
 }
 
+/** Files that run code when opened: the user confirms first (a page can start a download by itself) */
+const RUNS_CODE =
+  /\.(exe|msi|msix|msixbundle|appx|appxbundle|appinstaller|com|scr|pif|bat|cmd|ps1|psm1|psd1|vbs|vbe|js|jse|ws|wsf|wsh|hta|cpl|msc|msp|mst|jar|jnlp|reg|lnk|url|scf|inf|chm|hlp|gadget|application|settingcontent-ms|diagcab|library-ms|search-ms|iso|img|vhd|vhdx|dll|xll|docm|xlsm|pptm|sh|bash|run|bin|appimage|deb|rpm|desktop|app|command|tool|workflow|pkg|dmg|py|pyw|rb|pl)$/i
+
+const isDirectory = (p: string): boolean => {
+  try {
+    return fs.statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+const samePath = (a: string, b: string): boolean => {
+  const x = path.resolve(a)
+  const y = path.resolve(b)
+  return process.platform === 'win32' ? x.toLowerCase() === y.toLowerCase() : x === y
+}
+
+/** Only files this browser downloaded can be opened or shown, never a path the caller made up */
+function downloadedPath(filePath: string): string | null {
+  const record = downloadsService.list().find((r) => r.savePath && samePath(r.savePath, filePath))
+  return record ? path.resolve(record.savePath) : null
+}
+
+/** Files the user saved through a system dialog this run (Save as PDF ...): may be shown in the folder */
+const exported = new Set<string>()
+export function rememberExportedFile(filePath: string): void {
+  exported.add(path.resolve(filePath))
+}
+function exportedPath(filePath: string): string | null {
+  return [...exported].find((p) => samePath(p, filePath)) ?? null
+}
+
 let isDownloadManagerSetup = false
 /** Live download handles (for pause / resume / cancel), removed when done */
 const activeItems = new Map<string, DownloadItem>()
@@ -31,9 +66,20 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
   if (isDownloadManagerSetup) return
   isDownloadManagerSetup = true
 
+  const privateSession = session.fromPartition(PRIVATE_PARTITION)
   const attachListener = (ses: Electron.Session) => {
     ses.on('will-download', (event, item: DownloadItem, _webContents: WebContents) => {
-      const win = getMainWindow()
+      // The window the download started in (a tab's host window: main or private window)
+      const host = (_webContents as any)?.hostWebContents as WebContents | undefined
+      const ownerWin = (() => {
+        try {
+          const w = BrowserWindow.fromWebContents(host && !host.isDestroyed() ? host : _webContents)
+          return w && !w.isDestroyed() ? w : null
+        } catch {
+          return null
+        }
+      })()
+      const win = ownerWin ?? getMainWindow()
       const settings = localStorageService.getSettings()
 
       const fallbackDownloadsDir = app.getPath('downloads')
@@ -72,7 +118,9 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
         savePath: item.getSavePath(),
         state: 'progressing',
         startTime: new Date().toISOString(),
-        url: item.getURL ? item.getURL() : undefined
+        url: item.getURL ? item.getURL() : undefined,
+        // Private tabs: never written to downloads.json
+        ephemeral: ses === privateSession
       })
 
       if (win && !win.isDestroyed()) {
@@ -122,7 +170,7 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
       item.once('done', (_doneEvent, state) => {
         activeItems.delete(downloadId)
         const finalPath = item.getSavePath()
-        const win = getMainWindow()
+        const win = ownerWin && !ownerWin.isDestroyed() ? ownerWin : getMainWindow()
 
         downloadsService.addOrUpdate({
           id: downloadId,
@@ -165,15 +213,24 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
 
   // Attach to both isolated tab session and defaultSession
   try {
-    const tabSession = session.fromPartition('persist:browser-tabs')
+    const tabSession = session.fromPartition(SHARED_TAB_PARTITION)
     attachListener(tabSession)
   } catch (err) {
     console.warn('[DownloadManager] Error attaching to persist:browser-tabs session:', err)
   }
 
+  // Space profiles (separate logins) download through the same manager
+  onTabSessionCreated((ses) => {
+    try {
+      attachListener(ses)
+    } catch (err) {
+      console.warn('[DownloadManager] Error attaching to profile session:', err)
+    }
+  })
+
   try {
     // Private tabs (in-memory session) download through the same manager
-    attachListener(session.fromPartition('private-tabs'))
+    attachListener(privateSession)
   } catch (err) {
     console.warn('[DownloadManager] Error attaching to private-tabs session:', err)
   }
@@ -222,14 +279,10 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
   })
 
   // 3. Open downloads folder in OS file explorer
-  secureHandle(ipcMain, 'downloads:open-folder', Schemas.downloadsOpenFolder, async (_, targetPath?: string) => {
+  // (always the configured one: openPath would run a file, so no path is taken from the caller)
+  secureHandle(ipcMain, 'downloads:open-folder', Schemas.downloadsOpenFolder, async () => {
     const settings = localStorageService.getSettings()
-    const dirToOpen =
-      targetPath && fs.existsSync(targetPath)
-        ? targetPath
-        : settings.downloadPath && fs.existsSync(settings.downloadPath)
-        ? settings.downloadPath
-        : app.getPath('downloads')
+    const dirToOpen = settings.downloadPath && isDirectory(settings.downloadPath) ? settings.downloadPath : app.getPath('downloads')
 
     if (!fs.existsSync(dirToOpen)) {
       fs.mkdirSync(dirToOpen, { recursive: true })
@@ -241,28 +294,43 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
 
   // 4. Highlight specific downloaded file in OS file explorer
   secureHandle(ipcMain, 'downloads:show-in-folder', Schemas.downloadsShowInFolder, async (_, filePath: string) => {
-    if (filePath && fs.existsSync(filePath)) {
-      shell.showItemInFolder(filePath)
+    const file = downloadedPath(filePath) ?? exportedPath(filePath)
+    if (!file) return false
+    if (fs.existsSync(file)) {
+      shell.showItemInFolder(file)
       return true
     }
     // Fall back to opening containing directory
-    if (filePath) {
-      const parent = path.dirname(filePath)
-      if (fs.existsSync(parent)) {
-        await shell.openPath(parent)
-        return true
-      }
+    const parent = path.dirname(file)
+    if (isDirectory(parent)) {
+      await shell.openPath(parent)
+      return true
     }
     return false
   })
 
   // 5. Open downloaded file directly
-  secureHandle(ipcMain, 'downloads:open-file', Schemas.downloadsOpenFile, async (_, filePath: string) => {
-    if (filePath && fs.existsSync(filePath)) {
-      await shell.openPath(filePath)
-      return true
+  secureHandle(ipcMain, 'downloads:open-file', Schemas.downloadsOpenFile, async (event, filePath: string) => {
+    const file = downloadedPath(filePath)
+    if (!file || !fs.existsSync(file)) return false
+    // Windows ignores trailing dots and spaces: "setup.exe." runs as setup.exe
+    if (RUNS_CODE.test(file.replace(/[. ]+$/, '')) || isDirectory(file)) {
+      const options: Electron.MessageBoxOptions = {
+        type: 'warning',
+        buttons: ['Open', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        noLink: true,
+        message: `Open "${path.basename(file)}"?`,
+        detail: 'This type of file can run programs and harm your computer. Open it only if you trust where it came from.'
+      }
+      const win = BrowserWindow.fromWebContents(event.sender)
+      const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+      // Not an error: the user chose not to open it
+      if (response !== 0) return true
     }
-    return false
+    await shell.openPath(file)
+    return true
   })
 
   // 6. Delete file from list and optionally disk

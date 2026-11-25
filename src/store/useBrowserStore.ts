@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Space, Tab, Settings, AppInfo } from '@/types/api'
+import type { Space, Tab, TabGroup, Settings, AppInfo } from '@/types/api'
 import { soundscape, type SoundscapeType } from '@/lib/soundscapes'
 
 interface BrowserState {
@@ -7,6 +7,8 @@ interface BrowserState {
   spaces: Space[]
   activeSpaceId: string | null
   tabsBySpace: Record<string, Tab[]>
+  /** Nested tab groups per space */
+  groupsBySpace: Record<string, TabGroup[]>
   activeTabId: string | null
   settings: Settings | null
   commandBarOpen: boolean
@@ -44,6 +46,11 @@ interface BrowserState {
 
   // Split View State
   splitTabId: string | null
+  /**
+   * The two tabs shown side by side, remembered while another tab is shown alone.
+   * Selecting either tab of the pair shows the split again (left = primary pane).
+   */
+  splitPair: { left: string; right: string } | null
   splitRatio: number
   splitActivePane: 'primary' | 'secondary'
 
@@ -93,6 +100,8 @@ interface BrowserState {
   setSplitRatio: (ratio: number) => void
   setSplitActivePane: (pane: 'primary' | 'secondary') => void
   closeSplitView: () => void
+  /** Swap the left and right panes */
+  swapSplit: () => void
 
   // Reader Mode Actions
   openReaderMode: (data: {
@@ -116,11 +125,17 @@ interface BrowserState {
   updateTabInStore: (id: string, updates: Partial<Tab>) => void
   removeTabFromStore: (id: string) => void
 
+  // Tab group mutations in store
+  setGroupsForSpace: (spaceId: string, groups: TabGroup[]) => void
+  upsertGroupInStore: (group: TabGroup) => void
+
   // Space mutations in store
   addSpaceToStore: (space: Space) => void
   updateSpaceInStore: (id: string, updates: Partial<Space>) => void
   removeSpaceFromStore: (id: string) => void
 }
+
+const pairHas = (pair: { left: string; right: string } | null, id: string) => !!pair && (pair.left === id || pair.right === id)
 
 export const useBrowserStore = create<BrowserState>((set, get) => ({
   appInfo: typeof window !== 'undefined' && window.api?.appInfo
@@ -130,6 +145,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   spaces: [],
   activeSpaceId: null,
   tabsBySpace: {},
+  groupsBySpace: {},
   activeTabId: null,
   settings: null,
   commandBarOpen: false,
@@ -181,6 +197,7 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
 
   // Split View Initial State
   splitTabId: null,
+  splitPair: null,
   splitRatio: 0.5,
   splitActivePane: 'primary',
 
@@ -210,10 +227,26 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   setQrModal: (qrModal) => set({ qrModal }),
 
   // Split View Actions
-  setSplitTabId: (id) => set({ splitTabId: id }),
+  setSplitTabId: (id) =>
+    set((state) => ({
+      splitTabId: id,
+      splitPair: id && state.activeTabId && id !== state.activeTabId ? { left: state.activeTabId, right: id } : null
+    })),
   setSplitRatio: (ratio) => set({ splitRatio: Math.min(0.8, Math.max(0.2, ratio)) }),
   setSplitActivePane: (pane) => set({ splitActivePane: pane }),
-  closeSplitView: () => set({ splitTabId: null, splitActivePane: 'primary' }),
+  closeSplitView: () => set({ splitTabId: null, splitPair: null, splitActivePane: 'primary' }),
+  swapSplit: () =>
+    set((state) => {
+      const pair = state.splitPair
+      if (!pair) return state
+      // Atomic: the active-tab rule below sees the new left tab as the pair's left
+      return {
+        splitPair: { left: pair.right, right: pair.left },
+        activeTabId: pair.right,
+        splitTabId: pair.left,
+        splitActivePane: state.splitActivePane === 'primary' ? 'secondary' : 'primary'
+      }
+    }),
 
   // Reader Mode Actions
   openReaderMode: (data) =>
@@ -307,7 +340,11 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     })
   },
 
-  setActiveTabId: (id) => set({ activeTabId: id }),
+  setActiveTabId: (id) =>
+    set((state) =>
+      // Clicking the split's left tab focuses the left pane, even when it's already the active tab
+      state.splitPair && id === state.splitPair.left ? { activeTabId: id, splitActivePane: 'primary' } : { activeTabId: id }
+    ),
 
   setSettings: (settings) => set({ settings }),
 
@@ -380,21 +417,38 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
     })
   },
 
+  // Hot path: called on every title / favicon / URL / audio change of every tab.
+  // Only the space that holds the tab gets a new array, and nothing changes (no re-render at all)
+  // when the update carries the values the tab already has.
   updateTabInStore: (id, updates) => {
     set((state) => {
-      const nextTabsBySpace: Record<string, Tab[]> = {}
       for (const [spaceId, tabs] of Object.entries(state.tabsBySpace)) {
-        nextTabsBySpace[spaceId] = tabs.map((tab) =>
-          tab.id === id ? { ...tab, ...updates } : tab
-        )
+        const idx = tabs.findIndex((t) => t.id === id)
+        if (idx === -1) continue
+        const current = tabs[idx]
+        let changed = false
+        for (const key in updates) {
+          const next = (updates as Record<string, unknown>)[key]
+          const prev = (current as unknown as Record<string, unknown>)[key]
+          // Dates (lastVisited) may arrive as Date or ISO string: compare by value
+          if (next !== prev && !(next instanceof Date && typeof prev === 'string' && next.toISOString() === prev)) {
+            changed = true
+            break
+          }
+        }
+        if (!changed) return state
+        const nextTabs = tabs.slice()
+        nextTabs[idx] = { ...current, ...updates }
+        return { tabsBySpace: { ...state.tabsBySpace, [spaceId]: nextTabs } }
       }
-      return { tabsBySpace: nextTabsBySpace }
+      return state
     })
   },
 
   removeTabFromStore: (id) => {
     set((state) => {
-      const nextTabsBySpace: Record<string, Tab[]> = {}
+      // Only the space that holds the tab gets a new array
+      const nextTabsBySpace: Record<string, Tab[]> = { ...state.tabsBySpace }
       let removedTab: Tab | null = null
       let removedSpaceId: string | null = null
 
@@ -403,9 +457,11 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         if (found) {
           removedTab = found
           removedSpaceId = spaceId
+          nextTabsBySpace[spaceId] = tabs.filter((t) => t.id !== id)
+          break
         }
-        nextTabsBySpace[spaceId] = tabs.filter((t) => t.id !== id)
       }
+      if (!removedSpaceId) return state
 
       let nextActiveTabId = state.activeTabId
       if (state.activeTabId === id && removedSpaceId) {
@@ -421,11 +477,29 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return {
         tabsBySpace: nextTabsBySpace,
         activeTabId: nextActiveTabId,
-        splitTabId: state.splitTabId === id ? null : state.splitTabId,
+        // Closing either tab of the split ends the split
+        splitTabId: state.splitTabId === id || pairHas(state.splitPair, id) ? null : state.splitTabId,
+        splitPair: pairHas(state.splitPair, id) ? null : state.splitPair,
+        splitActivePane: pairHas(state.splitPair, id) ? 'primary' : state.splitActivePane,
         recentlyClosedTabs: nextRecentlyClosed
       }
     })
   },
+
+  setGroupsForSpace: (spaceId, groups) =>
+    set((state) => ({ groupsBySpace: { ...state.groupsBySpace, [spaceId]: groups } })),
+
+  upsertGroupInStore: (group) =>
+    set((state) => {
+      const list = state.groupsBySpace[group.spaceId] || []
+      const exists = list.some((g) => g.id === group.id)
+      return {
+        groupsBySpace: {
+          ...state.groupsBySpace,
+          [group.spaceId]: exists ? list.map((g) => (g.id === group.id ? group : g)) : [...list, group]
+        }
+      }
+    }),
 
   addSpaceToStore: (space) => {
     const spaceTabs = space.tabs || []
@@ -452,6 +526,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       const nextSpaces = state.spaces.filter((s) => s.id !== id)
       const nextTabsBySpace = { ...state.tabsBySpace }
       delete nextTabsBySpace[id]
+      const nextGroupsBySpace = { ...state.groupsBySpace }
+      delete nextGroupsBySpace[id]
 
       let nextActiveSpaceId = state.activeSpaceId
       let nextActiveTabId = state.activeTabId
@@ -465,9 +541,35 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
       return {
         spaces: nextSpaces,
         tabsBySpace: nextTabsBySpace,
+        groupsBySpace: nextGroupsBySpace,
         activeSpaceId: nextActiveSpaceId,
         activeTabId: nextActiveTabId
       }
     })
   }
 }))
+
+/**
+ * Split view follows the active tab. Runs for EVERY way the active tab changes (sidebar, tab
+ * strip, keyboard, new tabs, setState), so no caller can forget it:
+ * - the pair's left tab  -> show the split, left pane focused
+ * - the pair's right tab -> show the split, right pane focused
+ * - any other tab        -> show that tab alone (the pair is remembered for later)
+ */
+useBrowserStore.subscribe((state, prev) => {
+  if (state.activeTabId === prev.activeTabId) return
+  const pair = state.splitPair
+  if (!pair) return
+  const id = state.activeTabId
+  if (id === pair.left) {
+    // Coming from the right tab = the remap below: keep the right pane focused
+    const pane = prev.activeTabId === pair.right ? state.splitActivePane : 'primary'
+    if (state.splitTabId !== pair.right || state.splitActivePane !== pane) {
+      useBrowserStore.setState({ splitTabId: pair.right, splitActivePane: pane })
+    }
+  } else if (id === pair.right) {
+    useBrowserStore.setState({ activeTabId: pair.left, splitTabId: pair.right, splitActivePane: 'secondary' })
+  } else if (state.splitTabId) {
+    useBrowserStore.setState({ splitTabId: null })
+  }
+})

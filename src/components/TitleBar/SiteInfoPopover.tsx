@@ -11,6 +11,7 @@ import {
   X
 } from 'lucide-react'
 import { api } from '@/lib/ipc'
+import { useBrowserStore } from '@/store/useBrowserStore'
 import { toast } from 'sonner'
 import type { SiteInfoResult } from '@/types/api'
 
@@ -40,7 +41,8 @@ export const SiteInfoPopover: React.FC<SiteInfoPopoverProps> = ({ url }) => {
   const fetchSiteInfo = async () => {
     if (!url || !isWebUrl || !api.site?.getInfo) return
     try {
-      const info = await api.site.getInfo(url)
+      // Isolated spaces keep their own cookies: ask about the active space's profile
+      const info = await api.site.getInfo(url, useBrowserStore.getState().activeSpaceId || undefined)
       setSiteInfo(info)
     } catch {
       // ignore

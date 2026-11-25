@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import {
   X,
   BookOpen,
@@ -12,6 +12,8 @@ import {
   Printer
 } from 'lucide-react'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { sanitizeHtml, htmlToText } from '@/lib/sanitizeHtml'
+import { webviewRegistry } from '@/lib/webviewRegistry'
 
 export const ReaderModeOverlay: React.FC = () => {
   const readerMode = useBrowserStore((s) => s.readerMode)
@@ -19,6 +21,25 @@ export const ReaderModeOverlay: React.FC = () => {
   const updateReaderSettings = useBrowserStore((s) => s.updateReaderSettings)
 
   const [isSpeaking, setIsSpeaking] = useState(false)
+
+  // Page HTML is untrusted: it may only reach the UI through the allowlist sanitizer
+  const safeHtml = useMemo(
+    () => (readerMode.isOpen ? sanitizeHtml(readerMode.contentHtml) : ''),
+    [readerMode.isOpen, readerMode.contentHtml]
+  )
+
+  // Links open in the tab being read, so a private tab's links stay private
+  const handleArticleClick = (e: React.MouseEvent) => {
+    const link = (e.target as Element).closest?.('a')
+    if (!link) return
+    e.preventDefault()
+    const href = link.getAttribute('href') || ''
+    if (!/^https?:\/\//i.test(href) || !readerMode.tabId) return
+    const el = webviewRegistry.get(readerMode.tabId)
+    if (!el) return
+    handleClose()
+    el.loadURL(href).catch(() => {})
+  }
 
   // Handle ESC key to exit Reader Mode
   useEffect(() => {
@@ -55,9 +76,7 @@ export const ReaderModeOverlay: React.FC = () => {
     }
 
     // Extract text from content
-    const div = document.createElement('div')
-    div.innerHTML = readerMode.contentHtml
-    const plainText = `${readerMode.title}. ${div.innerText}`
+    const plainText = `${readerMode.title}. ${htmlToText(safeHtml)}`
 
     const utterance = new SpeechSynthesisUtterance(plainText)
     utterance.rate = 1.0
@@ -267,7 +286,9 @@ export const ReaderModeOverlay: React.FC = () => {
           {/* Article Cleaned Body */}
           <div
             className="prose dark:prose-invert max-w-none space-y-5 [&>p]:leading-relaxed [&>h2]:text-xl [&>h2]:font-bold [&>h2]:mt-6 [&>h3]:text-lg [&>h3]:font-bold [&>img]:rounded-xl [&>img]:my-4 [&>blockquote]:border-l-4 [&>blockquote]:border-primary/50 [&>blockquote]:pl-4 [&>blockquote]:italic [&>pre]:bg-black/10 [&>pre]:p-4 [&>pre]:rounded-xl"
-            dangerouslySetInnerHTML={{ __html: readerMode.contentHtml }}
+            onClick={handleArticleClick}
+            onAuxClick={handleArticleClick}
+            dangerouslySetInnerHTML={{ __html: safeHtml }}
           />
         </article>
       </div>

@@ -5,7 +5,10 @@ export interface ChannelMeta {
   name: string
   displayName: string
   appId: string
+  /** Legacy folder name / URL scheme (tct-orbit, tct-orbit-nova, …). Also the Linux data folder. */
   userDataDirName: string
+  /** Data folder name on Windows + macOS (e.g. %LOCALAPPDATA%\TCTOrbit\User Data) */
+  dataFolder: string
   badgeLabel?: string
   badgeColor?: string
   description: string
@@ -29,6 +32,7 @@ export const CHANNELS: Record<ReleaseChannel, ChannelMeta> = {
     displayName: 'TCT Orbit',
     appId: 'com.tctorbit.browser',
     userDataDirName: 'tct-orbit',
+    dataFolder: 'TCTOrbit',
     badgeLabel: 'Stable',
     badgeColor: '#10b981',
     description: 'Official production release of TCT Orbit.'
@@ -39,6 +43,7 @@ export const CHANNELS: Record<ReleaseChannel, ChannelMeta> = {
     displayName: 'TCT Orbit Nova',
     appId: 'com.tctorbit.browser.nova',
     userDataDirName: 'tct-orbit-nova',
+    dataFolder: 'TCTOrbitNova',
     badgeLabel: 'Nova (Beta)',
     badgeColor: '#8b5cf6',
     description: 'Public beta channel featuring upcoming innovations and UI enhancements.'
@@ -49,6 +54,7 @@ export const CHANNELS: Record<ReleaseChannel, ChannelMeta> = {
     displayName: 'TCT Orbit Deep',
     appId: 'com.tctorbit.browser.deep',
     userDataDirName: 'tct-orbit-deep',
+    dataFolder: 'TCTOrbitDeep',
     badgeLabel: 'Deep (Nightly)',
     badgeColor: '#06b6d4',
     description: 'Nightly builds with bleeding-edge features and experimental performance flags.'
@@ -59,6 +65,7 @@ export const CHANNELS: Record<ReleaseChannel, ChannelMeta> = {
     displayName: 'TCT Orbit Canary',
     appId: 'com.tctorbit.browser.canary',
     userDataDirName: 'tct-orbit-canary',
+    dataFolder: 'TCTOrbitCanary',
     badgeLabel: 'Canary',
     badgeColor: '#f59e0b',
     description: 'Developer preview channel with raw, uncurated changes.'

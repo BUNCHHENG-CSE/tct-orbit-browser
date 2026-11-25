@@ -1,13 +1,15 @@
 import { sitePermissions, toPromptable } from './permissions/sitePermissions'
 import { PRIVATE_PARTITION } from './privacy/types'
+import { getPersistentTabSessions } from './sessions'
 import {
   app,
   session,
   shell,
   safeStorage,
+  dialog,
+  BrowserWindow,
   type WebFrameMain,
   type WebContents,
-  type BrowserWindow,
   type Session,
   type IpcMain,
   type IpcMainInvokeEvent,
@@ -15,7 +17,7 @@ import {
   WebContentsView
 } from 'electron'
 import { z, type ZodType } from 'zod'
-import path from 'path'
+import { devServerUrl, isAppUiUrl } from './appUi'
 
 // ==============================================================================
 // 1. IPC Sender Validation & Frame Guard
@@ -38,66 +40,16 @@ export function validateSender(frame: WebFrameMain | null | undefined): boolean 
     return false
   }
 
-  const frameUrl = frame.url
-  if (!frameUrl) {
-    console.warn('[Security Guard] Rejected IPC: frame has no URL')
+  if (!isAppUiUrl(frame.url)) {
+    console.warn(`[Security Guard] Rejected IPC: not the browser UI: ${frame.url || '(no URL)'}`)
     return false
   }
+  return true
+}
 
-  try {
-    const parsed = new URL(frameUrl)
-
-    // Production environment (packaged app)
-    if (app.isPackaged) {
-      if (parsed.protocol === 'file:') {
-        const normalizedFramePath = path.normalize(decodeURIComponent(parsed.pathname))
-        const appPath = path.normalize(app.getAppPath())
-
-        const cleanFramePath = process.platform === 'win32'
-          ? normalizedFramePath.replace(/^[/\\]+/, '').toLowerCase()
-          : normalizedFramePath
-        const cleanAppPath = process.platform === 'win32'
-          ? appPath.replace(/^[/\\]+/, '').toLowerCase()
-          : appPath
-
-        const isInsideApp = cleanFramePath.startsWith(cleanAppPath)
-        if (!isInsideApp) {
-          console.warn(`[Security Guard] Rejected IPC: file URL is outside application bundle: ${frameUrl}`)
-        }
-        return isInsideApp
-      }
-
-      // Custom app protocols if registered
-      if (parsed.protocol === 'app:' || parsed.protocol === 'tct-orbit:') {
-        return true
-      }
-
-      console.warn(`[Security Guard] Rejected IPC: unauthorized protocol in packaged build: ${frameUrl}`)
-      return false
-    }
-
-    // Development environment
-    const devServerUrl = process.env['ELECTRON_RENDERER_URL']
-    if (devServerUrl) {
-      try {
-        const devParsed = new URL(devServerUrl)
-        if (parsed.origin === devParsed.origin) {
-          return true
-        }
-      } catch {}
-    }
-
-    // Local file protocol in development
-    if (parsed.protocol === 'file:') {
-      return true
-    }
-
-    console.warn(`[Security Guard] Rejected IPC: frame origin does not match internal UI in dev: ${frameUrl}`)
-    return false
-  } catch (err) {
-    console.error('[Security Guard] Error parsing frame URL for sender validation:', err)
-    return false
-  }
+/** The call comes from the UI page AND from a real window (never a webview or extension page) */
+function isTrustedSender(event: IpcMainInvokeEvent | IpcMainEvent): boolean {
+  return validateSender(event.senderFrame) && event.sender.getType() === 'window'
 }
 
 /**
@@ -110,7 +62,7 @@ export function secureHandle(
   handler: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<any> | any
 ): void {
   ipcMain.handle(channel, async (event, ...args: any[]) => {
-    if (!validateSender(event.senderFrame)) {
+    if (!isTrustedSender(event)) {
       console.error(`[Security Guard] UNAUTHORIZED: Invoke on channel "${channel}" from frame: ${event.senderFrame?.url || 'unknown'}`)
       throw new Error(`Unauthorized IPC invocation on channel: ${channel}`)
     }
@@ -138,7 +90,7 @@ export function secureOn(
   listener: (event: IpcMainEvent, ...args: any[]) => void
 ): void {
   ipcMain.on(channel, (event, ...args: any[]) => {
-    if (!validateSender(event.senderFrame)) {
+    if (!isTrustedSender(event)) {
       console.error(`[Security Guard] UNAUTHORIZED: Event on channel "${channel}" from frame: ${event.senderFrame?.url || 'unknown'}`)
       return
     }
@@ -170,7 +122,8 @@ export const Schemas = {
     favicon: z.string().nullable().optional(),
     isPinned: z.boolean().optional(),
     order: z.number().optional(),
-    isPrivate: z.boolean().optional()
+    isPrivate: z.boolean().optional(),
+    groupId: z.string().max(200).nullable().optional()
   }),
   tabUpdate: z.tuple([
     z.string().min(1),
@@ -180,7 +133,8 @@ export const Schemas = {
       favicon: z.string().nullable().optional(),
       isPinned: z.boolean().optional(),
       spaceId: z.string().optional(),
-      order: z.number().optional()
+      order: z.number().optional(),
+      groupId: z.string().max(200).nullable().optional()
     })
   ]),
   tabRemove: z.string().min(1),
@@ -196,7 +150,8 @@ export const Schemas = {
     icon: z.string().optional(),
     order: z.number().optional(),
     initialUrl: z.string().max(8192).optional(),
-    initialTitle: z.string().max(1000).optional()
+    initialTitle: z.string().max(1000).optional(),
+    isolated: z.boolean().optional()
   }),
   spaceUpdate: z.tuple([
     z.string().min(1),
@@ -204,10 +159,45 @@ export const Schemas = {
       name: z.string().optional(),
       color: z.string().optional(),
       icon: z.string().optional(),
-      isActive: z.boolean().optional()
+      isActive: z.boolean().optional(),
+      isolated: z.boolean().optional()
     })
   ]),
   spaceId: z.string().min(1),
+
+  // Tab groups
+  groupList: z.string().min(1).max(200),
+  groupCreate: z.object({
+    spaceId: z.string().min(1).max(200),
+    name: z.string().max(80),
+    parentId: z.string().max(200).nullable().optional(),
+    color: z.string().max(32).nullable().optional(),
+    tabIds: z.array(z.string().max(200)).max(500).optional()
+  }),
+  groupUpdate: z.tuple([
+    z.string().min(1).max(200),
+    z.object({
+      name: z.string().max(80).optional(),
+      color: z.string().max(32).nullable().optional(),
+      collapsed: z.boolean().optional(),
+      parentId: z.string().max(200).nullable().optional(),
+      order: z.number().int().min(0).max(100000).optional(),
+      openLinksInGroup: z.boolean().optional()
+    })
+  ]),
+  groupRemove: z.union([
+    z.string().min(1).max(200),
+    z.tuple([z.string().min(1).max(200), z.boolean().optional()])
+  ]),
+
+  // Saved split layouts
+  splitSave: z.object({
+    name: z.string().max(80),
+    primary: z.object({ url: z.string().min(1).max(8192), title: z.string().max(1000) }),
+    secondary: z.object({ url: z.string().min(1).max(8192), title: z.string().max(1000) }),
+    ratio: z.number().min(0).max(1)
+  }),
+  splitRemove: z.string().min(1).max(200),
 
   // Settings
   settingsUpdate: z.object({
@@ -226,7 +216,11 @@ export const Schemas = {
     defaultZoom: z.number().min(50).max(300).optional(),
     autoArchiveDuration: z.enum(['off', '12h', '24h', '3d', '7d']).optional(),
     memorySaverEnabled: z.boolean().optional(),
-    sleepTimeoutMinutes: z.number().int().min(1).max(1440).optional()
+    sleepTimeoutMinutes: z.number().int().min(1).max(1440).optional(),
+    newTabPage: z.enum(['command-bar', 'start-page']).optional(),
+    tabLayout: z.enum(['sidebar', 'topbar']).optional(),
+    newTabsOnTop: z.boolean().optional(),
+    favoritesBar: z.enum(['always', 'never', 'new-tab']).optional()
   }),
 
   // Downloads
@@ -291,12 +285,19 @@ export const Schemas = {
     isReadingList: z.boolean().optional()
   }),
   bookmarksDelete: z.string().min(1),
+  bookmarksUpdate: z.tuple([
+    z.string().min(1).max(100),
+    z.object({ title: z.string().max(500).optional(), url: z.string().min(1).max(4096).optional(), folder: z.string().min(1).max(300).optional() })
+  ]),
+  bookmarksReorder: z.array(z.string().min(1).max(100)).max(5000),
+  bookmarksRenameFolder: z.tuple([z.string().min(1).max(300), z.string().min(1).max(300)]),
+  bookmarksFolder: z.string().min(1).max(300),
   bookmarksDeleteByUrl: z.string().min(1),
   bookmarksToggleRead: z.string().min(1),
   bookmarksIsBookmarked: z.string().min(1),
 
   // Site Info & Permissions
-  siteGetInfo: z.string().min(1),
+  siteGetInfo: z.union([z.string().min(1), z.tuple([z.string().min(1), z.string().max(200).optional()])]),
   siteClearData: z.string().min(1),
 
   // Theme
@@ -349,6 +350,12 @@ export const Schemas = {
     width: z.number(),
     height: z.number()
   }),
+  devtoolsOverlayRects: z.array(z.object({
+    x: z.number(),
+    y: z.number(),
+    width: z.number(),
+    height: z.number()
+  })).max(20),
   devtoolsSyncTab: z.object({
     webContentsId: z.number().int().positive()
   }),
@@ -436,6 +443,73 @@ export function setupWebRTCLeakProtection(
 // PrivacyEngine.setupNetworkFilters. Electron allows only ONE onBeforeSendHeaders listener per
 // session, so registering a second one here would silently replace (or be replaced by) that one.
 
+// --- User gestures & external apps ---
+
+const lastUserInput = new WeakMap<WebContents, number>()
+
+/** Remember real clicks / key presses, so pages can't act "for" the user without one */
+export function trackUserInput(contents: WebContents): void {
+  contents.on('input-event', (_event, input) => {
+    if (input.type === 'mouseDown' || input.type === 'keyDown' || input.type === 'rawKeyDown' || input.type === 'gestureTap') {
+      lastUserInput.set(contents, Date.now())
+    }
+  })
+}
+
+export function hasRecentUserInput(contents: WebContents, withinMs = 5000): boolean {
+  return Date.now() - (lastUserInput.get(contents) ?? 0) < withinMs
+}
+
+function dialogParent(contents: WebContents | null): BrowserWindow | null {
+  const host = (contents as any)?.hostWebContents as WebContents | undefined
+  const win = contents ? BrowserWindow.fromWebContents(host && !host.isDestroyed() ? host : contents) : null
+  return win && !win.isDestroyed() ? win : null
+}
+
+/** Native yes/no question. One at a time per page, so a page can't stack dialogs. */
+const asking = new WeakSet<WebContents>()
+async function askUser(contents: WebContents, message: string, detail: string, confirm: string): Promise<boolean> {
+  if (asking.has(contents)) return false
+  asking.add(contents)
+  try {
+    const options: Electron.MessageBoxOptions = {
+      type: 'question',
+      buttons: [confirm, 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      noLink: true,
+      message,
+      detail
+    }
+    const win = dialogParent(contents)
+    const { response } = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+    return response === 0
+  } finally {
+    asking.delete(contents)
+  }
+}
+
+/** Link to another app (mailto:, zoommtg: ...): known schemes only, and only if the user wants it */
+async function allowExternalUrl(contents: WebContents | null, rawUrl: string): Promise<boolean> {
+  let url: URL
+  try {
+    url = new URL(rawUrl)
+  } catch {
+    return false
+  }
+  if (!SAFE_EXTERNAL_PROTOCOLS.has(url.protocol) || rawUrl.length > 8192) return false
+  if (!contents || contents.isDestroyed()) return false
+  if (hasRecentUserInput(contents)) return true
+  // The page did this on its own (no click): ask first
+  return askUser(contents, 'Open another app?', `${contents.getURL().slice(0, 200)}\nwants to open:\n${rawUrl.slice(0, 300)}`, 'Open')
+}
+
+export function openExternalFromPage(contents: WebContents, rawUrl: string): void {
+  allowExternalUrl(contents, rawUrl)
+    .then((ok) => (ok ? shell.openExternal(rawUrl) : undefined))
+    .catch(() => {})
+}
+
 /**
  * Hardens device, sensor, and media permissions: default-deny all sensitive permissions.
  */
@@ -464,7 +538,11 @@ export function lockDownSessionPermissions(ses: Session): void {
     'window-management',
     'local-fonts',
     'screen-wake-lock',
-    'speaker-selection'
+    'speaker-selection',
+    // document.execCommand('paste'): would let pages read the clipboard without any prompt
+    'deprecated-sync-clipboard-read',
+    'payment-handler',
+    'periodic-background-sync'
   ])
 
   // Harmless, user-initiated browser features
@@ -486,12 +564,27 @@ export function lockDownSessionPermissions(ses: Session): void {
     // External protocol launches (link to mailto:, ms-msdt:, search-ms: ...): only known-safe schemes
     if (permission === 'openExternal') {
       const externalURL = (details as { externalURL?: string }).externalURL || ''
+      allowExternalUrl(webContents, externalURL)
+        .then((ok) => {
+          if (!ok) console.warn(`[Security] Blocked external protocol launch: ${externalURL.slice(0, 200)}`)
+          callback(ok)
+        })
+        .catch(() => callback(false))
+      return
+    }
+
+    // A page that was given a file to read now wants to change it: ask, like Chrome does
+    if (permission === 'fileSystem' && (details as { fileAccessType?: string }).fileAccessType === 'writable') {
+      const target = (details as { filePath?: string }).filePath || ''
+      if (!webContents || webContents.isDestroyed()) return callback(false)
+      let site = url
       try {
-        const protocol = new URL(externalURL).protocol
-        if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) return callback(true)
+        site = new URL(details.requestingUrl || url).origin
       } catch {}
-      console.warn(`[Security] Blocked external protocol launch: ${externalURL}`)
-      return callback(false)
+      askUser(webContents, 'Let this site change your files?', `${site}\nwants to save changes to:\n${target}`, 'Allow')
+        .then((ok) => callback(ok))
+        .catch(() => callback(false))
+      return
     }
 
     // Camera, microphone, location, notifications, clipboard, MIDI: ask the user (per site)
@@ -572,12 +665,8 @@ export function setupMainWindowSecurity(mainWindow: BrowserWindow): void {
 
   // 2. Prevent the internal UI shell from navigating away on link click or drag-and-drop
   wc.on('will-navigate', (event, navigationUrl) => {
-    const devServerUrl = process.env['ELECTRON_RENDERER_URL']
-    const isAllowed = devServerUrl
-      ? navigationUrl.startsWith(devServerUrl)
-      : navigationUrl.startsWith('file://') && navigationUrl.includes('renderer')
-
-    if (!isAllowed) {
+    // Dev: HMR may reload the page. Built app: the UI never navigates.
+    if (!devServerUrl() || !isAppUiUrl(navigationUrl)) {
       event.preventDefault()
       console.warn(`[Security] Blocked UI shell navigation to external URL: ${navigationUrl}`)
     }
@@ -621,6 +710,12 @@ export function setupMainWindowSecurity(mainWindow: BrowserWindow): void {
 export function setupWebContentsSecurity(contents: WebContents, mainWindow?: BrowserWindow | null): void {
   // 1. WebRTC leak prevention
   setupWebRTCLeakProtection(contents)
+  trackUserInput(contents)
+  // Links from a private tab's popup must open as private tabs
+  const isPrivate = contents.session === session.fromPartition(PRIVATE_PARTITION)
+
+  // Popups opened by popups get the same guards (without this they had none)
+  contents.on('did-create-window', (popup) => setupWebContentsSecurity(popup.webContents, mainWindow))
 
   // 2. Block navigation to dangerous protocols
   contents.on('will-navigate', (event, navigationUrl) => {
@@ -654,7 +749,7 @@ export function setupWebContentsSecurity(contents: WebContents, mainWindow?: Bro
 
       // Safe OS external protocols
       if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) {
-        shell.openExternal(rawUrl).catch(() => {})
+        openExternalFromPage(contents, rawUrl)
         return { action: 'deny' }
       }
 
@@ -673,14 +768,15 @@ export function setupWebContentsSecurity(contents: WebContents, mainWindow?: Bro
         rawUrl.includes('login') ||
         rawUrl.includes('signin')
 
-      if (isSmallPopup && isAuthFlow) {
+      if (isSmallPopup && isAuthFlow && ['http:', 'https:', 'about:'].includes(protocol)) {
         return {
           action: 'allow',
           overrideBrowserWindowOptions: {
             parent: mainWindow || undefined,
             autoHideMenuBar: true,
             webPreferences: {
-              partition: 'persist:browser-tabs',
+              // Stay in the opener's profile (shared, private or a space profile)
+              session: contents.session,
               nodeIntegration: false,
               nodeIntegrationInWorker: false,
               contextIsolation: true,
@@ -699,7 +795,8 @@ export function setupWebContentsSecurity(contents: WebContents, mainWindow?: Bro
           mainWindow.webContents.send('tabs:open-url', {
             url: rawUrl,
             active: isActive,
-            sourceWebContentsId: contents.id
+            sourceWebContentsId: contents.id,
+            isPrivate
           })
         }
         return { action: 'deny' }
@@ -795,7 +892,7 @@ export const safeStorageVault = {
  * Cleanly wipes cache, localStorage, cookies, IndexedDB, and temporary traces across sessions.
  */
 export async function panicWipeBrowsingData(
-  targetSessions: Session[] = [session.fromPartition('persist:browser-tabs'), session.defaultSession]
+  targetSessions: Session[] = [...getPersistentTabSessions(), session.defaultSession]
 ): Promise<boolean> {
   let allClean = true
 

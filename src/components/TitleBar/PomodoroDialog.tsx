@@ -1,27 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription
-} from '@/components/ui/dialog'
-import {
-  Timer,
-  Play,
-  Pause,
-  RotateCcw,
-  Coffee,
-  Brain,
-  ShieldAlert,
-  X,
-  Plus
-} from 'lucide-react'
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog'
+import { Timer, Play, Pause, RotateCcw, ShieldBan, X, Plus, ChevronDown, Layers } from 'lucide-react'
 import { usePomodoroStore, WORK_TIME, BREAK_TIME, normalizeDomain } from '@/store/usePomodoroStore'
 import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { useSmartStore } from '@/store/useSmartStore'
 import { extractDomain } from '@/lib/domainZoom'
+import { Switch } from '@/components/ui/switch'
+import { ToolHeader, ToolFooter, Segmented, toolDialogClass } from '@/components/ui/tool-dialog'
 import { toast } from 'sonner'
+
+const RING_SIZE = 208
+const RING_STROKE = 8
+const RING_R = (RING_SIZE - RING_STROKE) / 2
+const RING_C = 2 * Math.PI * RING_R
 
 export const PomodoroDialog: React.FC = () => {
   const isOpen = usePomodoroStore((s) => s.isOpen)
@@ -38,11 +30,10 @@ export const PomodoroDialog: React.FC = () => {
   const blockedDomains = usePomodoroStore((s) => s.blockedDomains)
   const setBlockedDomains = usePomodoroStore((s) => s.setBlockedDomains)
   const [newDomain, setNewDomain] = useState('')
+  const [editingSites, setEditingSites] = useState(false)
 
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
-  const activeTabId = useBrowserStore((s) => s.activeTabId)
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
-  const activeTab = activeSpaceId ? tabsBySpace[activeSpaceId]?.find((t) => t.id === activeTabId) : null
+  const activeTab = useBrowserStore((s) => (activeSpaceId ? s.tabsBySpace[activeSpaceId]?.find((t) => t.id === s.activeTabId) ?? null : null))
 
   // Global background timer tick
   useEffect(() => {
@@ -68,7 +59,7 @@ export const PomodoroDialog: React.FC = () => {
     const isDistracting = blockedDomains.some((d) => domain === d || domain.endsWith('.' + d))
     if (isDistracting && lastWarnedDomainRef.current !== domain) {
       lastWarnedDomainRef.current = domain
-      toast.warning('Focus Sprint in progress', {
+      toast.warning('Focus sprint in progress', {
         description: `${domain} is on your block list. New visits are blocked until the sprint ends.`,
         duration: 4000
       })
@@ -85,155 +76,155 @@ export const PomodoroDialog: React.FC = () => {
     setNewDomain('')
   }
 
+  const total = mode === 'work' ? WORK_TIME : BREAK_TIME
+  const progress = Math.min(1, Math.max(0, 1 - timeLeft / total))
+  const started = timeLeft < total
   const minutes = Math.floor(timeLeft / 60)
   const seconds = timeLeft % 60
   const timeFormatted = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+  const isWork = mode === 'work'
+  const ringColor = isWork ? 'hsl(var(--primary))' : 'rgb(16 185 129)'
+  const status = isRunning ? (isWork ? 'Focusing' : 'On a break') : started ? 'Paused' : isWork ? 'Ready to focus' : 'Ready for a break'
 
   return (
     <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogContent className="max-w-md bg-popover/95 dark:bg-[#12141a]/95 backdrop-blur-2xl border border-border shadow-2xl rounded-3xl p-6 text-foreground z-50 select-none">
-        <DialogHeader className="pb-3 border-b border-border/50">
-          <div className="flex items-center justify-between pr-8">
-            <div className="flex items-center gap-2.5">
-              <div className="p-2 rounded-xl bg-primary/10 text-primary border border-primary/20">
-                <Timer className="w-5 h-5" />
-              </div>
-              <div>
-                <DialogTitle className="text-base font-bold">Focus Sprint Timer</DialogTitle>
-                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Deep work sprints with automated rest intervals
-                </DialogDescription>
+      <DialogContent className={`max-w-[400px] ${toolDialogClass}`}>
+        <ToolHeader
+          icon={Timer}
+          tone={isWork ? 'primary' : 'emerald'}
+          title="Focus Timer"
+          description="Work in focused sprints with short breaks in between."
+          TitleAs={DialogTitle}
+          DescriptionAs={DialogDescription}
+        />
+
+        <div className="px-5 pb-5 select-none">
+          <Segmented
+            value={mode}
+            onChange={(m) => setMode(m)}
+            options={[
+              { value: 'work', label: 'Focus', hint: '25 min' },
+              { value: 'break', label: 'Break', hint: '5 min' }
+            ]}
+          />
+
+          {/* Countdown ring */}
+          <div className="relative mx-auto my-6" style={{ width: RING_SIZE, height: RING_SIZE }}>
+            <svg width={RING_SIZE} height={RING_SIZE} className="-rotate-90" aria-hidden>
+              <circle cx={RING_SIZE / 2} cy={RING_SIZE / 2} r={RING_R} fill="none" stroke="hsl(var(--muted))" strokeWidth={RING_STROKE} />
+              <circle
+                cx={RING_SIZE / 2}
+                cy={RING_SIZE / 2}
+                r={RING_R}
+                fill="none"
+                stroke={ringColor}
+                strokeWidth={RING_STROKE}
+                strokeLinecap="round"
+                strokeDasharray={RING_C}
+                strokeDashoffset={RING_C * (1 - progress)}
+                style={{ transition: 'stroke-dashoffset 1s linear, stroke 200ms' }}
+              />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-[52px] leading-none font-semibold tabular-nums tracking-tight text-foreground font-mono">{timeFormatted}</div>
+              <div className="mt-2.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+                <span
+                  className={`w-1.5 h-1.5 rounded-full ${isRunning ? (isWork ? 'bg-primary animate-pulse' : 'bg-emerald-500 animate-pulse') : 'bg-muted-foreground/50'}`}
+                />
+                {status}
               </div>
             </div>
-            <span
-              className={`text-[10px] px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider ${
-                mode === 'work'
-                  ? 'bg-primary/15 text-primary border border-primary/25'
-                  : 'bg-emerald-500/15 text-emerald-500 border border-emerald-500/25'
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              onClick={toggleRunning}
+              className={`flex-1 h-11 rounded-xl flex items-center justify-center gap-2 text-sm font-semibold transition-colors cursor-pointer ${
+                isRunning
+                  ? 'bg-muted hover:bg-muted/80 text-foreground ring-1 ring-border'
+                  : isWork
+                  ? 'bg-primary hover:bg-primary/90 text-primary-foreground'
+                  : 'bg-emerald-500 hover:bg-emerald-500/90 text-white'
               }`}
             >
-              {mode === 'work' ? 'Deep Work' : 'Break'}
-            </span>
-          </div>
-        </DialogHeader>
-
-        {/* Big Countdown Display */}
-        <div className="py-6 text-center">
-          <div className="text-5xl font-extrabold font-mono tracking-tight text-foreground tabular-nums">
-            {timeFormatted}
-          </div>
-          <div className="text-xs text-muted-foreground mt-2 flex items-center justify-center gap-1.5">
-            {mode === 'work' ? (
-              <>
-                <Brain className="w-3.5 h-3.5 text-primary" /> 25-minute sprint
-              </>
-            ) : (
-              <>
-                <Coffee className="w-3.5 h-3.5 text-emerald-500" /> 5-minute recovery
-              </>
-            )}
+              {isRunning ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-current" />}
+              {isRunning ? 'Pause' : started ? 'Resume' : isWork ? 'Start focus' : 'Start break'}
+            </button>
+            <button
+              onClick={resetTimer}
+              disabled={!started}
+              title="Reset timer"
+              aria-label="Reset timer"
+              className="w-11 h-11 rounded-xl flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted ring-1 ring-border transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default disabled:hover:bg-transparent"
+            >
+              <RotateCcw className="w-4 h-4" />
+            </button>
           </div>
         </div>
 
-        {/* Action Controls */}
-        <div className="flex items-center justify-center gap-2 pb-2">
-          <button
-            onClick={() => setMode('work')}
-            className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              mode === 'work'
-                ? 'bg-primary text-primary-foreground shadow-sm'
-                : 'hover:bg-accent text-muted-foreground hover:text-foreground border border-border/50'
-            }`}
-          >
-            25m Work Sprint
-          </button>
-          <button
-            onClick={() => setMode('break')}
-            className={`px-4 py-1.5 rounded-xl text-xs font-semibold transition-all ${
-              mode === 'break'
-                ? 'bg-emerald-500 text-white shadow-sm'
-                : 'hover:bg-accent text-muted-foreground hover:text-foreground border border-border/50'
-            }`}
-          >
-            5m Rest Break
-          </button>
-        </div>
-
-        <div className="flex items-center justify-center gap-2.5 mt-2 pt-4 border-t border-border/40">
-          <button
-            onClick={toggleRunning}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold transition-all shadow-sm ${
-              isRunning
-                ? 'bg-accent hover:bg-accent/80 text-foreground border border-border'
-                : 'bg-primary hover:bg-primary/90 text-primary-foreground'
-            }`}
-          >
-            {isRunning ? (
-              <>
-                <Pause className="w-4 h-4" />
-                <span>Pause Sprint</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-4 h-4 fill-current" />
-                <span>Start Focus Sprint</span>
-              </>
-            )}
-          </button>
-
-          <button
-            onClick={resetTimer}
-            title="Reset timer"
-            className="p-2.5 rounded-xl hover:bg-accent text-muted-foreground hover:text-foreground border border-border/60 transition-colors"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-        </div>
-
-        {/* Distraction Blocker Setting */}
-        <div className="mt-3 pt-3 border-t border-border/40 flex items-center justify-between text-xs">
-          <label htmlFor="tct-focus-block" className="flex items-center gap-2 cursor-pointer text-muted-foreground hover:text-foreground select-none">
-            <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
-            <span>Block distracting sites during focus sprints</span>
-          </label>
-          <input
-            id="tct-focus-block"
-            type="checkbox"
-            checked={blockDistractions}
-            onChange={(e) => setBlockDistractions(e.target.checked)}
-            className="rounded border-border text-primary focus:ring-primary cursor-pointer w-4 h-4"
-          />
-        </div>
-        {blockDistractions && (
-          <div className="mt-2 space-y-2">
-            <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto" data-lenis-prevent>
-              {blockedDomains.map((d) => (
-                <span key={d} className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 rounded-md bg-muted border border-border text-[11px] text-foreground">
-                  {d}
-                  <button
-                    onClick={() => setBlockedDomains(blockedDomains.filter((x) => x !== d))}
-                    className="p-0.5 rounded hover:bg-background text-muted-foreground hover:text-foreground"
-                    aria-label={`Remove ${d}`}
-                  >
-                    <X className="w-2.5 h-2.5" />
-                  </button>
-                </span>
-              ))}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <input
-                value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && addDomain()}
-                placeholder="Add a site, e.g. news.ycombinator.com"
-                className="flex-1 h-7 px-2 rounded-md bg-background border border-border text-[11px] outline-none focus:border-primary"
-              />
-              <button onClick={addDomain} className="h-7 px-2 rounded-md bg-muted hover:bg-accent text-[11px] flex items-center gap-1 border border-border">
-                <Plus className="w-3 h-3" /> Add
+        {/* Distraction blocking */}
+        <ToolFooter className="space-y-3">
+          <div className="flex items-center gap-3">
+            <ShieldBan className="w-4 h-4 text-amber-500 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <div className="text-[13px] font-medium text-foreground">Block distracting sites</div>
+              <button
+                onClick={() => setEditingSites((v) => !v)}
+                disabled={!blockDistractions}
+                className="text-[11.5px] text-muted-foreground hover:text-foreground flex items-center gap-1 cursor-pointer disabled:cursor-default disabled:hover:text-muted-foreground"
+              >
+                {blockedDomains.length} site{blockedDomains.length === 1 ? '' : 's'} during focus sprints
+                {blockDistractions && <ChevronDown className={`w-3 h-3 transition-transform ${editingSites ? 'rotate-180' : ''}`} />}
               </button>
             </div>
+            <Switch checked={blockDistractions} onCheckedChange={setBlockDistractions} aria-label="Block distracting sites" />
           </div>
-        )}
+
+          {blockDistractions && editingSites && (
+            <div className="space-y-2 animate-in fade-in slide-in-from-top-1 duration-150">
+              <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto" data-lenis-prevent>
+                {blockedDomains.map((d) => (
+                  <span key={d} className="inline-flex items-center gap-1 h-6 pl-2 pr-1 rounded-md bg-background ring-1 ring-border text-[11.5px] text-foreground">
+                    {d}
+                    <button
+                      onClick={() => setBlockedDomains(blockedDomains.filter((x) => x !== d))}
+                      className="w-4 h-4 rounded flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted cursor-pointer"
+                      aria-label={`Remove ${d}`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={newDomain}
+                  onChange={(e) => setNewDomain(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && addDomain()}
+                  placeholder="Add a site, e.g. news.ycombinator.com"
+                  className="flex-1 h-8 px-2.5 rounded-lg bg-background ring-1 ring-border text-xs text-foreground placeholder:text-muted-foreground outline-none focus:ring-primary"
+                />
+                <button
+                  onClick={addDomain}
+                  className="h-8 px-3 rounded-lg bg-background hover:bg-muted ring-1 ring-border text-xs font-medium flex items-center gap-1 cursor-pointer"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Add
+                </button>
+              </div>
+            </div>
+          )}
+
+          <button
+            onClick={() => {
+              setIsOpen(false)
+              useSmartStore.getState().openSmartTools('focus')
+            }}
+            className="w-full flex items-center gap-2 text-[11.5px] text-muted-foreground hover:text-foreground cursor-pointer"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            Different rules for each space…
+          </button>
+        </ToolFooter>
       </DialogContent>
     </Dialog>
   )

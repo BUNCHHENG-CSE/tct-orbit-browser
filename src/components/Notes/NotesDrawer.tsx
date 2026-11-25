@@ -12,11 +12,13 @@ import {
   Check,
   Layers,
   Copy,
-  Trash2
+  Trash2,
+  Clock
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/ipc'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { useMeetingStore } from '@/store/useMeetingStore'
 import { useSpaces } from '@/hooks/useSpaces'
 import { modKey } from '@/lib/platform'
 
@@ -25,7 +27,6 @@ export const NotesDrawer: React.FC = () => {
   const setIsOpen = useBrowserStore((s) => s.setNotesDrawerOpen)
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
 
   const { activeSpace } = useSpaces()
   const [content, setContent] = useState('')
@@ -79,6 +80,58 @@ export const NotesDrawer: React.FC = () => {
     return () => window.removeEventListener('tct:clip-to-notes', onClip)
   }, [])
 
+  // Append text to a space's notes (e.g. "Links from this meeting"). Works for any space;
+  // when it's the open one, the drawer content is updated too.
+  useEffect(() => {
+    const onAppend = async (e: Event) => {
+      const { spaceId, text } = (e as CustomEvent).detail || {}
+      if (!spaceId || !text || !api.notes?.save) return
+      const isCurrent = spaceId === currentSpaceRef.current
+      if (isCurrent && saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      try {
+        const prev = isCurrent ? contentRef.current : (await api.notes.get(spaceId)) || ''
+        const sep = !prev ? '' : prev.endsWith('\n\n') ? '' : prev.endsWith('\n') ? '\n' : '\n\n'
+        const next = `${prev}${sep}${String(text)}`
+        if (isCurrent) setContent(next)
+        await api.notes.save(spaceId, next)
+      } catch {
+        toast.error('Could not save to notes')
+      }
+    }
+    window.addEventListener('tct:append-to-notes', onAppend)
+    return () => window.removeEventListener('tct:append-to-notes', onAppend)
+  }, [])
+
+  // Meeting mode: one-click timestamps ("[12:34] decided X"), minutes since the call started
+  const meeting = useMeetingStore((s) => s.active)
+  const meetingStarted = !!meeting && Date.now() >= meeting.startAt
+  const insertTimestamp = () => {
+    const el = textareaRef.current
+    let stamp: string
+    if (meeting && Date.now() >= meeting.startAt) {
+      const secs = Math.floor((Date.now() - meeting.startAt) / 1000)
+      const h = Math.floor(secs / 3600)
+      const m = Math.floor((secs % 3600) / 60)
+      const sec = secs % 60
+      stamp = h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
+    } else {
+      stamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    }
+    const pos = el ? el.selectionStart : content.length
+    const atLineStart = pos === 0 || content[pos - 1] === '\n'
+    const insert = `${atLineStart ? '' : '\n'}**[${stamp}]** `
+    const next = content.slice(0, pos) + insert + content.slice(pos)
+    handleContentChange(next)
+    setTimeout(() => {
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(pos + insert.length, pos + insert.length)
+    }, 10)
+  }
+
   // Save content debounced
   const handleContentChange = (newVal: string) => {
     setContent(newVal)
@@ -126,7 +179,7 @@ export const NotesDrawer: React.FC = () => {
       return
     }
 
-    const currentTabs = tabsBySpace[activeSpaceId] || []
+    const currentTabs = useBrowserStore.getState().tabsBySpace[activeSpaceId] || []
     const activeTab = currentTabs.find((t) => t.id === activeTabId)
     if (!activeTab || !activeTab.url || activeTab.url === 'about:blank') {
       toast.info('No valid tab URL to insert')
@@ -282,6 +335,17 @@ export const NotesDrawer: React.FC = () => {
           </button>
         </div>
 
+        {meeting && (
+          <button
+            onClick={insertTimestamp}
+            className="flex items-center gap-1 px-2 py-1 rounded-md bg-rose-500/10 hover:bg-rose-500/20 text-rose-500 text-[11px] font-semibold transition-colors cursor-pointer"
+            title={meetingStarted ? 'Insert the time since the meeting started (Alt+T)' : 'Insert the current time (Alt+T)'}
+          >
+            <Clock className="w-3 h-3" />
+            <span>Time</span>
+          </button>
+        )}
+
         {/* Insert Current Tab Link */}
         <button
           onClick={handleInsertTabLink}
@@ -299,6 +363,12 @@ export const NotesDrawer: React.FC = () => {
           ref={textareaRef}
           value={content}
           onChange={(e) => handleContentChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (meeting && e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 't') {
+              e.preventDefault()
+              insertTimestamp()
+            }
+          }}
           placeholder={`Jot down ideas, to-do items, code snippets, or links for ${activeSpace?.name || 'this space'}...\n\n- [ ] Task 1\n- [ ] Task 2`}
           spellCheck={false}
           className="w-full h-full flex-1 bg-transparent border-none outline-none resize-none text-foreground text-xs leading-relaxed font-sans placeholder:text-muted-foreground/60 select-text p-1"

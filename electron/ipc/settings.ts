@@ -43,7 +43,11 @@ export function register(ipcMain: IpcMain): void {
   })
 
   // Update settings
-  secureHandle(ipcMain, 'settings:update', Schemas.settingsUpdate, async (_, data: UpdateSettingsData) => {
+  secureHandle(ipcMain, 'settings:update', Schemas.settingsUpdate, async (_, input: UpdateSettingsData) => {
+    // Known settings only. A new download folder comes from the system folder picker
+    // (downloads:select-directory); here it can only be kept or reset.
+    const data = Schemas.settingsUpdate.parse(input) as UpdateSettingsData
+    if (data.downloadPath && data.downloadPath !== localStorageService.getSettings().downloadPath) delete data.downloadPath
     if (data.theme || data.accentPreset || data.webColorScheme) {
       themeManager.setTheme({
         ...(data.theme ? { mode: data.theme as any } : {}),

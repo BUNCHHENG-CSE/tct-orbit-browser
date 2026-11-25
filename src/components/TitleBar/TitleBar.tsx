@@ -21,6 +21,8 @@ import {
 } from 'lucide-react'
 import type { BookmarkItem } from '@/types/api'
 import { api } from '@/lib/ipc'
+import { isPrivateWindow } from '@/lib/privateWindow'
+import { PrivatePill } from '@/components/PrivateWindow/PrivateWindowBadge'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSettings } from '@/hooks/useSettings'
 import { isMac, modKey } from '@/lib/platform'
@@ -33,13 +35,24 @@ import {
   type SearchEngineId
 } from '@/lib/searchEngines'
 import { resolveIsDark } from '@/lib/theme'
-import browserLogo from '@/assets/logo-sm.png'
 import { SiteShieldPopover } from './SiteShieldPopover'
 import { SiteInfoPopover } from './SiteInfoPopover'
 import { BookmarkPopover } from './BookmarkPopover'
 import { SplitViewPopover } from './SplitViewPopover'
 import { ToolsMenu } from './ToolsMenu'
+import { BrandMark } from './BrandMark'
+import { FavoritesPopover } from '@/components/Favorites/FavoritesPopover'
+import { PinnedHeaderTools } from './PinnedHeaderTools'
+import { ExtensionsPopover, PinnedExtensions } from './ExtensionsPopover'
 import { getDomainZoom, setDomainZoom } from '@/lib/domainZoom'
+import { openNewTab, isStartPageUrl } from '@/lib/startPage'
+import { MeetingChip } from '../Meeting/MeetingChip'
+import { Puzzle as PuzzleIcon } from 'lucide-react'
+import { useSearchSuggestions } from '@/hooks/useSearchSuggestions'
+import { isStoreDetailUrl } from '@/lib/extensionStores'
+
+/** The start page is internal: show an empty address bar instead of its orbit:// URL */
+const addressFor = (url: string | undefined): string => (url && !isStartPageUrl(url) ? url : '')
 
 interface TitleBarProps {
   spaceName?: string
@@ -55,12 +68,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   const canGoForward = useBrowserStore((s) => s.canGoForward)
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
-  const appInfo = useBrowserStore((s) => s.appInfo)
 
-  const activeTab = activeSpaceId ? tabsBySpace[activeSpaceId]?.find((t) => t.id === activeTabId) : null
-  const urlInfo = getDisplayUrlInfo(activeTab?.url || '')
+  // Only the active tab: re-renders when it changes, not when any tab anywhere changes
+  const activeTab = useBrowserStore((s) => (activeSpaceId ? s.tabsBySpace[activeSpaceId]?.find((t) => t.id === s.activeTabId) ?? null : null))
+  const urlInfo = getDisplayUrlInfo(addressFor(activeTab?.url))
   // Private tabs always search with DuckDuckGo (no account, no search history profiling)
   const isPrivateTab = !!activeTab?.isPrivate
   const isSecure = urlInfo.isSecure
@@ -179,7 +191,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   // Keep input synchronized with active tab URL when not editing
   useEffect(() => {
     if (!isFocused) {
-      setInputValue(activeTab?.url || '')
+      setInputValue(addressFor(activeTab?.url))
     }
   }, [activeTab?.url, isFocused])
 
@@ -279,7 +291,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   const handleBack = () => window.dispatchEvent(new CustomEvent('tct:webview-back'))
   const handleForward = () => window.dispatchEvent(new CustomEvent('tct:webview-forward'))
   const handleReload = () => window.dispatchEvent(new CustomEvent('tct:webview-reload'))
-  const handleNewTab = () => setCommandBarOpen(true, '', 'new-tab')
+  const handleNewTab = () => void openNewTab()
+  const topBarTabs = settings?.tabLayout === 'topbar'
+
 
   // Direct navigation handler (Enter key or suggestion click)
   const handleNavigateTo = async (targetUrl: string, title?: string) => {
@@ -356,24 +370,24 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
-      if (suggestions.length === 0) return
+      if (allSuggestions.length === 0) return
       e.preventDefault()
       setSelectedIndex((i) => {
-        const max = suggestions.length - 1
+        const max = allSuggestions.length - 1
         if (e.key === 'ArrowDown') return i >= max ? -1 : i + 1
         return i <= -1 ? max : i - 1
       })
       return
     }
     if (e.key === 'Enter') {
-      if (selectedIndex >= 0 && suggestions[selectedIndex]) {
-        activateSuggestion(suggestions[selectedIndex])
+      if (selectedIndex >= 0 && allSuggestions[selectedIndex]) {
+        activateSuggestion(allSuggestions[selectedIndex])
       } else {
         handleSubmit()
       }
     } else if (e.key === 'Escape') {
       setIsFocused(false)
-      setInputValue(activeTab?.url || '')
+      setInputValue(addressFor(activeTab?.url))
       inputRef.current?.blur()
     }
   }
@@ -383,18 +397,29 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
     : (settings?.defaultSearchEngine as SearchEngineId) || 'duckduckgo'
   const engineMeta = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
+  // Live search-engine suggestions first (like Chrome/Edge), then open tabs, bookmarks, history
+  const engineSuggestions = useSearchSuggestions(inputValue, currentEngine, { enabled: isFocused, isPrivate: isPrivateTab })
+  const allSuggestions: Suggestion[] = [
+    ...engineSuggestions.map((text) => ({
+      kind: 'search' as const,
+      title: text,
+      url: buildSearchUrl(text, currentEngine, resolveIsDark(settings?.theme))
+    })),
+    ...suggestions
+  ]
+
   return (
     <div
       onDoubleClick={handleMaximize}
-      className="h-10 w-full flex items-center justify-between select-none app-drag bg-chrome border-b border-border text-xs text-muted-foreground z-50 px-2 gap-2"
+      className="relative h-10 w-full flex items-center justify-between select-none app-drag bg-chrome border-b border-border text-xs text-muted-foreground z-50 px-2 gap-2"
     >
       {/* Left: macOS traffic lights space + Sidebar toggle + App logo + Space badge + Navigation */}
       <div className="flex items-center gap-1.5 h-full app-no-drag shrink-0">
         {/* On macOS: Reserve traffic lights zone so sidebar collapse button doesn't collide */}
-        {isMac && <div className="w-[74px] h-full shrink-0 app-drag" />}
+        {isMac && !topBarTabs && <div className="w-[74px] h-full shrink-0 app-drag" />}
 
-        {/* Sidebar Collapse Toggle */}
-        <div className="flex items-center justify-center w-7">
+        {/* Sidebar Collapse Toggle (not used when tabs are in the top bar) */}
+        <div className={`flex items-center justify-center w-7 ${settings?.tabLayout === 'topbar' ? 'hidden' : ''}`}>
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-colors outline-none focus:outline-none"
@@ -404,31 +429,15 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           </button>
         </div>
 
-        {/* Logo */}
-        <div className="flex items-center gap-1.5 font-semibold text-foreground shrink-0">
-          <img
-            src={browserLogo}
-            alt="TCT Orbit"
-            className="w-4 h-4 rounded-md object-contain shadow-xs"
-          />
-          <span className="tracking-wide hidden xl:inline text-[13px] font-semibold">TCT Orbit</span>
-          {appInfo?.channel && appInfo.channel !== 'stable' && (
-            <span
-              className={`h-3.5 px-1.5 rounded-full text-[8px] font-semibold uppercase tracking-wider inline-flex items-center justify-center leading-none shrink-0 ${
-                appInfo.channel === 'nova'
-                  ? 'bg-purple-500/15 text-purple-400 border border-purple-500/25'
-                  : appInfo.channel === 'deep'
-                  ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/25'
-                  : 'bg-amber-500/15 text-amber-400 border border-amber-500/25'
-              }`}
-            >
-              {appInfo.channel}
-            </span>
-          )}
-        </div>
+        {/* Logo (shown in the tab row instead when tabs are on top) */}
+        {!topBarTabs && <BrandMark />}
 
-        {/* Space indicator */}
-        <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted border border-border shrink-0 max-w-[110px] hidden sm:flex">
+        {/* Space indicator (the tab row shows the space when tabs are on top) */}
+        <div
+          className={`items-center gap-1.5 px-2 py-0.5 rounded-full bg-muted border border-border shrink-0 max-w-[110px] ${
+            topBarTabs ? 'hidden' : 'hidden sm:flex'
+          }`}
+        >
           <div
             className="w-1.5 h-1.5 rounded-full shrink-0"
             style={{ backgroundColor: spaceColor }}
@@ -437,7 +446,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         </div>
 
         {/* Divider */}
-        <div className="w-px h-3.5 bg-border mx-0.5 shrink-0 hidden md:block" />
+        <div className={`w-px h-3.5 bg-border mx-0.5 shrink-0 ${topBarTabs ? 'hidden' : 'hidden md:block'}`} />
 
         {/* Navigation buttons: Back, Forward, Reload */}
         <div className="flex items-center gap-0.5 shrink-0">
@@ -473,7 +482,11 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         className="flex-1 flex items-center justify-center min-w-0 max-w-4xl px-1 relative app-no-drag"
       >
         <div
-          onClick={() => {
+          onClick={(e) => {
+            // Buttons inside the address bar (star, shield, site info…) and their popups must not
+            // focus the input: focusing hides those buttons and closes what they just opened
+            const target = e.target as HTMLElement
+            if (target.closest('button, a, select, [role="dialog"], [role="menu"], [data-no-omnibox-focus]')) return
             if (!isFocused && inputRef.current) {
               inputRef.current.focus()
               inputRef.current.select()
@@ -513,15 +526,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
             type="text"
             value={
               isFocused
-                ? selectedIndex >= 0 && suggestions[selectedIndex]
-                  ? suggestions[selectedIndex].url
+                ? selectedIndex >= 0 && allSuggestions[selectedIndex]
+                  ? allSuggestions[selectedIndex].kind === 'search'
+                    ? allSuggestions[selectedIndex].title
+                    : allSuggestions[selectedIndex].url
                   : inputValue
                 : urlInfo.displayText || inputValue
             }
             onChange={(e) => setInputValue(e.target.value)}
             onFocus={() => {
               setIsFocused(true)
-              setInputValue(activeTab?.url || '')
+              setInputValue(addressFor(activeTab?.url))
               setTimeout(() => inputRef.current?.select(), 10)
             }}
             onBlur={(e) => {
@@ -584,6 +599,17 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           )}
 
           {/* Per-site Privacy & Adblock Shield Control */}
+          {/* On an extension's store page: install it here (the store's own button only works in Chrome/Edge) */}
+          {!isFocused && isStoreDetailUrl(activeTab?.url) && (
+            <button
+              onClick={() => window.dispatchEvent(new CustomEvent('tct:install-extension', { detail: { url: activeTab?.url } }))}
+              className="h-6 px-2 mr-1 flex items-center gap-1 rounded-md bg-primary text-primary-foreground text-[11px] font-semibold hover:bg-primary/90 shrink-0 shadow-sm"
+              title="Install this extension in TCT Orbit"
+            >
+              <PuzzleIcon className="w-3 h-3" />
+              Add to TCT Orbit
+            </button>
+          )}
           {!isFocused && <SiteShieldPopover url={activeTab?.url} />}
 
           {/* Bookmark Tab Control */}
@@ -646,10 +672,41 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
               </div>
             )}
 
-            {/* Open tabs, bookmarks & history matches */}
-            {suggestions.length > 0 && <div className="my-1 border-t border-border" />}
-            {suggestions.map((sug, i) => {
+            {/* Search-engine suggestions, then open tabs, bookmarks & history matches */}
+            {allSuggestions.length > 0 && <div className="my-1 border-t border-border" />}
+            {allSuggestions.map((sug, i) => {
+              if (sug.kind === 'search') {
+                const typed = inputValue.trim()
+                const startsWith = sug.title.toLowerCase().startsWith(typed.toLowerCase())
+                return (
+                  <div
+                    key={`search-${sug.title}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault()
+                      activateSuggestion(sug)
+                    }}
+                    onMouseEnter={() => setSelectedIndex(i)}
+                    className={`flex items-center gap-2.5 px-3.5 py-1.5 cursor-pointer transition-colors ${
+                      i === selectedIndex ? 'bg-accent' : 'hover:bg-accent'
+                    }`}
+                  >
+                    <Search className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+                    <span className="truncate flex-1 text-foreground">
+                      {startsWith ? (
+                        <>
+                          {sug.title.slice(0, typed.length)}
+                          <strong className="font-semibold">{sug.title.slice(typed.length)}</strong>
+                        </>
+                      ) : (
+                        sug.title
+                      )}
+                    </span>
+                    {i === selectedIndex && <span className="text-[10.5px] text-muted-foreground shrink-0">{engineMeta.name}</span>}
+                  </div>
+                )
+              }
               const Icon = sug.kind === 'tab' ? AppWindow : sug.kind === 'bookmark' ? Star : HistoryIcon
+              const firstLocal = i === engineSuggestions.length && engineSuggestions.length > 0
               return (
                 <div
                   key={`${sug.kind}-${sug.url}`}
@@ -660,7 +717,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
                   onMouseEnter={() => setSelectedIndex(i)}
                   className={`flex items-center gap-2.5 px-3.5 py-1.5 cursor-pointer transition-colors ${
                     i === selectedIndex ? 'bg-accent' : 'hover:bg-accent'
-                  }`}
+                  } ${firstLocal ? 'mt-1 border-t border-border pt-2' : ''}`}
                 >
                   <Icon
                     className={`w-3.5 h-3.5 shrink-0 ${
@@ -683,16 +740,25 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
       <div className="flex items-center gap-1 app-no-drag shrink-0">
         <button
           onClick={handleNewTab}
-          className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+          className={`w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer ${
+            topBarTabs ? 'hidden' : ''
+          }`}
           title={`New Tab (${modKey}+T)`}
         >
           <Plus className="w-3.5 h-3.5" />
         </button>
 
+        <PinnedExtensions />
+        <PinnedHeaderTools />
+
+        <MeetingChip />
+        <FavoritesPopover />
+        <ExtensionsPopover />
         <SplitViewPopover />
+        {isPrivateWindow && <PrivatePill />}
         <ToolsMenu hasActiveDownload={hasActiveDownload} />
 
-        {!isMac && (
+        {!isMac && !topBarTabs && (
           <div className="flex items-center gap-0.5 pl-1">
             <button
               onClick={handleMinimize}

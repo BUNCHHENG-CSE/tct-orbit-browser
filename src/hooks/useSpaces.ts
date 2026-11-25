@@ -48,7 +48,10 @@ export function useSpaces() {
 
   const updateSpace = async (id: string, data: UpdateSpaceData): Promise<Space> => {
     try {
-      updateSpaceInStore(id, data)
+      // Profile isolation is applied only after the main process saved it: webviews remount
+      // with the new partition, which the main process accepts only once the space is isolated.
+      const { isolated: _isolated, ...optimistic } = data
+      updateSpaceInStore(id, optimistic)
       const updated = await api.spaces.update(id, data)
       updateSpaceInStore(id, updated)
       return updated

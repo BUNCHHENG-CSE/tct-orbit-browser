@@ -6,7 +6,7 @@ import {
   webContents,
   session,
   type IpcMain,
-  type BrowserWindow,
+  BrowserWindow,
   type Rectangle
 } from 'electron'
 import fs from 'fs'
@@ -15,17 +15,20 @@ import { register as registerTabs } from './tabs'
 import { register as registerSpaces } from './spaces'
 import { register as registerSettings } from './settings'
 import { register as registerPrivacy } from './privacy'
-import { register as registerDownloads } from './downloads'
+import { register as registerDownloads, rememberExportedFile } from './downloads'
 import { register as registerBackup } from './backup'
 import { register as registerHistory } from './history'
 import { register as registerNotes } from './notes'
 import { register as registerBookmarks } from './bookmarks'
 import { register as registerSite } from './site'
 import { register as registerFeatures } from './features'
+import { register as registerBrowserFeatures } from './browserFeatures'
+import { register as registerSmart } from './smart'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
 import { secureHandle, secureOn, Schemas } from '../security'
+import { getPersistentTabSessions } from '../sessions'
 
 export function registerAllIpc(
   ipcMain: IpcMain,
@@ -43,6 +46,8 @@ export function registerAllIpc(
   registerBookmarks(ipcMain)
   registerSite(ipcMain)
   registerFeatures(ipcMain, getMainWindow)
+  registerBrowserFeatures(ipcMain, getMainWindow)
+  registerSmart(ipcMain)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning
@@ -64,14 +69,16 @@ export function registerAllIpc(
     }
   })
 
-  // Window controls
-  secureHandle(ipcMain, 'window:minimize', null, () => {
-    const win = getMainWindow()
+  // Window controls act on the window that asked (main or private window)
+  const senderWindow = (event: { sender: Electron.WebContents }) => BrowserWindow.fromWebContents(event.sender) ?? getMainWindow()
+
+  secureHandle(ipcMain, 'window:minimize', null, (event) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed()) win.minimize()
   })
 
-  secureHandle(ipcMain, 'window:maximize', null, () => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:maximize', null, (event) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed()) {
       if (win.isMaximized()) {
         win.unmaximize()
@@ -81,25 +88,25 @@ export function registerAllIpc(
     }
   })
 
-  secureHandle(ipcMain, 'window:close', null, () => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:close', null, (event) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed()) win.close()
   })
 
-  secureHandle(ipcMain, 'window:isMaximized', null, () => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:isMaximized', null, (event) => {
+    const win = senderWindow(event)
     return win && !win.isDestroyed() ? win.isMaximized() : false
   })
 
-  secureHandle(ipcMain, 'window:setTitle', Schemas.windowSetTitle, (_, title: string) => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:setTitle', Schemas.windowSetTitle, (event, title: string) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed() && typeof title === 'string') {
       win.setTitle(title)
     }
   })
 
-  secureHandle(ipcMain, 'window:toggleFullScreen', null, () => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:toggleFullScreen', null, (event) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed()) {
       const isFull = win.isFullScreen()
       win.setFullScreen(!isFull)
@@ -108,13 +115,13 @@ export function registerAllIpc(
     return false
   })
 
-  secureHandle(ipcMain, 'window:isFullScreen', null, () => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:isFullScreen', null, (event) => {
+    const win = senderWindow(event)
     return win && !win.isDestroyed() ? win.isFullScreen() : false
   })
 
-  secureHandle(ipcMain, 'window:setFullScreen', Schemas.windowSetFullScreen, (_, flag: boolean) => {
-    const win = getMainWindow()
+  secureHandle(ipcMain, 'window:setFullScreen', Schemas.windowSetFullScreen, (event, flag: boolean) => {
+    const win = senderWindow(event)
     if (win && !win.isDestroyed()) {
       win.setFullScreen(flag)
       return flag
@@ -151,7 +158,10 @@ export function registerAllIpc(
       const cpuPercent = Math.round((metric.cpu.percentCPUUsage || 0) * 10) / 10
 
       const wcInfo = wcByPid.get(metric.pid)
-      const isTab = metric.type === 'Tab' || (wcInfo && wcInfo.type === 'webview')
+      // A web page tab = a <webview>. Chromium also reports the browser's own interface as a
+      // "Tab" renderer (webContents type 'window'): that is TCT Orbit itself, not a page.
+      const isAppUi = wcInfo?.type === 'window'
+      const isTab = wcInfo?.type === 'webview'
 
       return {
         pid: metric.pid,
@@ -161,7 +171,13 @@ export function registerAllIpc(
         title: wcInfo?.title,
         url: wcInfo?.url,
         webContentsId: wcInfo?.id,
-        isTab: !!isTab
+        isTab: !!isTab,
+        isAppUi,
+        // Renderer with no page attached: service worker, extension page or Chromium's spare renderer
+        isWorker: metric.type === 'Tab' && !wcInfo,
+        // Only web page tabs can be ended: ending the GPU / network / main process or the
+        // interface just crashes or restarts it and frees nothing
+        killable: wcInfo?.type === 'webview'
       }
     })
 
@@ -177,26 +193,22 @@ export function registerAllIpc(
   })
 
   secureHandle(ipcMain, 'system:kill-process', Schemas.processKill, async (_, { pid, webContentsId }: { pid?: number; webContentsId?: number }) => {
+    // Only web page tabs (<webview> renderers) may be ended. Never process.kill() an arbitrary
+    // PID: that could end the GPU / network service, the interface, or another program entirely.
+    const isWebPage = (wc: Electron.WebContents | undefined | null): wc is Electron.WebContents =>
+      !!wc && !wc.isDestroyed() && wc.getType() === 'webview'
     try {
       if (webContentsId) {
         const wc = webContents.fromId(webContentsId)
-        if (wc && !wc.isDestroyed()) {
-          wc.forcefullyCrashRenderer()
-          return true
-        }
+        if (!isWebPage(wc)) return false
+        wc.forcefullyCrashRenderer()
+        return true
       }
       if (pid) {
-        const allWcs = webContents.getAllWebContents()
-        for (const wc of allWcs) {
-          if (!wc.isDestroyed() && wc.getOSProcessId() === pid) {
-            wc.forcefullyCrashRenderer()
-            return true
-          }
-        }
-        if (pid !== process.pid) {
-          process.kill(pid)
-          return true
-        }
+        const wc = webContents.getAllWebContents().find((w) => isWebPage(w) && w.getOSProcessId() === pid)
+        if (!wc) return false
+        wc.forcefullyCrashRenderer()
+        return true
       }
     } catch (err) {
       console.error('[IPC system:kill-process] Error killing process:', err)
@@ -210,9 +222,10 @@ export function registerAllIpc(
       await session.defaultSession.clearCache()
       session.defaultSession.clearHostResolverCache()
 
-      const tabSession = session.fromPartition('persist:browser-tabs')
-      await tabSession.clearCache()
-      tabSession.clearHostResolverCache()
+      for (const tabSession of getPersistentTabSessions()) {
+        await tabSession.clearCache()
+        tabSession.clearHostResolverCache()
+      }
 
       const allWcs = webContents.getAllWebContents()
       for (const wc of allWcs) {
@@ -244,9 +257,14 @@ export function registerAllIpc(
   })
 
   // DevTools docked and inspect controls
-  secureHandle(ipcMain, 'devtools:open', Schemas.devtoolsOpen, async (_, { webContentsId, bounds }: { webContentsId?: number; bounds?: Rectangle }) => {
+  secureHandle(ipcMain, 'devtools:open', Schemas.devtoolsOpen, async (event, { webContentsId, bounds }: { webContentsId?: number; bounds?: Rectangle }) => {
     if (webContentsId) {
       const wc = webContents.fromId(webContentsId)
+      const fromWin = BrowserWindow.fromWebContents(event.sender)
+      if (wc && !wc.isDestroyed() && fromWin && fromWin !== getMainWindow()) {
+        wc.openDevTools({ mode: 'detach' })
+        return
+      }
       if (wc && !wc.isDestroyed()) devtoolsManager.openDocked(wc, bounds)
     }
   })
@@ -260,6 +278,10 @@ export function registerAllIpc(
 
   secureHandle(ipcMain, 'devtools:update-bounds', Schemas.devtoolsBounds, async (_, bounds: Rectangle) => {
     devtoolsManager.updateBounds(bounds)
+  })
+
+  secureHandle(ipcMain, 'devtools:overlay-rects', Schemas.devtoolsOverlayRects, async (_, rects: Rectangle[]) => {
+    devtoolsManager.setOverlayRects(rects)
   })
 
   secureHandle(ipcMain, 'devtools:detach', null, async () => {
@@ -308,9 +330,9 @@ export function registerAllIpc(
   )
 
   // Save webpage as HTML complete
-  secureHandle(ipcMain, 'page:save-as', Schemas.webContentsTarget, async (_, { webContentsId }: { webContentsId: number }) => {
+  secureHandle(ipcMain, 'page:save-as', Schemas.webContentsTarget, async (event, { webContentsId }: { webContentsId: number }) => {
     const wc = webContents.fromId(webContentsId)
-    const win = getMainWindow()
+    const win = senderWindow(event)
     if (wc && win && !wc.isDestroyed() && !win.isDestroyed()) {
       try {
         const title = (wc.getTitle() || 'webpage').replace(/[/\\?%*:|"<>]/g, '_')
@@ -333,9 +355,9 @@ export function registerAllIpc(
   })
 
   // Save webpage as PDF
-  secureHandle(ipcMain, 'page:save-pdf', Schemas.webContentsTarget, async (_, { webContentsId }: { webContentsId: number }) => {
+  secureHandle(ipcMain, 'page:save-pdf', Schemas.webContentsTarget, async (event, { webContentsId }: { webContentsId: number }) => {
     const wc = webContents.fromId(webContentsId)
-    const win = getMainWindow()
+    const win = senderWindow(event)
     if (wc && win && !wc.isDestroyed() && !win.isDestroyed()) {
       try {
         const title = (wc.getTitle() || 'document').replace(/[/\\?%*:|"<>]/g, '_')
@@ -353,6 +375,7 @@ export function registerAllIpc(
             preferCSSPageSize: true
           })
           await fs.promises.writeFile(res.filePath, pdfBuffer)
+          rememberExportedFile(res.filePath)
           return { success: true, filePath: res.filePath }
         }
         return { success: false, canceled: true }

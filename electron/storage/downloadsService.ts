@@ -9,6 +9,9 @@ class DownloadsService {
   private records: DownloadRecord[] = []
   private filePath: string = ''
   private saveTimeout: NodeJS.Timeout | null = null
+  /** Ids of private-tab downloads: kept in memory only */
+  private ephemeral = new Set<string>()
+  private forgotten = new Set<string>()
 
   public init(): void {
     try {
@@ -47,14 +50,25 @@ class DownloadsService {
     if (!this.filePath) return
     try {
       const tmp = `${this.filePath}.tmp`
-      fs.writeFileSync(tmp, JSON.stringify(this.records, null, 2), 'utf-8')
+      fs.writeFileSync(tmp, JSON.stringify(this.records.filter((r) => !this.ephemeral.has(r.id)), null, 2), 'utf-8')
       fs.renameSync(tmp, this.filePath)
     } catch (err) {
       console.error('[DownloadsService] Failed to persist downloads:', err)
     }
   }
 
-  public addOrUpdate(data: Partial<DownloadRecord> & { id: string; filename?: string }): DownloadRecord {
+  /** Forget private-tab downloads (the files themselves stay, like in other browsers) */
+  public clearEphemeral(): void {
+    if (this.ephemeral.size === 0) return
+    this.records = this.records.filter((r) => !this.ephemeral.has(r.id))
+    this.forgotten = new Set([...this.forgotten, ...this.ephemeral])
+    this.ephemeral.clear()
+  }
+
+  public addOrUpdate({ ephemeral, ...data }: Partial<DownloadRecord> & { id: string; filename?: string; ephemeral?: boolean }): DownloadRecord | null {
+    if (ephemeral) this.ephemeral.add(data.id)
+    // A private download still running after its window closed must not come back as a saved record
+    if (this.forgotten.has(data.id)) return null
     const idx = this.records.findIndex((r) => r.id === data.id)
     let record: DownloadRecord
 

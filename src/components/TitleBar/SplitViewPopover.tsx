@@ -1,11 +1,13 @@
-import React, { useState } from 'react'
+import React, { useState, useMemo } from 'react'
 import {
   Columns2,
   X,
   ArrowLeftRight,
   Globe,
   SplitSquareVertical,
-  Plus
+  Plus,
+  Bookmark,
+  Trash2
 } from 'lucide-react'
 import {
   Popover,
@@ -15,12 +17,14 @@ import {
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { modKey } from '@/lib/platform'
 import { api } from '@/lib/ipc'
+import { useSavedSplits } from '@/hooks/useSavedSplits'
+import { openSavedSplit, removeSavedSplit, saveCurrentSplit, getCurrentSplitTabs, defaultSplitName } from '@/lib/savedSplits'
 
 export const SplitViewPopover: React.FC = () => {
   const [open, setOpen] = useState(false)
   const activeSpaceId = useBrowserStore((s) => s.activeSpaceId)
   const activeTabId = useBrowserStore((s) => s.activeTabId)
-  const tabsBySpace = useBrowserStore((s) => s.tabsBySpace)
+  const spaceTabs = useBrowserStore((s) => (s.activeSpaceId ? s.tabsBySpace[s.activeSpaceId] : undefined))
   const splitTabId = useBrowserStore((s) => s.splitTabId)
   const splitRatio = useBrowserStore((s) => s.splitRatio)
   const setSplitTabId = useBrowserStore((s) => s.setSplitTabId)
@@ -28,7 +32,11 @@ export const SplitViewPopover: React.FC = () => {
   const closeSplitView = useBrowserStore((s) => s.closeSplitView)
   const setActiveTabId = useBrowserStore((s) => s.setActiveTabId)
 
-  const currentTabs = activeSpaceId ? tabsBySpace[activeSpaceId] || [] : []
+  const { splits } = useSavedSplits(open)
+  const [saveName, setSaveName] = useState('')
+  const [naming, setNaming] = useState(false)
+
+  const currentTabs = useMemo(() => spaceTabs ?? [], [spaceTabs])
   const otherTabs = currentTabs.filter((t) => t.id !== activeTabId)
   const isSplitActive = Boolean(splitTabId && currentTabs.some((t) => t.id === splitTabId))
 
@@ -39,9 +47,7 @@ export const SplitViewPopover: React.FC = () => {
 
   const handleSwap = () => {
     if (!splitTabId) return
-    const currentActive = activeTabId
-    setActiveTabId(splitTabId)
-    setSplitTabId(currentActive)
+    useBrowserStore.getState().swapSplit()
   }
 
   return (
@@ -137,6 +143,46 @@ export const SplitViewPopover: React.FC = () => {
                 <span>Close Split</span>
               </button>
             </div>
+
+            {/* Save this layout to reopen it in one click later */}
+            {naming ? (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault()
+                  const saved = await saveCurrentSplit(saveName)
+                  if (saved) {
+                    setNaming(false)
+                    setSaveName('')
+                  }
+                }}
+                className="flex items-center gap-1.5"
+              >
+                <input
+                  autoFocus
+                  value={saveName}
+                  maxLength={80}
+                  onChange={(e) => setSaveName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Escape' && setNaming(false)}
+                  placeholder="Layout name"
+                  className="flex-1 min-w-0 h-8 px-2.5 rounded-lg bg-background border border-border focus:border-primary/60 text-xs text-foreground outline-none"
+                />
+                <button type="submit" className="h-8 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-semibold hover:bg-primary/90">
+                  Save
+                </button>
+              </form>
+            ) : (
+              <button
+                onClick={() => {
+                  const current = getCurrentSplitTabs()
+                  setSaveName(current ? defaultSplitName(current.primary, current.secondary) : '')
+                  setNaming(true)
+                }}
+                className="w-full flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-xl bg-primary/10 hover:bg-primary/20 text-primary text-xs font-semibold border border-primary/25 transition-colors cursor-pointer"
+              >
+                <Bookmark className="w-3.5 h-3.5" />
+                <span>Save layout</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="space-y-2">
@@ -190,6 +236,38 @@ export const SplitViewPopover: React.FC = () => {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* Saved layouts */}
+        {splits.length > 0 && (
+          <div className="pt-2 border-t border-border space-y-1">
+            <div className="text-[10px] uppercase font-bold tracking-wider text-muted-foreground px-1">Saved layouts</div>
+            <div className="max-h-40 overflow-y-auto space-y-0.5 pr-1">
+              {splits.map((split) => (
+                <div key={split.id} className="group flex items-center gap-2 px-2 py-1.5 rounded-xl hover:bg-muted transition-colors">
+                  <button
+                    onClick={() => {
+                      void openSavedSplit(split)
+                      setOpen(false)
+                    }}
+                    className="flex-1 min-w-0 flex items-center gap-2 text-left cursor-pointer"
+                    title={`${split.primary.url}
+${split.secondary.url}`}
+                  >
+                    <Columns2 className="w-3.5 h-3.5 text-primary shrink-0" />
+                    <span className="text-xs text-foreground truncate font-medium group-hover:text-primary">{split.name}</span>
+                  </button>
+                  <button
+                    onClick={() => void removeSavedSplit(split.id)}
+                    className="opacity-0 group-hover:opacity-100 p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-opacity"
+                    aria-label={`Delete layout ${split.name}`}
+                  >
+                    <Trash2 className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </PopoverContent>

@@ -14,6 +14,8 @@ export interface Space {
   createdAt: string | Date;
   updatedAt: string | Date;
   tabs?: Tab[];
+  /** Separate profile: this space keeps its own cookies, logins and site storage */
+  isolated?: boolean;
 }
 
 export interface Tab {
@@ -31,6 +33,149 @@ export interface Tab {
   isSleeping?: boolean;
   /** Private tab: in-memory session, never saved to disk or history */
   isPrivate?: boolean;
+  /** Tab group this tab belongs to (null/undefined = ungrouped) */
+  groupId?: string | null;
+}
+
+/** Named, colored, nestable group of tabs inside a space */
+export interface TabGroup {
+  id: string;
+  spaceId: string;
+  /** Parent group (null = top level). Max nesting depth is MAX_GROUP_DEPTH. */
+  parentId: string | null;
+  name: string;
+  /** null = inherit the parent group's color */
+  color: string | null;
+  collapsed: boolean;
+  order: number;
+  /** Links opened from tabs in this group open as new tabs inside the group */
+  openLinksInGroup: boolean;
+  createdAt: string | Date;
+}
+
+export interface CreateTabGroupData {
+  spaceId: string;
+  name: string;
+  parentId?: string | null;
+  color?: string | null;
+  /** Tabs to move into the new group */
+  tabIds?: string[];
+}
+
+export interface UpdateTabGroupData {
+  name?: string;
+  color?: string | null;
+  collapsed?: boolean;
+  parentId?: string | null;
+  order?: number;
+  openLinksInGroup?: boolean;
+}
+
+/** A saved two-pane layout that can be reopened in one click */
+export interface SavedSplit {
+  id: string;
+  name: string;
+  primary: { url: string; title: string };
+  secondary: { url: string; title: string };
+  ratio: number;
+  createdAt: string | Date;
+}
+
+export interface SaveSplitData {
+  name: string;
+  primary: { url: string; title: string };
+  secondary: { url: string; title: string };
+  ratio: number;
+}
+
+export interface PasswordEntryInfo {
+  id: string;
+  origin: string;
+  username: string;
+  createdAt: string;
+  updatedAt: string;
+  lastUsedAt?: string;
+}
+
+export interface PasswordSaveOffer {
+  token: string;
+  origin: string;
+  username: string;
+  /** Same username already saved with a different password */
+  isUpdate: boolean;
+}
+
+export interface PasswordSettings {
+  offerToSave: boolean;
+  /** Sites where the user chose "Never" */
+  neverSave: string[];
+  /** OS encryption (DPAPI / Keychain) is available */
+  encrypted: boolean;
+}
+
+export interface DefaultBrowserStatus {
+  isDefault: boolean;
+  /** false in dev builds or when the OS tool is missing */
+  canSet: boolean;
+  reason?: string;
+}
+
+export interface BrowserExtensionInfo {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  enabled: boolean;
+  allowInPrivate: boolean;
+  /** Enabled and successfully loaded by Electron */
+  loaded: boolean;
+  icon?: string;
+  store?: 'chrome' | 'edge' | 'opera' | 'file' | 'builtin';
+  /** Ships with TCT Orbit (can still be turned off or removed, and restored later) */
+  builtin?: boolean;
+  /** Has a toolbar button that can be clicked */
+  hasAction?: boolean;
+  /** chrome-extension:// URL of the toolbar popup (when loaded) */
+  popupUrl?: string;
+  /** chrome-extension:// URL of the options page (when loaded) */
+  optionsUrl?: string;
+}
+
+/** A downloaded extension waiting for the user to confirm the install */
+export interface ExtensionInstallPreview {
+  token: string;
+  name: string;
+  version: string;
+  description: string;
+  permissions: string[];
+  icon?: string;
+  store: 'chrome' | 'edge' | 'opera' | 'file';
+  manifestVersion: number;
+  /** Same store extension already installed: this replaces it */
+  isUpdate: boolean;
+}
+
+export interface AboutInfo {
+  version: string;
+  electron: string;
+  chrome: string;
+  node: string;
+  v8: string;
+  platform: string;
+}
+
+export interface ArcImportInfo {
+  found: boolean;
+  spaces: number;
+  tabs: number;
+}
+
+export interface ArcImportResult {
+  success: boolean;
+  spaces: number;
+  tabs: number;
+  groups: number;
+  error?: string;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -73,8 +218,22 @@ export interface Settings {
   autoArchiveDuration?: AutoArchiveDuration;
   memorySaverEnabled?: boolean;
   sleepTimeoutMinutes?: number;
+  /** What Ctrl+T / New Tab opens: the command bar (default) or the Orbit start page */
+  newTabPage?: NewTabPage;
+  /** Where tabs are shown: vertical sidebar (default) or a horizontal strip under the toolbar */
+  tabLayout?: TabLayout;
+  /** New tabs go first (after pinned tabs) instead of next to the active tab */
+  newTabsOnTop?: boolean;
+  /** Favorites bar under the toolbar: always, never, or only on new tabs (default: always) */
+  favoritesBar?: FavoritesBarMode;
   updatedAt: string | Date;
 }
+
+export type FavoritesBarMode = 'always' | 'never' | 'new-tab';
+
+export type TabLayout = 'sidebar' | 'topbar';
+
+export type NewTabPage = 'command-bar' | 'start-page';
 
 export interface CreateSpaceData {
   name: string;
@@ -83,6 +242,7 @@ export interface CreateSpaceData {
   order?: number;
   initialUrl?: string;
   initialTitle?: string;
+  isolated?: boolean;
 }
 
 export interface UpdateSpaceData {
@@ -91,6 +251,7 @@ export interface UpdateSpaceData {
   icon?: string;
   order?: number;
   isActive?: boolean;
+  isolated?: boolean;
 }
 
 export interface CreateTabData {
@@ -101,6 +262,7 @@ export interface CreateTabData {
   isPinned?: boolean;
   order?: number;
   isPrivate?: boolean;
+  groupId?: string | null;
 }
 
 export interface UpdateTabData {
@@ -110,6 +272,7 @@ export interface UpdateTabData {
   isPinned?: boolean;
   order?: number;
   spaceId?: string;
+  groupId?: string | null;
 }
 
 export interface UpdateSettingsData {
@@ -129,6 +292,10 @@ export interface UpdateSettingsData {
   autoArchiveDuration?: AutoArchiveDuration;
   memorySaverEnabled?: boolean;
   sleepTimeoutMinutes?: number;
+  newTabPage?: NewTabPage;
+  tabLayout?: TabLayout;
+  newTabsOnTop?: boolean;
+  favoritesBar?: FavoritesBarMode;
 }
 
 export type ReleaseChannel = 'stable' | 'nova' | 'deep' | 'canary';
@@ -372,6 +539,8 @@ export interface BookmarkItem {
   folder?: string;
   isReadingList?: boolean;
   isRead?: boolean;
+  /** Display order (favorites bar drag & drop); unset = by creation time */
+  order?: number;
   createdAt: string;
 }
 
@@ -412,6 +581,12 @@ export interface ProcessMetricInfo {
   url?: string;
   webContentsId?: number;
   isTab?: boolean;
+  /** The browser's own interface (not a web page) */
+  isAppUi?: boolean;
+  /** Renderer without a page: service worker, extension or spare renderer */
+  isWorker?: boolean;
+  /** Can be ended from the Task Manager (web page tabs only) */
+  killable?: boolean;
 }
 
 export interface SystemMetricsResult {
@@ -422,14 +597,60 @@ export interface SystemMetricsResult {
 }
 
 export interface ElectronAPI {
+  /** Snoozed tabs, page watchers, focus rules per space, search over pages you've read */
+  smart: import('./smart').SmartApi;
   app: {
     getInfo: () => Promise<AppInfo>;
     getInfoSync: () => AppInfo;
     getVersion: () => string;
     getName: () => string;
     getChannel: () => ReleaseChannel;
+    about: () => Promise<AboutInfo>;
+    /** URLs the OS asked Orbit to open before the UI was ready */
+    takePendingUrls: () => Promise<string[]>;
   };
   appInfo: AppInfo;
+  passwords: {
+    list: () => Promise<PasswordEntryInfo[]>;
+    /** Decrypted password (for show / copy in the Passwords manager) */
+    reveal: (id: string) => Promise<string | null>;
+    update: (id: string, data: { username?: string; password?: string }) => Promise<boolean>;
+    remove: (id: string) => Promise<boolean>;
+    respond: (token: string, action: 'save' | 'never' | 'dismiss', username?: string) => Promise<boolean>;
+    getSettings: () => Promise<PasswordSettings>;
+    setOfferToSave: (enabled: boolean) => Promise<PasswordSettings>;
+    removeNeverSave: (origin: string) => Promise<PasswordSettings>;
+    /** A page submitted a login: ask the user whether to save it */
+    onOffer: (callback: (offer: PasswordSaveOffer) => void) => () => void;
+  };
+  search: {
+    /** Live suggestions from the search engine (never used for private tabs) */
+    suggest: (query: string, engine: string) => Promise<string[]>;
+  };
+  defaultBrowser: {
+    status: () => Promise<DefaultBrowserStatus>;
+    set: () => Promise<{ ok: boolean; openedSystemSettings: boolean; error?: string }>;
+  };
+  extensions: {
+    list: () => Promise<BrowserExtensionInfo[]>;
+    addUnpacked: () => Promise<{ ok: boolean; error?: string; extension?: BrowserExtensionInfo }>;
+    setEnabled: (id: string, enabled: boolean) => Promise<BrowserExtensionInfo[]>;
+    setAllowInPrivate: (id: string, allow: boolean) => Promise<BrowserExtensionInfo[]>;
+    remove: (id: string) => Promise<BrowserExtensionInfo[]>;
+    openFolder: () => Promise<boolean>;
+    /** Toolbar click on an extension without a popup, for the tab with this webContents id */
+    click: (id: string, tabWebContentsId: number) => Promise<{ ok: boolean; error?: string }>;
+    /** Reinstall built-in extensions the user removed */
+    restoreBuiltins: () => Promise<BrowserExtensionInfo[]>;
+    /** How many built-ins were removed (and can be restored) */
+    removedBuiltinCount: () => Promise<number>;
+    /** Download from Chrome Web Store / Edge Add-ons / Opera add-ons (link or id) and unpack for review */
+    prepareFromStore: (input: string) => Promise<{ ok: true; preview: ExtensionInstallPreview } | { ok: false; error: string }>;
+    /** Pick a .crx / .zip file and unpack for review */
+    prepareFromFile: () => Promise<{ ok: true; preview: ExtensionInstallPreview } | { ok: false; error?: string }>;
+    commitInstall: (token: string) => Promise<{ ok: boolean; error?: string; extension?: BrowserExtensionInfo; updated?: boolean }>;
+    cancelInstall: (token: string) => Promise<boolean>;
+  };
   theme: {
     get: () => Promise<ThemeState>;
     set: (data: SetThemeData) => Promise<ThemeState>;
@@ -449,12 +670,26 @@ export interface ElectronAPI {
     remove: (id: string) => Promise<boolean>;
     setActive: (id: string) => Promise<Space>;
   };
+  groups: {
+    list: (spaceId: string) => Promise<TabGroup[]>;
+    create: (data: CreateTabGroupData) => Promise<{ group: TabGroup; tabs: Tab[] }>;
+    update: (id: string, data: UpdateTabGroupData) => Promise<TabGroup>;
+    /** closeTabs=false: children move up to the parent; true: the group's tabs are closed */
+    remove: (id: string, closeTabs?: boolean) => Promise<{ groups: TabGroup[]; tabs: Tab[] }>;
+  };
+  splits: {
+    list: () => Promise<SavedSplit[]>;
+    save: (data: SaveSplitData) => Promise<SavedSplit>;
+    remove: (id: string) => Promise<boolean>;
+  };
   settings: {
     get: () => Promise<Settings>;
     update: (data: UpdateSettingsData) => Promise<Settings>;
   };
   window: {
     minimize: () => Promise<void>;
+    /** Open a private window (only private tabs, Edge InPrivate style) */
+    openPrivate?: (url?: string) => Promise<boolean>;
     maximize: () => Promise<void>;
     close: () => Promise<void>;
     isMaximized: () => Promise<boolean>;
@@ -470,6 +705,8 @@ export interface ElectronAPI {
     open: (webContentsId?: number, bounds?: { x: number; y: number; width: number; height: number }) => Promise<void>;
     inspect: (webContentsId: number, x: number, y: number, bounds?: { x: number; y: number; width: number; height: number }) => Promise<void>;
     updateBounds: (bounds: { x: number; y: number; width: number; height: number }) => Promise<void>;
+    /** Open app menus/popovers: the docked DevTools hides while one overlaps it */
+    setOverlayRects?: (rects: { x: number; y: number; width: number; height: number }[]) => Promise<void>;
     detach: () => Promise<void>;
     close: () => Promise<void>;
     getState: () => Promise<DevToolsState>;
@@ -548,9 +785,15 @@ export interface ElectronAPI {
     deleteByUrl: (url: string) => Promise<boolean>;
     toggleRead: (id: string) => Promise<boolean>;
     isBookmarked: (url: string) => Promise<boolean>;
+    update?: (id: string, data: { title?: string; url?: string; folder?: string }) => Promise<BookmarkItem | null>;
+    reorder?: (ids: string[]) => Promise<boolean>;
+    renameFolder?: (from: string, to: string) => Promise<number>;
+    deleteFolder?: (folder: string) => Promise<number>;
+    /** Fires after any bookmark change (from any window or dialog) */
+    onChanged?: (callback: () => void) => () => void;
   };
   site: {
-    getInfo: (url: string) => Promise<SiteInfoResult>;
+    getInfo: (url: string, spaceId?: string) => Promise<SiteInfoResult>;
     clearData: (origin: string) => Promise<ClearSiteDataResult>;
   };
   system?: {
@@ -593,6 +836,8 @@ export interface ElectronAPI {
     detect: () => Promise<ImportSource[]>;
     run: (sourceId: string, bookmarks: boolean, history: boolean) => Promise<BrowserImportResult>;
     bookmarksHtml: () => Promise<BrowserImportResult | null>;
+    arcDetect: () => Promise<ArcImportInfo>;
+    arcImport: () => Promise<ArcImportResult>;
   };
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean }) => void) => () => void;
   onExternalUrl?: (callback: (url: string) => void) => () => void;

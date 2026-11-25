@@ -16,7 +16,10 @@ import type {
   ImportBackupOptions,
   RecordVisitData,
   HistoryFilterOptions,
-  HistoryClearRange
+  HistoryClearRange,
+  CreateTabGroupData,
+  UpdateTabGroupData,
+  SaveSplitData
 } from '../src/types/api'
 
 /** Subscribe to a main-process event; returns an unsubscribe function (event object never exposed) */
@@ -58,7 +61,49 @@ const hardenedApi: ElectronAPI = {
     getInfoSync: () => initialAppInfo,
     getVersion: () => initialAppInfo.version,
     getName: () => initialAppInfo.name,
-    getChannel: () => initialAppInfo.channel
+    getChannel: () => initialAppInfo.channel,
+    about: () => ipcRenderer.invoke('app:about'),
+    takePendingUrls: () => ipcRenderer.invoke('app:take-pending-urls')
+  },
+
+  passwords: {
+    list: () => ipcRenderer.invoke('passwords:list'),
+    reveal: (id: string) => ipcRenderer.invoke('passwords:reveal', id),
+    update: (id: string, data: { username?: string; password?: string }) => ipcRenderer.invoke('passwords:update', id, data),
+    remove: (id: string) => ipcRenderer.invoke('passwords:remove', id),
+    respond: (token: string, action: 'save' | 'never' | 'dismiss', username?: string) =>
+      username === undefined
+        ? ipcRenderer.invoke('passwords:respond', token, action)
+        : ipcRenderer.invoke('passwords:respond', token, action, username),
+    getSettings: () => ipcRenderer.invoke('passwords:settings'),
+    setOfferToSave: (enabled: boolean) => ipcRenderer.invoke('passwords:set-offer', enabled),
+    removeNeverSave: (origin: string) => ipcRenderer.invoke('passwords:remove-never', origin),
+    onOffer: (callback: (offer: any) => void) => listen('passwords:offer', callback)
+  },
+
+  search: {
+    suggest: (query: string, engine: string) => ipcRenderer.invoke('search:suggest', query, engine)
+  },
+
+  defaultBrowser: {
+    status: () => ipcRenderer.invoke('default-browser:status'),
+    set: () => ipcRenderer.invoke('default-browser:set')
+  },
+
+  extensions: {
+    list: () => ipcRenderer.invoke('extensions:list'),
+    addUnpacked: () => ipcRenderer.invoke('extensions:add-unpacked'),
+    setEnabled: (id: string, enabled: boolean) => ipcRenderer.invoke('extensions:set-enabled', id, enabled),
+    setAllowInPrivate: (id: string, allow: boolean) => ipcRenderer.invoke('extensions:set-private', id, allow),
+    remove: (id: string) => ipcRenderer.invoke('extensions:remove', id),
+    prepareFromStore: (input: string) => ipcRenderer.invoke('extensions:prepare-store', input),
+    prepareFromFile: () => ipcRenderer.invoke('extensions:prepare-file'),
+    commitInstall: (token: string) => ipcRenderer.invoke('extensions:commit', token),
+    cancelInstall: (token: string) => ipcRenderer.invoke('extensions:cancel', token),
+    openFolder: () => ipcRenderer.invoke('extensions:open-folder'),
+    click: (id: string, tabWebContentsId: number) => ipcRenderer.invoke('extensions:click', id, tabWebContentsId),
+    restoreBuiltins: () => ipcRenderer.invoke('extensions:restore-builtins'),
+    removedBuiltinCount: () => ipcRenderer.invoke('extensions:removed-builtins')
   },
   appInfo: initialAppInfo,
 
@@ -76,6 +121,19 @@ const hardenedApi: ElectronAPI = {
     update: (id: string, data: UpdateSpaceData) => ipcRenderer.invoke('spaces:update', id, data),
     remove: (id: string) => ipcRenderer.invoke('spaces:remove', id),
     setActive: (id: string) => ipcRenderer.invoke('spaces:setActive', id)
+  },
+
+  groups: {
+    list: (spaceId: string) => ipcRenderer.invoke('groups:list', spaceId),
+    create: (data: CreateTabGroupData) => ipcRenderer.invoke('groups:create', data),
+    update: (id: string, data: UpdateTabGroupData) => ipcRenderer.invoke('groups:update', id, data),
+    remove: (id: string, closeTabs?: boolean) => ipcRenderer.invoke('groups:remove', id, !!closeTabs)
+  },
+
+  splits: {
+    list: () => ipcRenderer.invoke('splits:list'),
+    save: (data: SaveSplitData) => ipcRenderer.invoke('splits:save', data),
+    remove: (id: string) => ipcRenderer.invoke('splits:remove', id)
   },
 
   settings: {
@@ -97,6 +155,7 @@ const hardenedApi: ElectronAPI = {
 
   window: {
     minimize: () => ipcRenderer.invoke('window:minimize'),
+    openPrivate: (url?: string) => ipcRenderer.invoke('window:open-private', url),
     maximize: () => ipcRenderer.invoke('window:maximize'),
     close: () => ipcRenderer.invoke('window:close'),
     isMaximized: () => ipcRenderer.invoke('window:isMaximized'),
@@ -117,6 +176,8 @@ const hardenedApi: ElectronAPI = {
       ipcRenderer.invoke('devtools:inspect', { webContentsId, x, y, bounds }),
     updateBounds: (bounds: { x: number; y: number; width: number; height: number }) =>
       ipcRenderer.invoke('devtools:update-bounds', bounds),
+    setOverlayRects: (rects: { x: number; y: number; width: number; height: number }[]) =>
+      ipcRenderer.invoke('devtools:overlay-rects', rects),
     detach: () => ipcRenderer.invoke('devtools:detach'),
     close: () => ipcRenderer.invoke('devtools:close'),
     getState: () => ipcRenderer.invoke('devtools:getState'),
@@ -269,11 +330,23 @@ const hardenedApi: ElectronAPI = {
     delete: (id: string) => ipcRenderer.invoke('bookmarks:delete', id),
     deleteByUrl: (url: string) => ipcRenderer.invoke('bookmarks:delete-by-url', url),
     toggleRead: (id: string) => ipcRenderer.invoke('bookmarks:toggle-read', id),
-    isBookmarked: (url: string) => ipcRenderer.invoke('bookmarks:is-bookmarked', url)
+    isBookmarked: (url: string) => ipcRenderer.invoke('bookmarks:is-bookmarked', url),
+    update: (id: string, data: { title?: string; url?: string; folder?: string }) => ipcRenderer.invoke('bookmarks:update', id, data),
+    reorder: (ids: string[]) => ipcRenderer.invoke('bookmarks:reorder', ids),
+    renameFolder: (from: string, to: string) => ipcRenderer.invoke('bookmarks:rename-folder', from, to),
+    deleteFolder: (folder: string) => ipcRenderer.invoke('bookmarks:delete-folder', folder),
+    onChanged: (callback: () => void) => {
+      const handler = () => callback()
+      ipcRenderer.on('bookmarks:changed', handler)
+      return () => {
+        ipcRenderer.removeListener('bookmarks:changed', handler)
+      }
+    }
   },
 
   site: {
-    getInfo: (url: string) => ipcRenderer.invoke('site:get-info', url),
+    getInfo: (url: string, spaceId?: string) =>
+      spaceId ? ipcRenderer.invoke('site:get-info', url, spaceId) : ipcRenderer.invoke('site:get-info', url),
     clearData: (origin: string) => ipcRenderer.invoke('site:clear-data', origin)
   },
 
@@ -321,10 +394,41 @@ const hardenedApi: ElectronAPI = {
     capture: (webContentsId: number) => ipcRenderer.invoke('webview:thumbnail', webContentsId)
   },
 
+  smart: {
+    snoozeAdd: (data) => ipcRenderer.invoke('smart:snooze-add', data),
+    snoozeList: () => ipcRenderer.invoke('smart:snooze-list'),
+    snoozeRemove: (id: string) => ipcRenderer.invoke('smart:snooze-remove', id),
+    snoozeTakeDue: (spaceId?: string) => ipcRenderer.invoke('smart:snooze-take-due', spaceId),
+    onSnoozeDue: (callback) => listen('smart:snooze-due', callback),
+    pageIndex: (data) => ipcRenderer.invoke('smart:page-index', data),
+    pageSearch: (query: string, limit?: number) =>
+      limit === undefined ? ipcRenderer.invoke('smart:page-search', query) : ipcRenderer.invoke('smart:page-search', query, limit),
+    pageIndexStatus: () => ipcRenderer.invoke('smart:page-index-status'),
+    pageIndexSetEnabled: (enabled: boolean) => ipcRenderer.invoke('smart:page-index-enabled', enabled),
+    pageIndexClear: () => ipcRenderer.invoke('smart:page-index-clear'),
+    watchList: () => ipcRenderer.invoke('smart:watch-list'),
+    watchAdd: (data) => ipcRenderer.invoke('smart:watch-add', data),
+    watchUpdate: (id: string, data) => ipcRenderer.invoke('smart:watch-update', id, data),
+    watchRemove: (id: string) => ipcRenderer.invoke('smart:watch-remove', id),
+    watchCheckNow: (id: string) => ipcRenderer.invoke('smart:watch-check', id),
+    onWatchUpdated: (callback) => {
+      const handler = (_: unknown, watch: any, changed: boolean) => callback(watch, !!changed)
+      ipcRenderer.on('smart:watch-updated', handler)
+      return () => {
+        ipcRenderer.removeListener('smart:watch-updated', handler)
+      }
+    },
+    onWatchOpen: (callback) => listen('smart:watch-open', callback),
+    focusRulesGet: () => ipcRenderer.invoke('smart:focus-rules-get'),
+    focusRulesSet: (rules) => ipcRenderer.invoke('smart:focus-rules-set', rules)
+  },
+
   browserImport: {
     detect: () => ipcRenderer.invoke('import:detect'),
     run: (sourceId: string, bookmarks: boolean, history: boolean) => ipcRenderer.invoke('import:run', { sourceId, bookmarks, history }),
-    bookmarksHtml: () => ipcRenderer.invoke('import:bookmarks-html')
+    bookmarksHtml: () => ipcRenderer.invoke('import:bookmarks-html'),
+    arcDetect: () => ipcRenderer.invoke('import:arc-detect'),
+    arcImport: () => ipcRenderer.invoke('import:arc-run')
   },
 
   onOpenUrl: (callback: (payload: { url: string; active: boolean; sourceWebContentsId?: number; isPrivate?: boolean }) => void) => {

@@ -81,6 +81,14 @@ export default defineConfig({
         '@resources': resolve('resources')
       }
     },
-    plugins: [react()]
+    plugins: [
+      react(),
+      {
+        // React Fast Refresh needs an inline script. Dev server only: builds keep the strict CSP.
+        name: 'dev-csp',
+        apply: 'serve',
+        transformIndexHtml: (html) => html.replace("script-src 'self'", "script-src 'self' 'unsafe-inline'")
+      }
+    ]
   }
 })

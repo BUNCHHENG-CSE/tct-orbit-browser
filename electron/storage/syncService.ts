@@ -14,8 +14,9 @@ import type { BackupCategory } from '../../src/types/api'
 
 export const ENCRYPTED_FORMAT = 'tct-orbit-encrypted'
 const SYNC_CATEGORIES: BackupCategory[] = ['settings', 'spaces', 'tabs', 'privacy', 'history']
-// scrypt cost: ~50-100 ms per derivation, strong against offline guessing
-const SCRYPT_PARAMS = { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }
+// scrypt cost (OWASP minimum, 128 MB): the file lives in cloud storage, so it must resist offline
+// guessing. The cost is stored in the file; older files (N = 2^15) still open.
+const SCRYPT_PARAMS = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }
 
 interface EncryptedEnvelope {
   format: typeof ENCRYPTED_FORMAT
@@ -89,8 +90,11 @@ export function decryptText(raw: string, passphrase: string): string {
       p: env.p,
       maxmem: 256 * 1024 * 1024
     })
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(env.iv, 'base64'))
-    decipher.setAuthTag(Buffer.from(env.tag, 'base64'))
+    const tag = Buffer.from(env.tag, 'base64')
+    // Full-length tag only: GCM accepts shortened tags, which are far easier to forge
+    if (tag.length !== 16) throw new Error('Bad tag')
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(env.iv, 'base64'), { authTagLength: 16 })
+    decipher.setAuthTag(tag)
     return Buffer.concat([decipher.update(Buffer.from(env.data, 'base64')), decipher.final()]).toString('utf8')
   } catch {
     // GCM auth failure: wrong passphrase or modified file
@@ -100,6 +104,7 @@ export function decryptText(raw: string, passphrase: string): string {
 
 class SyncService {
   private configPath = ''
+  private chosenPath: string | null = null
   private config: { enabled: boolean; filePath: string; passphrase: string; lastSyncedAt?: string } = {
     enabled: false,
     filePath: '',
@@ -142,9 +147,13 @@ class SyncService {
 
   /** Configure auto-sync. Passphrase is stored encrypted with the OS keychain (safeStorage). */
   public configure(opts: { enabled?: boolean; filePath?: string; passphrase?: string }): SyncConfig {
-    if (opts.filePath !== undefined) this.config.filePath = opts.filePath
+    // Only a location picked in the system dialog: this file is overwritten on every quit
+    if (opts.filePath !== undefined && (opts.filePath === '' || opts.filePath === this.chosenPath)) this.config.filePath = opts.filePath
     if (opts.passphrase !== undefined) {
       if (opts.passphrase && opts.passphrase.length < 8) throw new Error('Passphrase must be at least 8 characters')
+      if (opts.passphrase && !safeStorageVault.isAvailable()) {
+        throw new Error('This system has no secure storage (keyring), so the passphrase cannot be remembered safely')
+      }
       this.config.passphrase = opts.passphrase ? safeStorageVault.encryptString(opts.passphrase) : ''
     }
     if (opts.enabled !== undefined) this.config.enabled = opts.enabled
@@ -162,6 +171,7 @@ class SyncService {
       filters: [{ name: 'TCT Orbit encrypted sync (*.orbitsync)', extensions: ['orbitsync'] }]
     })
     if (res.canceled || !res.filePath) return null
+    this.chosenPath = res.filePath
     return res.filePath
   }
 

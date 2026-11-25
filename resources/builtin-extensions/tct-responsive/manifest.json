@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "TCT-Responsive",
+  "version": "1.0.0",
+  "description": "TCT-Responsive is a tool that allows you to simulate responsive layouts on your web app with realistic iPhone, iPad, MacBook, and POS device frames.",
+  "action": {
+    "default_title": "TCT-Responsive",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "service-worker-loader.js",
+    "type": "module"
+  },
+  "permissions": [
+    "activeTab",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "content_scripts": [
+    {
+      "js": [
+        "assets/overlay.tsx-DObIxtFh.js"
+      ],
+      "matches": [
+        "<all_urls>"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "resources": [
+        "assets/overlay.tsx-DObIxtFh.js"
+      ],
+      "use_dynamic_url": false
+    }
+  ]
+}

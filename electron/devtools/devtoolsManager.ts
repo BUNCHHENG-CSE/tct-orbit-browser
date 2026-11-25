@@ -197,6 +197,29 @@ export class DevToolsManager {
   /**
    * Update docked view bounds on window resize or splitter drag
    */
+  /** App menus/popovers currently open (window content coords) that the docked view would cover */
+  private overlayRects: Rectangle[] = []
+
+  /**
+   * The docked DevTools is a native view drawn above the app UI, so menus that reach into it
+   * would be hidden. Hide the view while an open menu overlaps it.
+   */
+  public setOverlayRects(rects: Rectangle[]): void {
+    this.overlayRects = rects
+    this.applyOverlayVisibility()
+  }
+
+  private applyOverlayVisibility(): void {
+    if (!this.devToolsView || !this.isDockedOpen) return
+    const b = this.currentBounds
+    const covered = this.overlayRects.some(
+      (r) => r.x < b.x + b.width && r.x + r.width > b.x && r.y < b.y + b.height && r.y + r.height > b.y
+    )
+    try {
+      this.devToolsView.setVisible(!covered)
+    } catch {}
+  }
+
   public updateBounds(bounds: Rectangle): void {
     this.currentBounds = bounds
     if (this.devToolsView && this.isDockedOpen) {

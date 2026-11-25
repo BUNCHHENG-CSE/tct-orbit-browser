@@ -7,6 +7,13 @@ class BookmarksService {
   private bookmarks: BookmarkItem[] = []
   private filePath: string = ''
   private saveTimeout: NodeJS.Timeout | null = null
+  private listeners = new Set<() => void>()
+
+  /** Called after every change (the IPC layer tells the windows to refresh) */
+  public onChange(listener: () => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
 
   public init(): void {
     try {
@@ -33,6 +40,11 @@ class BookmarksService {
   }
 
   private scheduleSave(): void {
+    for (const l of this.listeners) {
+      try {
+        l()
+      } catch {}
+    }
     if (this.saveTimeout) {
       clearTimeout(this.saveTimeout)
     }
@@ -117,6 +129,59 @@ class BookmarksService {
       return true
     }
     return false
+  }
+
+  /** Rename, change the URL, or move to another folder */
+  public update(id: string, data: { title?: string; url?: string; folder?: string }): BookmarkItem | null {
+    const item = this.bookmarks.find((b) => b.id === id)
+    if (!item) return null
+    if (data.title !== undefined) item.title = data.title.trim() || item.url
+    if (data.url !== undefined && data.url.trim()) item.url = data.url.trim()
+    if (data.folder !== undefined && data.folder.trim()) item.folder = data.folder.trim()
+    this.scheduleSave()
+    return item
+  }
+
+  /** Set the display order of the given bookmarks (e.g. favorites bar drag & drop) */
+  public reorder(orderedIds: string[]): boolean {
+    const index = new Map(orderedIds.map((id, i) => [id, i]))
+    let changed = false
+    for (const b of this.bookmarks) {
+      const order = index.get(b.id)
+      if (order !== undefined && b.order !== order) {
+        b.order = order
+        changed = true
+      }
+    }
+    if (changed) this.scheduleSave()
+    return changed
+  }
+
+  /** Rename a folder (and its subfolders, "A / B" paths) */
+  public renameFolder(from: string, to: string): number {
+    const target = to.trim()
+    if (!from || !target || from === target) return 0
+    let count = 0
+    for (const b of this.bookmarks) {
+      if (b.folder === from) {
+        b.folder = target
+        count++
+      } else if (b.folder?.startsWith(`${from} / `)) {
+        b.folder = target + b.folder.slice(from.length)
+        count++
+      }
+    }
+    if (count) this.scheduleSave()
+    return count
+  }
+
+  /** Delete every bookmark in a folder (and its subfolders) */
+  public deleteFolder(folder: string): number {
+    const before = this.bookmarks.length
+    this.bookmarks = this.bookmarks.filter((b) => b.folder !== folder && !b.folder?.startsWith(`${folder} / `))
+    const removed = before - this.bookmarks.length
+    if (removed) this.scheduleSave()
+    return removed
   }
 
   public isBookmarked(url: string): boolean {

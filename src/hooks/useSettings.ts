@@ -1,136 +1,97 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState } from 'react'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { api } from '@/lib/ipc'
 import type { Settings, UpdateSettingsData, ThemeMode, AccentPreset, WebColorScheme, StartupBehavior, AutoArchiveDuration } from '@/types/api'
 
-export function useSettings() {
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<Error | null>(null)
+/**
+ * Settings are loaded ONCE and shared. useSettings is mounted by a dozen components; previously
+ * each one fetched settings on mount and wrote a fresh object to the store, re-rendering every
+ * settings consumer once per component at startup (and again whenever a menu or dialog mounted).
+ */
+let loadPromise: Promise<void> | null = null
 
-  const settings = useBrowserStore((s) => s.settings)
-  const setSettings = useBrowserStore((s) => s.setSettings)
-
-  const loadSettings = useCallback(async () => {
-    try {
-      setLoading(true)
-      const data = await api.settings.get()
-      setSettings(data)
-      setError(null)
-    } catch (err) {
+function loadSettings(force = false): Promise<void> {
+  if (loadPromise && !force) return loadPromise
+  loadPromise = api.settings
+    .get()
+    .then((data) => {
+      useBrowserStore.getState().setSettings(data)
+    })
+    .catch((err) => {
       console.error('[useSettings] Error loading settings:', err)
-      setError(err as Error)
-    } finally {
-      setLoading(false)
-    }
-  }, [setSettings])
-
-  useEffect(() => {
-    loadSettings()
-  }, [loadSettings])
-
-  const updateSettings = async (data: UpdateSettingsData): Promise<Settings> => {
-    try {
-      // Optimistic update (read latest store state, not a possibly stale render closure)
-      const current = useBrowserStore.getState().settings
-      if (current) {
-        setSettings({ ...current, ...data } as Settings)
-      }
-      const updated = await api.settings.update(data)
-      // Skip the second store write when the main process confirmed exactly what we applied:
-      // it would re-render every settings consumer mid-animation (e.g. sidebar toggle) for nothing.
-      const latest = useBrowserStore.getState().settings
-      const confirmed =
-        latest &&
-        (Object.keys(data) as Array<keyof UpdateSettingsData>).every(
-          (k) => JSON.stringify((latest as any)[k]) === JSON.stringify((updated as any)[k])
-        )
-      if (!confirmed) {
-        setSettings(updated)
-      }
-      return updated
-    } catch (err) {
-      console.error('[useSettings] Error updating settings:', err)
-      loadSettings()
+      loadPromise = null
       throw err
-    }
-  }
+    })
+  return loadPromise
+}
 
-  const setDefaultSearchEngine = (defaultSearchEngine: string) => {
-    return updateSettings({ defaultSearchEngine })
+async function updateSettings(data: UpdateSettingsData): Promise<Settings> {
+  const { setSettings } = useBrowserStore.getState()
+  try {
+    // Optimistic update (read latest store state, not a possibly stale render closure)
+    const current = useBrowserStore.getState().settings
+    if (current) setSettings({ ...current, ...data } as Settings)
+    const updated = await api.settings.update(data)
+    // Skip the second store write when the main process confirmed exactly what we applied:
+    // it would re-render every settings consumer mid-animation (e.g. sidebar toggle) for nothing.
+    const latest = useBrowserStore.getState().settings
+    const confirmed =
+      latest &&
+      (Object.keys(data) as Array<keyof UpdateSettingsData>).every(
+        (k) => JSON.stringify((latest as any)[k]) === JSON.stringify((updated as any)[k])
+      )
+    if (!confirmed) setSettings(updated)
+    return updated
+  } catch (err) {
+    console.error('[useSettings] Error updating settings:', err)
+    void loadSettings(true).catch(() => {})
+    throw err
   }
+}
 
-  const setSidebarCollapsed = (sidebarCollapsed: boolean) => {
-    return updateSettings({ sidebarCollapsed })
-  }
-
-  const setTheme = async (theme: string) => {
+// Module-level, so every function is stable across renders and components
+const actions = {
+  updateSettings,
+  setDefaultSearchEngine: (defaultSearchEngine: string) => updateSettings({ defaultSearchEngine }),
+  setSidebarCollapsed: (sidebarCollapsed: boolean) => updateSettings({ sidebarCollapsed }),
+  setTheme: async (theme: string) => {
     if (['light', 'dark', 'system'].includes(theme)) {
       await useThemeStore.getState().setThemeMode(theme as ThemeMode)
     }
     return updateSettings({ theme })
-  }
-
-  const setAccentColor = async (accentColor: string) => {
-    return updateSettings({ accentColor })
-  }
-
-  const setAccentPreset = async (accentPreset: AccentPreset) => {
+  },
+  setAccentColor: async (accentColor: string) => updateSettings({ accentColor }),
+  setAccentPreset: async (accentPreset: AccentPreset) => {
     await useThemeStore.getState().setAccent(accentPreset)
     return updateSettings({ accentPreset })
-  }
-
-  const setWebColorScheme = async (webColorScheme: WebColorScheme) => {
+  },
+  setWebColorScheme: async (webColorScheme: WebColorScheme) => {
     await useThemeStore.getState().setWebColorScheme(webColorScheme)
     return updateSettings({ webColorScheme })
-  }
+  },
+  setStartupBehavior: (startupBehavior: StartupBehavior) => updateSettings({ startupBehavior }),
+  setStartupCustomUrls: (startupCustomUrls: string[]) => updateSettings({ startupCustomUrls }),
+  setDownloadPath: (downloadPath: string) => updateSettings({ downloadPath }),
+  setAskWhereToSave: (askWhereToSave: boolean) => updateSettings({ askWhereToSave }),
+  setOpenFolderOnDownload: (openFolderOnDownload: boolean) => updateSettings({ openFolderOnDownload }),
+  setDefaultZoom: (defaultZoom: number) => updateSettings({ defaultZoom }),
+  setAutoArchiveDuration: (autoArchiveDuration: AutoArchiveDuration) => updateSettings({ autoArchiveDuration }),
+  reloadSettings: () => loadSettings(true)
+}
 
-  const setStartupBehavior = (startupBehavior: StartupBehavior) => {
-    return updateSettings({ startupBehavior })
-  }
+export function useSettings() {
+  const settings = useBrowserStore((s) => s.settings)
+  const [error, setError] = useState<Error | null>(null)
 
-  const setStartupCustomUrls = (startupCustomUrls: string[]) => {
-    return updateSettings({ startupCustomUrls })
-  }
-
-  const setDownloadPath = (downloadPath: string) => {
-    return updateSettings({ downloadPath })
-  }
-
-  const setAskWhereToSave = (askWhereToSave: boolean) => {
-    return updateSettings({ askWhereToSave })
-  }
-
-  const setOpenFolderOnDownload = (openFolderOnDownload: boolean) => {
-    return updateSettings({ openFolderOnDownload })
-  }
-
-  const setDefaultZoom = (defaultZoom: number) => {
-    return updateSettings({ defaultZoom })
-  }
-
-  const setAutoArchiveDuration = (autoArchiveDuration: AutoArchiveDuration) => {
-    return updateSettings({ autoArchiveDuration })
-  }
+  useEffect(() => {
+    loadSettings().catch((err) => setError(err as Error))
+  }, [])
 
   return {
     settings,
-    loading,
+    loading: settings === null && !error,
     error,
-    updateSettings,
-    setDefaultSearchEngine,
-    setSidebarCollapsed,
-    setTheme,
-    setAccentColor,
-    setAccentPreset,
-    setWebColorScheme,
-    setStartupBehavior,
-    setStartupCustomUrls,
-    setDownloadPath,
-    setAskWhereToSave,
-    setOpenFolderOnDownload,
-    setDefaultZoom,
-    setAutoArchiveDuration,
-    reloadSettings: loadSettings
+    ...actions
   }
 }

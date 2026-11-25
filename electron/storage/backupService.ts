@@ -5,6 +5,7 @@ import { localStorageService } from './localStorage'
 import { historyService } from './historyService'
 import { privacyEngine } from '../privacy/privacyEngine'
 import { getAppPaths } from './paths'
+import { Schemas } from '../security'
 import type {
   Space,
   Tab,
@@ -40,6 +41,94 @@ export interface BackupV1File {
     privacy?: Record<string, any>
     history?: HistoryEntry[]
   }
+}
+
+/** Addresses a backup may put in tabs: web pages and Orbit's own start page, never file: or scripts */
+function isImportableUrl(url: unknown): url is string {
+  return typeof url === 'string' && url.length <= 8192 && /^(https?:\/\/|orbit:\/\/|about:blank$)/i.test(url)
+}
+
+const text = (v: unknown, max: number): string | undefined => (typeof v === 'string' && v ? v.slice(0, max) : undefined)
+
+function importableFavicon(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length <= 200_000 && /^(https?:\/\/|data:image\/)/i.test(v) ? v : undefined
+}
+
+/**
+ * Backup files can come from anyone: keep only known fields with the right types.
+ * The download folder is never imported (it could point at an auto-start folder or a network share).
+ */
+function sanitizeBackupData(raw: BackupV1File['data']): BackupV1File['data'] {
+  const out: BackupV1File['data'] = {}
+  if (raw.settings && typeof raw.settings === 'object') {
+    const settings: Record<string, unknown> = {}
+    for (const [key, schema] of Object.entries(Schemas.settingsUpdate.shape)) {
+      if (key === 'downloadPath' || !Object.prototype.hasOwnProperty.call(raw.settings, key)) continue
+      const parsed = schema.safeParse((raw.settings as Record<string, unknown>)[key])
+      if (parsed.success && parsed.data !== undefined) settings[key] = parsed.data
+    }
+    if (Array.isArray(settings.startupCustomUrls)) {
+      settings.startupCustomUrls = settings.startupCustomUrls.filter(isImportableUrl).slice(0, 50)
+    }
+    out.settings = settings as Partial<Settings>
+  }
+  if (Array.isArray(raw.spaces)) {
+    out.spaces = raw.spaces.slice(0, 500).flatMap((s) =>
+      s && typeof s === 'object'
+        ? [
+            {
+              id: typeof s.id === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(s.id) ? s.id : undefined,
+              name: text(s.name, 80),
+              color: text(s.color, 64),
+              icon: text(s.icon, 64),
+              order: typeof s.order === 'number' ? s.order : undefined,
+              createdAt: text(s.createdAt, 64)
+            } as Partial<Space>
+          ]
+        : []
+    )
+  }
+  if (Array.isArray(raw.tabs)) {
+    out.tabs = raw.tabs.slice(0, 20_000).flatMap((t) =>
+      t && typeof t === 'object' && isImportableUrl(t.url)
+        ? [
+            {
+              url: t.url,
+              title: text(t.title, 1000),
+              favicon: importableFavicon(t.favicon) ?? null,
+              isPinned: !!t.isPinned,
+              order: typeof t.order === 'number' ? t.order : undefined,
+              spaceName: text(t.spaceName, 80)
+            }
+          ]
+        : []
+    )
+  }
+  // Privacy preferences are sanitized by PrivacyEngine.updatePrefs
+  if (raw.privacy && typeof raw.privacy === 'object') {
+    out.privacy = {
+      ...raw.privacy,
+      whitelistedOrigins: Array.isArray(raw.privacy.whitelistedOrigins) ? raw.privacy.whitelistedOrigins : []
+    }
+  }
+  if (Array.isArray(raw.history)) {
+    out.history = raw.history.flatMap((h, i) =>
+      h && typeof h === 'object' && typeof h.url === 'string' && h.url.length <= 8192 && /^https?:\/\//i.test(h.url)
+        ? [
+            {
+              id: text(h.id, 100) ?? `hist-imp-${Date.now()}-${i}`,
+              url: h.url,
+              title: text(h.title, 1000) ?? h.url,
+              favicon: importableFavicon(h.favicon) ?? null,
+              spaceId: text(h.spaceId, 200),
+              visitedAt: Number.isFinite(Date.parse(String(h.visitedAt))) ? String(h.visitedAt) : new Date().toISOString(),
+              visitCount: typeof h.visitCount === 'number' && h.visitCount >= 1 ? Math.floor(h.visitCount) : 1
+            } as HistoryEntry
+          ]
+        : []
+    )
+  }
+  return out
 }
 
 export class BackupService {
@@ -340,7 +429,7 @@ export class BackupService {
     }
 
     const backupFile: BackupV1File = JSON.parse(rawContent)
-    const data = backupFile.data
+    const data = sanitizeBackupData(backupFile.data)
 
     // 1. Snapshot current state for rollback safety
     const previousFullState = localStorageService.getFullState()
@@ -435,6 +524,8 @@ export class BackupService {
           settings: newSettings,
           spaces: newSpaces,
           tabs: newTabs,
+          // Tab ids are regenerated, so old groups no longer apply; saved split layouts are URL-based and stay
+          savedSplits: previousFullState.savedSplits,
           encryptedVault: previousFullState.encryptedVault
         })
 

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { TitleBar } from '@/components/TitleBar/TitleBar'
 import { Sidebar } from '@/components/Sidebar/Sidebar'
 import { WebViewContainer } from '@/components/WebView/WebViewContainer'
@@ -24,19 +24,66 @@ import { LegalDialog } from '@/components/Legal/LegalDialog'
 import { Toaster } from '@/components/ui/sonner'
 import { toast } from 'sonner'
 import { useSpaces } from '@/hooks/useSpaces'
-import { useTabs } from '@/hooks/useTabs'
+import { useTabActions, useLoadSpaceTabs } from '@/hooks/useTabs'
 import { useSettings } from '@/hooks/useSettings'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
 import { api } from '@/lib/ipc'
+import { openNewTab } from '@/lib/startPage'
+import { groupForNewTab } from '@/lib/tabGroups'
+import { MeetingDialog } from '@/components/Meeting/MeetingDialog'
+import { SmartRuntime } from '@/components/Smart/SmartRuntime'
+import { SmartToolsDialog } from '@/components/Smart/SmartToolsDialog'
+import { ExtensionsDialog } from '@/components/Extensions/ExtensionsDialog'
+import { AboutDialog } from '@/components/Help/AboutDialog'
+import { PasswordSavePrompt } from '@/components/Passwords/PasswordSavePrompt'
+import { PasswordsDialog } from '@/components/Passwords/PasswordsDialog'
+import { useDevtoolsOverlayGuard } from '@/hooks/useDevtoolsOverlayGuard'
+import { useDismissOverlaysOnBlur } from '@/hooks/useDismissOverlaysOnBlur'
+import { placeNewTab } from '@/lib/tabPlacement'
+import { isPrivateWindow, PRIVATE_WINDOW_SPACE_ID } from '@/lib/privateWindow'
+import { useFavoritesButton } from '@/lib/favorites'
+import { TabStrip } from '@/components/TabStrip/TabStrip'
+import { FavoritesBar } from '@/components/Favorites/FavoritesBar'
+import { isStartPageUrl } from '@/lib/startPage'
+
+/** Active tab of a space (falls back to its first tab, like useTabs) */
+function activeTabOf(s: ReturnType<typeof useBrowserStore.getState>, spaceId: string | null) {
+  const tabs = spaceId ? s.tabsBySpace[spaceId] : undefined
+  if (!tabs || tabs.length === 0) return undefined
+  return tabs.find((t) => t.id === s.activeTabId) || tabs[0]
+}
 
 export const App: React.FC = () => {
   const { spaces, activeSpace, activeSpaceId } = useSpaces()
-  const { tabs, activeTab, activeTabId, createTab, removeTab, setActiveTab, reopenLastClosedTab } = useTabs(activeSpaceId)
+  // The root component must not subscribe to the tab list: it would re-render the whole UI on
+  // every title / favicon / URL change. It only needs the count and the active tab's title + URL.
+  const { removeTab, setActiveTab, reopenLastClosedTab } = useTabActions(activeSpaceId)
+  const tabsLoading = useLoadSpaceTabs(activeSpaceId)
+  const activeTabId = useBrowserStore((s) => s.activeTabId)
+  const tabCount = useBrowserStore((s) => (activeSpaceId ? s.tabsBySpace[activeSpaceId]?.length ?? 0 : 0))
+  const activeTabTitle = useBrowserStore((s) => activeTabOf(s, activeSpaceId)?.title)
+  const activeTabUrl = useBrowserStore((s) => activeTabOf(s, activeSpaceId)?.url)
+
+  // Private window: its first tab is created by the main process; close the window when its
+  // last tab is closed (like Edge InPrivate)
+  const privateHadTabs = useRef(false)
+  useEffect(() => {
+    if (!isPrivateWindow) return
+    document.documentElement.classList.add('private-window')
+    document.title = 'TCT Orbit — Private'
+  }, [])
+  useEffect(() => {
+    if (!isPrivateWindow || activeSpaceId !== PRIVATE_WINDOW_SPACE_ID || tabsLoading) return
+    if (tabCount > 0) privateHadTabs.current = true
+    else if (privateHadTabs.current) void api.window.close()
+  }, [tabCount, activeSpaceId, tabsLoading])
   const { settings, setSidebarCollapsed } = useSettings()
   const setCommandBarOpen = useBrowserStore((s) => s.setCommandBarOpen)
   const setDevToolsOpen = useBrowserStore((s) => s.setDevToolsOpen)
   const devtoolsOpen = useBrowserStore((s) => s.devtoolsOpen)
+  useDevtoolsOverlayGuard(devtoolsOpen)
+  useDismissOverlaysOnBlur()
   const appInfo = useBrowserStore((s) => s.appInfo)
   const setAppInfo = useBrowserStore((s) => s.setAppInfo)
   const zenMode = useBrowserStore((s) => s.zenMode)
@@ -84,7 +131,9 @@ export const App: React.FC = () => {
           url,
           title: 'Loading...',
           order: insertOrder,
-          isPrivate
+          isPrivate,
+          // "Open links in this group": the new tab joins the opener's group
+          groupId: groupForNewTab(currentActive, store.groupsBySpace[targetSpace] || [])
         })
 
         store.insertTabNextTo(targetSpace, newTab, store.activeTabId, isActive)
@@ -121,7 +170,7 @@ export const App: React.FC = () => {
           title: 'Loading...'
         })
 
-        store.insertTabNextTo(targetSpace, newTab, store.activeTabId, true)
+        placeNewTab(targetSpace, newTab)
       } catch (err) {
         console.error('[App] Failed to open external URL:', err)
       }
@@ -131,6 +180,25 @@ export const App: React.FC = () => {
       if (typeof unsub === 'function') unsub()
     }
   }, [])
+
+  // Links the OS asked us to open at launch (Orbit as default browser): open once spaces are loaded
+  const spacesLoaded = spaces.length > 0
+  useEffect(() => {
+    // Launch links belong to the main window, never the private one
+    if (isPrivateWindow || !spacesLoaded || !api.app?.takePendingUrls) return
+    api.app
+      .takePendingUrls()
+      .then(async (urls) => {
+        const store = useBrowserStore.getState()
+        const targetSpace = store.activeSpaceId || store.spaces[0]?.id
+        if (!targetSpace) return
+        for (const url of urls) {
+          const tab = await api.tabs.create({ spaceId: targetSpace, url, title: 'Loading...' })
+          placeNewTab(targetSpace, tab)
+        }
+      })
+      .catch(() => {})
+  }, [spacesLoaded])
 
   // Responsive layout: auto-collapse sidebar when window width is constrained (< 720px) to maximize browsing area
   useEffect(() => {
@@ -155,9 +223,9 @@ export const App: React.FC = () => {
     const appName = appInfo?.name || 'TCT Orbit'
     let title = appName
 
-    if (activeTab && activeTab.title) {
-      const activeTitle = activeTab.title.trim()
-      const otherTabsCount = Math.max(0, tabs.length - 1)
+    if (activeTabTitle) {
+      const activeTitle = activeTabTitle.trim()
+      const otherTabsCount = Math.max(0, tabCount - 1)
 
       if (otherTabsCount > 0) {
         title = `${activeTitle} and ${otherTabsCount} other tab${otherTabsCount === 1 ? '' : 's'} - ${appName}`
@@ -170,7 +238,7 @@ export const App: React.FC = () => {
     if (api.window && typeof api.window.setTitle === 'function') {
       api.window.setTitle(title).catch(() => {})
     }
-  }, [activeTab?.title, tabs.length, appInfo?.name])
+  }, [activeTabTitle, tabCount, appInfo?.name])
 
   // Download notifications listener
   useEffect(() => {
@@ -200,8 +268,6 @@ export const App: React.FC = () => {
   }, [])
 
   // Synchronized refs for fresh state in shortcut handlers without rebinding listeners
-  const tabsRef = React.useRef(tabs)
-  tabsRef.current = tabs
   const activeTabIdRef = React.useRef(activeTabId)
   activeTabIdRef.current = activeTabId
   const settingsRef = React.useRef(settings)
@@ -212,7 +278,7 @@ export const App: React.FC = () => {
     (action: string) => {
       switch (action) {
         case 'new-tab':
-          setCommandBarOpen(true, '', 'new-tab')
+          void openNewTab()
           break
         case 'new-private-tab':
           window.dispatchEvent(new CustomEvent('tct:new-private-tab'))
@@ -237,7 +303,7 @@ export const App: React.FC = () => {
         case 'next-tab': {
           const store = useBrowserStore.getState()
           const spaceId = store.activeSpaceId
-          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : []
           if (currentTabs.length > 1) {
             const activeId = store.activeTabId || activeTabIdRef.current
             const curIdx = currentTabs.findIndex((t) => t.id === activeId)
@@ -249,7 +315,7 @@ export const App: React.FC = () => {
         case 'prev-tab': {
           const store = useBrowserStore.getState()
           const spaceId = store.activeSpaceId
-          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : []
           if (currentTabs.length > 1) {
             const activeId = store.activeTabId || activeTabIdRef.current
             const curIdx = currentTabs.findIndex((t) => t.id === activeId)
@@ -268,7 +334,7 @@ export const App: React.FC = () => {
         case 'switch-tab-8': {
           const store = useBrowserStore.getState()
           const spaceId = store.activeSpaceId
-          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : []
           const targetIndex = parseInt(action.replace('switch-tab-', ''), 10) - 1
           if (currentTabs[targetIndex]) {
             setActiveTab(currentTabs[targetIndex].id)
@@ -278,7 +344,7 @@ export const App: React.FC = () => {
         case 'switch-tab-last': {
           const store = useBrowserStore.getState()
           const spaceId = store.activeSpaceId
-          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : tabsRef.current
+          const currentTabs = spaceId ? store.tabsBySpace[spaceId] || [] : []
           if (currentTabs.length > 0) {
             setActiveTab(currentTabs[currentTabs.length - 1].id)
           }
@@ -292,7 +358,8 @@ export const App: React.FC = () => {
           break
         case 'toggle-sidebar': {
           const cur = settingsRef.current
-          if (cur) {
+          // Horizon layout has no rail: don't silently flip its hidden collapse state
+          if (cur && cur.tabLayout !== 'topbar') {
             setSidebarCollapsed(!cur.sidebarCollapsed)
           }
           break
@@ -393,6 +460,16 @@ export const App: React.FC = () => {
     },
     [removeTab, setActiveTab, reopenLastClosedTab, setCommandBarOpen, setSidebarCollapsed, setDevToolsOpen]
   )
+
+  // Menus (View, Help ...) run the same actions as keyboard shortcuts
+  useEffect(() => {
+    const onAction = (e: Event) => {
+      const action = (e as CustomEvent).detail
+      if (typeof action === 'string') executeShortcutAction(action)
+    }
+    window.addEventListener('tct:shortcut-action', onAction)
+    return () => window.removeEventListener('tct:shortcut-action', onAction)
+  }, [executeShortcutAction])
 
   // Listen to shortcuts forwarded from webview before-input-event via IPC
   useEffect(() => {
@@ -586,6 +663,24 @@ export const App: React.FC = () => {
         return
       }
 
+      // Favorites panel: Ctrl+Shift+O (full manager if the toolbar button is unpinned)
+      if (isCmdOrCtrl && shift && !alt && (key === 'o' || code === 'KeyO')) {
+        e.preventDefault()
+        if (useFavoritesButton.getState().show) window.dispatchEvent(new CustomEvent('tct:open-favorites'))
+        else useBrowserStore.getState().setBookmarksDialogOpen(true)
+        return
+      }
+
+      // Show / hide favorites bar: Ctrl+Shift+B
+      if (isCmdOrCtrl && shift && !alt && (key === 'b' || code === 'KeyB')) {
+        e.preventDefault()
+        const cur = useBrowserStore.getState().settings?.favoritesBar ?? 'always'
+        void api.settings?.update?.({ favoritesBar: cur === 'never' ? 'always' : 'never' }).then((next: any) => {
+          if (next) useBrowserStore.getState().setSettings(next)
+        })
+        return
+      }
+
       // Bookmark Tab: Ctrl+D
       if (isCmdOrCtrl && !shift && !alt && (key === 'd' || code === 'KeyD')) {
         e.preventDefault()
@@ -700,10 +795,17 @@ export const App: React.FC = () => {
               : 'relative z-20 shrink-0'
           }`}
         >
+          {settings?.tabLayout === 'topbar' && <TabStrip />}
           <TitleBar
             spaceName={activeSpace?.name || 'Personal'}
             spaceColor={activeSpace?.color || '#6366f1'}
           />
+          {(() => {
+            // Favorites bar: always / never / only on new tabs (start page)
+            const mode = settings?.favoritesBar ?? 'always'
+            const show = mode === 'always' || (mode === 'new-tab' && (!activeTabUrl || isStartPageUrl(activeTabUrl)))
+            return show ? <FavoritesBar /> : null
+          })()}
         </div>
 
         {/* Main browser frame: Sidebar + WebViews + Docked DevTools */}
@@ -719,7 +821,7 @@ export const App: React.FC = () => {
                 : 'relative z-30 flex shrink-0 h-full'
             }`}
           >
-            <Sidebar />
+            <Sidebar hideTabs={settings?.tabLayout === 'topbar'} />
           </div>
 
           <WebViewContainer spaceId={activeSpaceId} />
@@ -735,6 +837,21 @@ export const App: React.FC = () => {
 
         {/* Focus Sprint Pomodoro Dialog */}
         <PomodoroDialog />
+
+        {/* Meeting mode: meeting + notes side by side with a countdown */}
+        <MeetingDialog />
+
+        {/* Snoozed tabs, page watchers, focus rules per space, page search */}
+        <SmartRuntime />
+        <SmartToolsDialog />
+
+        {/* Tools > Extensions, Help > About */}
+        <ExtensionsDialog />
+        <AboutDialog />
+
+        {/* Password manager: save prompt + manager */}
+        <PasswordSavePrompt />
+        <PasswordsDialog />
 
         {/* TCT Orbit spotlight CommandBar overlay */}
         <CommandBar />

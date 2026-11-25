@@ -3,31 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- No inline scripts. The dev server relaxes script-src for HMR only (electron.vite.config.ts). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https:; object-src 'none'; base-uri 'self'; form-action 'self';"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https: blob:; font-src 'self' data:; connect-src 'self' https://api.qrserver.com; object-src 'none'; base-uri 'none'; form-action 'none';"
     />
     <title>TCT Orbit</title>
     <link rel="icon" type="image/png" href="./assets/logo-sm.png" />
-    <script>
-      (function() {
-        try {
-          var storedMode = localStorage.getItem('tct_theme_mode') || localStorage.getItem('tct_pref_theme');
-          var mode = storedMode || (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
-          var accent = localStorage.getItem('tct_theme_accent') || localStorage.getItem('tct_pref_accent_preset') || 'orbit-blue';
-          var isDark = mode === 'dark' || (mode === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          var root = document.documentElement;
-          if (isDark) {
-            root.classList.add('dark');
-            root.style.colorScheme = 'dark';
-          } else {
-            root.classList.remove('dark');
-            root.style.colorScheme = 'light';
-          }
-          root.setAttribute('data-accent', accent);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="./theme-init.js"></script>
   </head>
   <body class="bg-background text-foreground antialiased overflow-hidden select-none">
     <div id="root"></div>

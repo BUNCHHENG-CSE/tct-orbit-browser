@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn, AppWindow, EyeOff, LayoutTemplate, ShieldCheck, Keyboard, RotateCcw, FileText } from 'lucide-react'
+import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn, AppWindow, EyeOff, LayoutTemplate, ShieldCheck, Keyboard, RotateCcw, FileText, Columns2, Video, Home, FileSearch, Eye, AlarmClock, Wrench } from 'lucide-react'
+import { placeNewTab } from '@/lib/tabPlacement'
 import {
   CommandGroup,
   CommandItem,
@@ -9,7 +10,16 @@ import { isUrl, normalizeUrl, SEARCH_ENGINES, type SearchEngineId } from '@/lib/
 import { api } from '@/lib/ipc'
 import { modKey } from '@/lib/platform'
 import { useBrowserStore } from '@/store/useBrowserStore'
+import { useMeetingStore } from '@/store/useMeetingStore'
+import { useSavedSplits } from '@/hooks/useSavedSplits'
+import { openSavedSplit } from '@/lib/savedSplits'
+import { START_PAGE_TITLE, START_PAGE_URL } from '@/lib/startPage'
 import type { Tab, Space, HistoryEntry } from '@/types/api'
+import type { PageSearchHit } from '@/types/smart'
+import { useSmartStore } from '@/store/useSmartStore'
+import { watchActivePage } from '@/lib/watchPage'
+import { isPrivateWindow } from '@/lib/privateWindow'
+import { HighlightedSnippet } from '@/components/Smart/SmartToolsDialog'
 
 interface SearchResultsProps {
   query: string
@@ -71,6 +81,23 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
   const engine = SEARCH_ENGINES[currentEngine] || SEARCH_ENGINES.duckduckgo
 
   const [historyResults, setHistoryResults] = useState<HistoryEntry[]>([])
+  const [pageHits, setPageHits] = useState<PageSearchHit[]>([])
+  const { splits } = useSavedSplits()
+
+  // Saved split layouts, meeting mode and the start page, matched against the query
+  const q = trimmed.toLowerCase()
+  const matches = (...texts: string[]) => !q || texts.some((t) => t.toLowerCase().includes(q))
+  const matchingSplits = splits.filter((sp) => matches(sp.name, 'split layout', sp.primary.url, sp.secondary.url)).slice(0, 5)
+  const showMeeting = matches('meeting mode', 'call', 'zoom', 'meet', 'teams')
+  const showStartPage = matches('start page', 'home', 'new tab page')
+  const showSmart = !!q && !isPrivateWindow && matches('smart tools', 'watch page changes', 'snooze snoozed tabs', 'focus rules block sites', 'search pages read')
+  const openStartPage = async () => {
+    const store = useBrowserStore.getState()
+    const spaceId = store.activeSpaceId || store.spaces[0]?.id
+    if (!spaceId) return
+    const tab = await api.tabs.create({ spaceId, url: START_PAGE_URL, title: START_PAGE_TITLE })
+    placeNewTab(spaceId, tab)
+  }
 
   useEffect(() => {
     let active = true
@@ -87,6 +114,27 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
       active = false
     }
   }, [trimmed])
+
+  // "Search what pages said": full-text matches from pages you've read (local index)
+  useEffect(() => {
+    let active = true
+    if (isPrivateWindow || trimmed.length < 3 || isInputUrl || !api.smart?.pageSearch) {
+      setPageHits([])
+      return
+    }
+    const t = setTimeout(() => {
+      api.smart
+        .pageSearch(trimmed, 4)
+        .then((res) => {
+          if (active) setPageHits(Array.isArray(res) ? res : [])
+        })
+        .catch(() => {})
+    }, 120)
+    return () => {
+      active = false
+      clearTimeout(t)
+    }
+  }, [trimmed, isInputUrl])
 
   // Filter tabs and spaces
   const matchingTabs = trimmed
@@ -292,7 +340,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
           </CommandItem>
 
           <CommandItem
-            value="New Private Tab No history, wiped when closed"
+            value="New Private Window Private Tab No history, wiped when closed"
             onSelect={act(() => window.dispatchEvent(new CustomEvent('tct:new-private-tab')))}
             className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
           >
@@ -300,7 +348,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
               <EyeOff className="w-4 h-4 text-violet-500" />
             </div>
             <div className="flex-1 min-w-0">
-              <span className="font-semibold text-foreground text-xs">New Private Tab</span>
+              <span className="font-semibold text-foreground text-xs">New Private Window</span>
               <p className="text-[11px] text-muted-foreground">No history, wiped when closed</p>
             </div>
             <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
@@ -453,6 +501,62 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
         </CommandGroup>
       )}
 
+      {/* Saved split layouts, meeting mode, start page */}
+      {(matchingSplits.length > 0 || showMeeting || showStartPage) && (
+        <CommandGroup heading="Layouts & Meetings">
+          {matchingSplits.map((split) => (
+            <CommandItem
+              key={split.id}
+              value={`split-layout ${split.name} ${split.primary.url} ${split.secondary.url} ${split.id}`}
+              onSelect={act(() => void openSavedSplit(split))}
+              className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary border border-primary/25 flex items-center justify-center shrink-0">
+                <Columns2 className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold text-foreground text-xs">{split.name}</span>
+                <p className="text-[11px] text-muted-foreground truncate">Open saved split layout</p>
+              </div>
+            </CommandItem>
+          ))}
+          {showMeeting && (
+            <CommandItem
+              value="meeting-mode Meeting mode call zoom meet teams notes"
+              onSelect={act(() => {
+                const m = useMeetingStore.getState()
+                if (m.active) m.focus()
+                else m.setDialogOpen(true)
+              })}
+              className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-xl bg-rose-500/10 text-rose-500 border border-rose-500/25 flex items-center justify-center shrink-0">
+                <Video className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold text-foreground text-xs">Meeting Mode</span>
+                <p className="text-[11px] text-muted-foreground">Open a call next to your notes, with a countdown</p>
+              </div>
+            </CommandItem>
+          )}
+          {showStartPage && (
+            <CommandItem
+              value="start-page Orbit start page home"
+              onSelect={act(() => void openStartPage())}
+              className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+            >
+              <div className="w-8 h-8 rounded-xl bg-muted/60 text-primary border border-border flex items-center justify-center shrink-0">
+                <Home className="w-4 h-4" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <span className="font-semibold text-foreground text-xs">Start Page</span>
+                <p className="text-[11px] text-muted-foreground">Most visited sites, layouts, notes and downloads</p>
+              </div>
+            </CommandItem>
+          )}
+        </CommandGroup>
+      )}
+
       {/* Primary Action: Go to URL or Search Web */}
       {trimmed && (
         <CommandGroup heading="Actions">
@@ -548,6 +652,78 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
             })}
           </CommandGroup>
         </>
+      )}
+
+      {/* Full-text matches in pages you've read */}
+      {pageHits.length > 0 && (
+        <>
+          <CommandSeparator />
+          <CommandGroup heading="Pages you've read">
+            {pageHits.map((hit) => (
+              <CommandItem
+                key={hit.url}
+                value={`page-text ${trimmed} ${hit.title} ${hit.url}`}
+                onSelect={() => onNavigate(hit.url)}
+                className="flex items-start gap-3 py-2 px-3 rounded-xl cursor-pointer"
+              >
+                <div className="w-5 h-5 mt-0.5 shrink-0 flex items-center justify-center rounded-md text-primary">
+                  <FileSearch className="w-3.5 h-3.5" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-medium text-foreground truncate">{hit.title || hit.url}</p>
+                  <p className="text-[11px] text-muted-foreground line-clamp-2 leading-snug mt-0.5">
+                    <HighlightedSnippet text={hit.snippet} query={trimmed} />
+                  </p>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        </>
+      )}
+
+      {/* Smart tools */}
+      {showSmart && (
+        <CommandGroup heading="Smart Tools">
+          <CommandItem
+            value="smart-watch Watch this page for changes"
+            onSelect={act(() => void watchActivePage())}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-500 border border-sky-500/25 flex items-center justify-center shrink-0">
+              <Eye className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Watch this page for changes</span>
+              <p className="text-[11px] text-muted-foreground">Get notified when a price, stock or result changes</p>
+            </div>
+          </CommandItem>
+          <CommandItem
+            value="smart-snoozed Snoozed tabs snooze"
+            onSelect={act(() => useSmartStore.getState().openSmartTools('snoozed'))}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-500 border border-amber-500/25 flex items-center justify-center shrink-0">
+              <AlarmClock className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Snoozed tabs</span>
+              <p className="text-[11px] text-muted-foreground">Tabs that come back later</p>
+            </div>
+          </CommandItem>
+          <CommandItem
+            value="smart-tools Smart Tools focus rules block sites search pages read"
+            onSelect={act(() => useSmartStore.getState().openSmartTools())}
+            className="flex items-center gap-3 py-2 px-3 rounded-xl cursor-pointer"
+          >
+            <div className="w-8 h-8 rounded-xl bg-primary/10 text-primary border border-primary/25 flex items-center justify-center shrink-0">
+              <Wrench className="w-4 h-4" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <span className="font-semibold text-foreground text-xs">Smart Tools</span>
+              <p className="text-[11px] text-muted-foreground">Watched pages, focus rules per space, page search</p>
+            </div>
+          </CommandItem>
+        </CommandGroup>
       )}
 
       {/* Matching History Results */}
