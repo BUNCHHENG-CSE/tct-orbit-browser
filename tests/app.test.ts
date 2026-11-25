@@ -107,3 +107,34 @@ describe('interface language', async () => {
     for (const a of SHORTCUT_ACTIONS) expect(TRANSLATIONS[a.label], a.label).toBeDefined()
   })
 })
+
+describe('dropped links', async () => {
+  vi.doMock('@/lib/ipc', () => ({ api: {} }))
+  vi.doMock('@/lib/tabPlacement', () => ({ placeNewTab: () => {} }))
+  vi.doMock('sonner', () => ({ toast: {} }))
+  const { linkFromData } = await import('../src/lib/linkDrop')
+
+  it('takes the first web address', () => {
+    expect(linkFromData('# comment\r\nhttps://youtube.com/watch?v=1\r\nhttps://b.com', 'x')).toBe('https://youtube.com/watch?v=1')
+    expect(linkFromData('', ' https://a.com/ ')).toBe('https://a.com/')
+  })
+
+  it('refuses everything else', () => {
+    for (const bad of ['file:///C:/x', 'javascript:alert(1)', 'data:text/html,x', 'some words', 'https://a b', '']) expect(linkFromData(bad, '')).toBeNull()
+  })
+})
+
+describe('load errors', async () => {
+  const { describeLoadError } = await import('../src/lib/netErrors')
+
+  it.each([
+    [-105, 'This site can’t be found'],
+    [-106, 'You are offline'],
+    [-102, 'The site refused to connect'],
+    [-118, 'The site took too long'],
+    [-201, 'Your connection is not private'],
+    [-999, 'Unable to reach webpage']
+  ])('%i -> %s', (code, title) => expect(describeLoadError(code, 'ERR_X', 'https://a.com/x').title).toBe(title))
+
+  it('survives odd addresses', () => expect(describeLoadError(-105, '', 'not a url').text).toContain('The site'))
+})

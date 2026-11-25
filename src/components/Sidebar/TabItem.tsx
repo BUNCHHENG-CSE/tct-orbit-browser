@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2, FolderPlus, Folder, FolderMinus, Home, AppWindow } from 'lucide-react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2, FolderPlus, Folder, FolderMinus, Home, AppWindow, Loader2 } from 'lucide-react'
 import { getUnreadCount, stripUnreadPrefix } from '@/lib/liveTabs'
 import { isStartPageUrl, isPrivateStartUrl } from '@/lib/startPage'
 import { groupById, groupPathLabel, resolveGroupColor } from '@/lib/tabGroups'
@@ -61,6 +61,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
   const t = useT()
   const isolated = useBrowserStore((s) => !!s.spaces.find((sp) => sp.id === tab.spaceId)?.isolated)
   const movable = canMoveToNewWindow(tab, isolated)
+  const loading = useBrowserStore((s) => !!s.loadingTabs[tab.id])
   const thumbnail = useThumbnailStore((s) => s.thumbs[tab.id]?.dataUrl)
   // Reading progress of the page (thin bar under the title); only while partly read
   const progress = useSmartStore((s) => s.progress[tab.id])
@@ -115,7 +116,8 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
         }
       }
     },
-    'data-orbit-tab': true
+    'data-orbit-tab': true,
+    'data-tab-id': tab.id
   }
 
   const openInSplit = () => {
@@ -183,7 +185,9 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
 
       {/* Favicon with Dark Mode Contrast Protection */}
       <div className="w-5 h-5 shrink-0 flex items-center justify-center rounded-md p-0.5 dark:bg-white/[0.08] bg-transparent transition-colors">
-        {faviconSrc && !faviconError ? (
+        {loading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" aria-label="Loading" />
+        ) : faviconSrc && !faviconError ? (
           <img
             src={faviconSrc}
             alt=""
@@ -236,7 +240,9 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
 
       {/* Favicon with Dark Mode Contrast Protection */}
       <div className="w-5 h-5 shrink-0 flex items-center justify-center rounded-md p-0.5 dark:bg-white/[0.08] bg-transparent transition-colors">
-        {faviconSrc && !faviconError ? (
+        {loading ? (
+          <Loader2 className="w-3.5 h-3.5 animate-spin text-primary" aria-label="Loading" />
+        ) : faviconSrc && !faviconError ? (
           <img
             src={faviconSrc}
             alt=""

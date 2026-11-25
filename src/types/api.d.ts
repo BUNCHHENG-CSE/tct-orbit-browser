@@ -340,6 +340,17 @@ export interface ContextMenuParams {
   isEditable?: boolean;
   selectionText?: string;
   titleText?: string;
+  linkText?: string;
+  misspelledWord?: string;
+  mediaFlags?: {
+    isPaused?: boolean;
+    isMuted?: boolean;
+    isLooping?: boolean;
+    isControlsVisible?: boolean;
+    canToggleControls?: boolean;
+    canLoop?: boolean;
+    hasAudio?: boolean;
+  };
   pageURL?: string;
   frameURL?: string;
   editFlags?: {

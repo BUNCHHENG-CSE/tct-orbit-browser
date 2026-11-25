@@ -177,6 +177,8 @@ function isYouTubeHost(hostname: string): boolean {
   return hostMatchesSuffix(hostname, 'youtube.com') || hostMatchesSuffix(hostname, 'youtu.be')
 }
 
+const YOUTUBE_AD_PATHS = ['/youtubei/v1/player/ad_break', '/api/stats/ads', '/pagead/', '/get_midroll_info', '/ptracking']
+
 const YOUTUBE_SPA_PREFIXES = [
   '/youtubei/',
   '/s/desktop/',
@@ -577,6 +579,11 @@ export class PrivacyEngine {
     return this.whitelist.has(safeOrigin(pageUrl))
   }
 
+  /** Ads are blocked on this page (setting on, shield not turned off for the site) */
+  public adBlockingOn(pageUrl: string): boolean {
+    return this.prefs.adBlockerEnabled && !this.isPageWhitelisted(pageUrl)
+  }
+
   private shouldUpgradeToHttps(hostname: string): boolean {
     if (isLocalOrPrivateHost(hostname) || this.httpsExemptHosts.has(hostname)) return false
     const now = Date.now()
@@ -671,6 +678,11 @@ export class PrivacyEngine {
 
       // Never block YouTube navigations or its SPA endpoints (breaks Shorts/Subscriptions routing)
       if (isYouTubeHost(hostname)) {
+        // Ads the player asks for while a video or live stream is running
+        if (this.prefs.adBlockerEnabled && !isMainFrame && YOUTUBE_AD_PATHS.some((p) => parsed.pathname.startsWith(p))) {
+          this.recordBlocked(pageOrigin, 'ads', isPrivate)
+          return callback({ cancel: true })
+        }
         if (isMainFrame || YOUTUBE_SPA_PREFIXES.some((p) => parsed.pathname.startsWith(p))) {
           return callback({})
         }

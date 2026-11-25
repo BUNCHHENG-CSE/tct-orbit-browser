@@ -16,7 +16,8 @@ import {
   Settings,
   UserRound,
   SlidersHorizontal,
-  AppWindow
+  AppWindow,
+  Loader2
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSpaces } from '@/hooks/useSpaces'
@@ -35,6 +36,7 @@ import { isPrivateWindow } from '@/lib/privateWindow'
 import { canMoveToNewWindow, isExtraWindow, isMainWindow } from '@/lib/extraWindow'
 import { moveTabToOtherWindow } from '@/lib/tabLifecycle'
 import { useT } from '@/lib/i18n'
+import { useLinkDrop } from '@/lib/linkDrop'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -71,6 +73,8 @@ const leftFoot = { background: 'radial-gradient(circle at 0 0, transparent 7.5px
 const rightFoot = { background: 'radial-gradient(circle at 100% 0, transparent 7.5px, hsl(var(--chrome-bg)) 8px)' }
 
 const Favicon: React.FC<{ tab: Tab; className?: string }> = ({ tab, className = 'w-4 h-4' }) => {
+  const loading = useBrowserStore((s) => !!s.loadingTabs[tab.id])
+  if (loading) return <Loader2 className={`${className} shrink-0 animate-spin text-primary`} aria-label="Loading" />
   if (tab.isPrivate && isStartPageUrl(tab.url)) return <EyeOff className={`${className} shrink-0 text-violet-500`} />
   return tab.favicon ? (
     <img src={tab.favicon} alt="" className={`${className} shrink-0 rounded-sm object-contain`} draggable={false} />
@@ -122,6 +126,7 @@ export const TabStrip: React.FC = () => {
   }
   const accent = activeSpace?.color || '#6366f1'
   const t = useT()
+  const { over: linkOver, linkDropProps } = useLinkDrop('horizontal')
   const movable = (tab: Tab) => canMoveToNewWindow(tab, !!activeSpace?.isolated)
   const tearOff = (tab: Tab) => (e: React.DragEvent) => {
     if (movable(tab) && !isExtraWindow && droppedOutside(e)) void moveTabToOtherWindow(tab.id)
@@ -314,7 +319,10 @@ export const TabStrip: React.FC = () => {
 
   return (
     // app-drag: empty areas move the window; Windows/macOS maximize on double-click natively
-    <div className="flex items-stretch h-10 w-full bg-sidebar select-none app-drag animate-in fade-in slide-in-from-top-1 duration-200">
+    <div
+      {...linkDropProps}
+      className={`flex items-stretch h-10 w-full bg-sidebar select-none app-drag animate-in fade-in slide-in-from-top-1 duration-200 ${linkOver ? 'ring-2 ring-inset ring-primary' : ''}`}
+    >
       {/* macOS traffic lights */}
       {isMac && <div className="w-[74px] shrink-0" />}
 

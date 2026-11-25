@@ -444,6 +444,17 @@ const hardenedApi: ElectronAPI = {
       onRequest: (callback) => listen('auth:request', callback),
       onDismiss: (callback) => listen('auth:dismiss', callback)
     },
+    pagePrompts: {
+      respond: (id: string, value: string | null, mute: boolean) => ipcRenderer.invoke('page-prompt:respond', id, value, mute),
+      onRequest: (callback) => listen('page-prompt:request', callback),
+      onDismiss: (callback) => listen('page-prompt:dismiss', callback)
+    },
+    popups: {
+      onBlocked: (callback) => listen('popup:blocked', callback)
+    },
+    spelling: {
+      addWord: (webContentsId: number, word: string) => ipcRenderer.invoke('spelling:add-word', webContentsId, word)
+    },
     safeBrowsing: {
       status: () => ipcRenderer.invoke('safe-browsing:status'),
       refresh: () => ipcRenderer.invoke('safe-browsing:refresh'),

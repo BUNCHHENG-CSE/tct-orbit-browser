@@ -1,10 +1,12 @@
-import { BrowserWindow, webContents, type IpcMain, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, session, webContents, type IpcMain, type IpcMainInvokeEvent } from 'electron'
 import { z } from 'zod'
 import { secureHandle } from '../security'
 import { updateService } from '../essentials/updater'
 import { screenShareService } from '../essentials/screenShare'
 import { httpAuthService } from '../essentials/httpAuth'
 import { confirmCloseTab } from '../essentials/unload'
+import { pagePrompts } from '../essentials/pagePreloads'
+import { SHARED_TAB_PARTITION } from '../sessions'
 import { safeBrowsing } from '../essentials/safeBrowsing'
 import { addressService } from '../essentials/addresses'
 import { pageTools } from '../essentials/pageTools'
@@ -25,6 +27,8 @@ const S = {
   host: z.string().min(1).max(300),
   optionalUrl: z.string().max(8192).optional(),
   screenRespond: z.tuple([id, z.string().max(200).nullable(), z.boolean()]),
+  promptRespond: z.tuple([id, z.string().max(2000).nullable(), z.boolean()]),
+  addWord: z.tuple([wcId, z.string().min(1).max(99).regex(/^\S+$/)]),
   authRespond: z.tuple([id, z.string().max(300).nullable(), z.string().max(1000)]),
   address: z.object({
     id: id.optional(),
@@ -85,6 +89,18 @@ export function register(ipcMain: IpcMain): void {
   secureHandle(ipcMain, 'auth:respond', S.authRespond, (e, reqId: string, user: string | null, pass: string) =>
     httpAuthService.respond(winOf(e), reqId, user, pass)
   )
+
+  secureHandle(ipcMain, 'page-prompt:respond', S.promptRespond, (e, reqId: string, value: string | null, mute: boolean) =>
+    pagePrompts.respond(winOf(e), reqId, value, mute)
+  )
+  secureHandle(ipcMain, 'spelling:add-word', S.addWord, (_, contentsId: number, word: string) => {
+    const wc = tab(contentsId)
+    if (!wc) return false
+    const ok = wc.session.addWordToSpellCheckerDictionary(word)
+    // A word learned in a Space with its own profile is known everywhere; private tabs leave no trace
+    if (wc.session.isPersistent()) session.fromPartition(SHARED_TAB_PARTITION).addWordToSpellCheckerDictionary(word)
+    return ok
+  })
 
   secureHandle(ipcMain, 'safe-browsing:status', null, () => safeBrowsing.status())
   secureHandle(ipcMain, 'safe-browsing:refresh', null, async () => {

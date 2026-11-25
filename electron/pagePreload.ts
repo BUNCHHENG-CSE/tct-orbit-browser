@@ -1,9 +1,12 @@
-import { contextBridge } from 'electron'
+import { contextBridge, ipcRenderer } from 'electron'
 
 /**
  * Runs in every web page before the page's own scripts (registered per session in
- * essentials/silentPasskeys.ts). It exposes nothing to the page.
- *
+ * essentials/pagePreloads.ts). The functions below are copied into the page, so each must be
+ * self-contained. The page gets no API: only window.prompt() leads back to the browser.
+ */
+
+/**
  * Sites like Google start a *silent* passkey request on their sign-in page. Chrome offers those
  * passkeys inside autofill; Electron has no such UI and opens the operating system's passkey
  * dialog over the page instead, without the user asking. So silent requests are reported as
@@ -46,8 +49,79 @@ function quietSilentPasskeys(): void {
   wrap(container, 'create', (fn, self, args) => (isSilent(args[0]) ? Promise.reject(notAllowed()) : Reflect.apply(fn, self, args)))
 }
 
+/** Electron has no window.prompt(): ask in Orbit's own dialog (the page waits, as in any browser) */
+function addPrompt(ask: (message: string, value: string) => string | null): void {
+  const prompt = function prompt(message?: unknown, value?: unknown): string | null {
+    return ask(message === undefined ? '' : String(message), value === undefined ? '' : String(value))
+  }
+  Object.defineProperty(window, 'prompt', { value: prompt, writable: true, enumerable: true, configurable: true })
+}
+
+/**
+ * YouTube puts its ads in the same answers as the video, so they can't be blocked by address.
+ * Take the ad lists out of the player data before the player reads it.
+ */
+function removeYouTubeAds(): void {
+  const AD_KEYS = ['adPlacements', 'adSlots', 'playerAds', 'adBreakHeartbeatParams']
+  const MARK = /"(?:adPlacements|adSlots|playerAds|adBreakHeartbeatParams)"/
+
+  const strip = (o: any): void => {
+    if (!o || typeof o !== 'object') return
+    for (const k of AD_KEYS) if (k in o) delete o[k]
+  }
+  const clean = (data: any): any => {
+    try {
+      for (const o of Array.isArray(data) ? data.slice(0, 20) : [data]) {
+        if (!o || typeof o !== 'object') continue
+        strip(o)
+        strip(o.playerResponse)
+        strip(o.response?.playerResponse)
+        // Shorts: whole ad videos in the list
+        if (Array.isArray(o.entries)) {
+          o.entries = o.entries.filter((e: any) => !e?.command?.reelWatchEndpoint?.adClientParams?.isAd)
+        }
+      }
+    } catch {}
+    return data
+  }
+  const wrap = (target: any, name: string, apply: (original: any, self: any, args: any[]) => any): void => {
+    target[name] = new Proxy(target[name], { apply: (fn, self, args) => apply(fn, self, args) })
+  }
+
+  wrap(JSON, 'parse', (fn, self, args) => {
+    const out = Reflect.apply(fn, self, args)
+    return typeof args[0] === 'string' && out && typeof out === 'object' && MARK.test(args[0]) ? clean(out) : out
+  })
+  wrap(Response.prototype, 'json', (fn, self, args) => (Reflect.apply(fn, self, args) as Promise<any>).then(clean))
+
+  // The first video's data is written into the page itself
+  let initial: any
+  Object.defineProperty(window, 'ytInitialPlayerResponse', {
+    configurable: true,
+    enumerable: true,
+    get: () => initial,
+    set: (v) => {
+      initial = clean(v)
+    }
+  })
+}
+
 try {
-  if (/^https?:$/.test(location.protocol)) contextBridge.executeInMainWorld({ func: quietSilentPasskeys })
+  if (/^https?:$/.test(location.protocol)) {
+    contextBridge.executeInMainWorld({ func: quietSilentPasskeys })
+    contextBridge.executeInMainWorld({
+      func: addPrompt,
+      args: [
+        (message: string, value: string): string | null => {
+          const answer: unknown = ipcRenderer.sendSync('page:prompt', String(message).slice(0, 2000), String(value).slice(0, 2000))
+          return typeof answer === 'string' ? answer : null
+        }
+      ]
+    })
+    if (/(^|\.)youtube\.com$/.test(location.hostname) && ipcRenderer.sendSync('page:ad-block') === true) {
+      contextBridge.executeInMainWorld({ func: removeYouTubeAds })
+    }
+  }
 } catch {
   // Never break a page over this
 }

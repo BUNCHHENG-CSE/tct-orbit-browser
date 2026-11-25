@@ -90,6 +90,17 @@ export const EssentialsRuntime: React.FC = () => {
     return () => window.removeEventListener('tct:translate-page', onTranslate)
   }, [])
 
+  // A page tried to open a window on its own (one notice per site at a time)
+  useEffect(() => {
+    return api.essentials.popups.onBlocked(({ url, host }) => {
+      toast(`Popup blocked from ${host}`, {
+        id: `popup-${host}`,
+        description: url.length > 90 ? `${url.slice(0, 90)}…` : url,
+        action: { label: 'Open', onClick: () => void openInNewTab(url) }
+      })
+    })
+  }, [])
+
   // Extra windows have a single space: make sure nothing switches away from it
   useEffect(() => {
     if (isExtraWindow) document.documentElement.classList.add('extra-window')

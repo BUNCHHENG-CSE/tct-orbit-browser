@@ -29,7 +29,7 @@ import { ReaderModeOverlay } from '@/components/ReaderMode/ReaderModeOverlay'
 import { FindInPageBar } from '@/components/FindInPage/FindInPageBar'
 import { READABILITY_EXTRACTION_SCRIPT, PICTURE_IN_PICTURE_SCRIPT } from '@/lib/readability'
 import { getDomainZoom, setDomainZoom, getNextZoomIn, getNextZoomOut, extractDomain } from '@/lib/domainZoom'
-import { PROGRESS_SCRIPT, PROGRESS_MSG, PAGE_TEXT_SCRIPT, scrollToRatioScript } from '@/lib/pageScripts'
+import { PROGRESS_SCRIPT, PROGRESS_MSG, PAGE_TEXT_SCRIPT, PAGE_BASE_SCRIPT, scrollToRatioScript } from '@/lib/pageScripts'
 import { saveReadingPosition, getReadingPosition } from '@/lib/readingProgress'
 import { webviewRegistry } from '@/lib/webviewRegistry'
 import { useSmartStore, focusBlockFor } from '@/store/useSmartStore'
@@ -37,6 +37,8 @@ import { useMeetingStore } from '@/store/useMeetingStore'
 import { CompareToolbar } from '@/components/Smart/CompareToolbar'
 import { installTabDragGuard } from '@/lib/tabDragGuard'
 import { safeImageUrl } from '@/lib/sanitizeHtml'
+import { describeLoadError, type LoadError } from '@/lib/netErrors'
+import { START_PAGE_URL, START_PAGE_TITLE, PRIVATE_START_URL, PRIVATE_START_TITLE } from '@/lib/startPage'
 import { useT } from '@/lib/i18n'
 import type { UnsafeSiteInfo } from '@/types/essentials'
 
@@ -125,8 +127,13 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   onFocusPane
 }) => {
   const webviewRef = useRef<any>(null)
-  const [hasError, setHasError] = useState(false)
-  const [errorMessage, setErrorMessage] = useState('')
+  const [loadError, setLoadError] = useState<LoadError | null>(null)
+  const hasError = loadError !== null
+  /** Address that failed, until the next navigation. Chromium "finishes loading" its own error page. */
+  const failedUrlRef = useRef<string | null>(null)
+  // Address of the link under the pointer
+  const [hoverUrl, setHoverUrl] = useState('')
+  const isFullscreen = useBrowserStore((s) => s.htmlFullscreenTabId === tab.id)
   const [isLoading, setIsLoading] = useState(false)
   const t = useT()
   // The page's process ended unexpectedly
@@ -350,8 +357,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
     const handleStartLoading = () => {
       setIsLoading(true)
-      setHasError(false)
+      setLoadError(null)
       setCrashed(null)
+      useBrowserStore.getState().setTabLoading(tab.id, true)
     }
 
     const handleProcessGone = (e: any) => {
@@ -369,6 +377,20 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
     const handleStopLoading = () => {
       setIsLoading(false)
+      useBrowserStore.getState().setTabLoading(tab.id, false)
+    }
+
+    const handleEnterFullscreen = () => useBrowserStore.getState().setHtmlFullscreen(tab.id)
+    const handleLeaveFullscreen = () => {
+      if (useBrowserStore.getState().htmlFullscreenTabId === tab.id) useBrowserStore.getState().setHtmlFullscreen(null)
+    }
+
+    const handleTargetUrl = (e: any) => setHoverUrl(typeof e?.url === 'string' ? e.url.slice(0, 500) : '')
+
+    // window.close(): the page is gone, so is its tab
+    const handleGuestClose = () => {
+      useBrowserStore.getState().removeTabFromStore(tab.id)
+      api.tabs.remove(tab.id).catch(() => {})
     }
 
     const syncTheme = () => {
@@ -383,7 +405,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
     const handleDidFinishLoad = () => {
       setIsLoading(false)
-      setHasError(false)
+      // This was Chromium's blank error page, not the site
+      if (failedUrlRef.current) return
+      setLoadError(null)
       syncTheme()
       applyDomainZoom()
       try {
@@ -452,13 +476,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       // errorCode -3 is ABORTED (e.g. user navigated before finish), ignore it
       if (e.isMainFrame && e.errorCode !== -3) {
         setIsLoading(false)
-        setHasError(true)
-        // -20 ERR_BLOCKED_BY_CLIENT: cancelled by TCT Orbit itself (Focus Sprint block list)
-        setErrorMessage(
-          e.errorCode === -20
-            ? 'This site is blocked: it is on your Focus Sprint list, or TCT Orbit stopped it.'
-            : e.errorDescription || 'Failed to load webpage'
-        )
+        failedUrlRef.current = e.validatedURL || currentNavUrlRef.current
+        setLoadError(describeLoadError(e.errorCode, e.errorDescription || '', failedUrlRef.current || ''))
       }
     }
 
@@ -506,6 +525,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     // Per-space focus rules: stop blocked sites before they load
     const handleStartNavigation = (e: any) => {
       if (!e || e.isMainFrame === false || e.isInPlace) return
+      failedUrlRef.current = null
+      setHoverUrl('')
       const domain = focusBlockFor(tabRef.current.spaceId, e.url)
       if (domain) {
         try {
@@ -543,8 +564,18 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       }
     }
 
+    // Pages without a background of their own are drawn on white, like in any browser
+    const updateBase = () => {
+      el.executeJavaScript(PAGE_BASE_SCRIPT)
+        .then((kind: unknown) => {
+          el.style.backgroundColor = kind === 'light' && !failedUrlRef.current ? '#ffffff' : ''
+        })
+        .catch(() => {})
+    }
+
     const handleDomReady = () => {
       syncTheme()
+      updateBase()
       try {
         el.executeJavaScript(PROGRESS_SCRIPT).catch(() => {})
         // Link click interceptor in capture phase to guarantee target="_blank", Ctrl+click, and middle-click open tabs reliably
@@ -636,6 +667,10 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     el.addEventListener('did-fail-load', handleDidFailLoad)
     el.addEventListener('new-window', handleNewWindow)
     el.addEventListener('render-process-gone', handleProcessGone)
+    el.addEventListener('enter-html-full-screen', handleEnterFullscreen)
+    el.addEventListener('leave-html-full-screen', handleLeaveFullscreen)
+    el.addEventListener('update-target-url', handleTargetUrl)
+    el.addEventListener('close', handleGuestClose)
 
     return () => {
       unregisterWebviewRef(tab.id)
@@ -657,6 +692,12 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       el.removeEventListener('did-fail-load', handleDidFailLoad)
       el.removeEventListener('new-window', handleNewWindow)
       el.removeEventListener('render-process-gone', handleProcessGone)
+      el.removeEventListener('enter-html-full-screen', handleEnterFullscreen)
+      el.removeEventListener('leave-html-full-screen', handleLeaveFullscreen)
+      el.removeEventListener('update-target-url', handleTargetUrl)
+      el.removeEventListener('close', handleGuestClose)
+      handleLeaveFullscreen()
+      useBrowserStore.getState().setTabLoading(tab.id, false)
       offUnsafe?.()
     }
   }, [tab.id, registerWebviewRef, unregisterWebviewRef])
@@ -707,7 +748,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   const handleLeaveDanger = () => {
     const el = webviewRef.current
     setDanger(null)
-    setHasError(false)
+    setLoadError(null)
+    failedUrlRef.current = null
     try {
       // The blocked page was never shown: the previous page is still there
       const live = el?.getURL()
@@ -723,17 +765,44 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     await api.essentials.safeBrowsing.allow(danger.host)
     const url = danger.url
     setDanger(null)
-    setHasError(false)
+    setLoadError(null)
     loadUrlWithRetry(webviewRef.current, url)
   }
 
   const handleRetry = () => {
+    const failed = failedUrlRef.current
     setCrashed(null)
-    setHasError(false)
-    if (webviewRef.current) {
-      webviewRef.current.reload()
-    }
+    setLoadError(null)
+    if (failed) loadUrlWithRetry(webviewRef.current, failed)
+    else webviewRef.current?.reload()
   }
+  const handleRetryRef = useRef(handleRetry)
+  handleRetryRef.current = handleRetry
+
+  // Back online: load the page that could not be reached
+  useEffect(() => {
+    if (!hasError || !isActive) return
+    const retry = () => handleRetryRef.current()
+    window.addEventListener('online', retry)
+    return () => window.removeEventListener('online', retry)
+  }, [hasError, isActive])
+
+  // Another tab was selected: full screen ends
+  useEffect(() => {
+    if (isFullscreen && !isActive) webviewRef.current?.executeJavaScript('document.exitFullscreen && document.exitFullscreen()').catch(() => {})
+  }, [isFullscreen, isActive])
+
+  // Stop button
+  useEffect(() => {
+    if (!isActive) return
+    const stop = () => {
+      try {
+        webviewRef.current?.stop()
+      } catch {}
+    }
+    window.addEventListener('tct:webview-stop', stop)
+    return () => window.removeEventListener('tct:webview-stop', stop)
+  }, [isActive])
 
   return (
     <div
@@ -746,7 +815,9 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         zIndex: isActive ? 10 : 0,
         position: 'absolute',
         inset: paneStyle ? undefined : 0,
-        ...paneStyle
+        ...paneStyle,
+        // Full-screen video: over the other split pane too
+        ...(isFullscreen ? { left: 0, right: 0, top: 0, bottom: 0, width: '100%', zIndex: 50, border: 'none' } : {})
       }}
       onMouseDown={() => {
         if (onFocusPane) onFocusPane()
@@ -754,7 +825,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       }}
     >
       {/* Split Pane Header Indicator */}
-      {splitRole && (
+      {splitRole && !isFullscreen && (
         <div className="h-7 px-3 bg-muted/60 border-b border-border flex items-center justify-between text-xs shrink-0 select-none z-20">
           <div className="flex items-center gap-2 truncate">
             {tab.favicon ? (
@@ -884,6 +955,13 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         </div>
       )}
 
+      {/* Address of the link under the pointer */}
+      {hoverUrl && isActive && (
+        <div className="pointer-events-none absolute bottom-0 left-0 z-20 max-w-[60%] truncate rounded-tr-lg border-t border-r border-border bg-popover px-2.5 py-1 text-[11.5px] text-popover-foreground shadow-md">
+          {hoverUrl}
+        </div>
+      )}
+
       {/* Known phishing / malware site */}
       {danger && (
         <div role="alertdialog" aria-label={t('Dangerous site')} className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-20">
@@ -936,10 +1014,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
             <AlertCircle className="w-6 h-6" />
           </div>
           <h3 className="text-base font-semibold text-foreground mb-1">
-            {t('Unable to reach webpage')}
+            {loadError ? loadError.title : t('Unable to reach webpage')}
           </h3>
           <p className="text-xs text-muted-foreground max-w-sm mb-4">
-            {errorMessage || 'Check your internet connection or the URL.'}
+            {loadError?.text}
+            <span className="block mt-2 font-mono text-[10.5px] opacity-60">{loadError?.code}</span>
           </p>
           <div className="flex items-center gap-2">
             <button
@@ -950,7 +1029,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
               <span>{t('Retry')}</span>
             </button>
             <button
-              onClick={() => onOpenNewTab('https://duckduckgo.com')}
+              onClick={() => void openNewTab()}
               className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium flex items-center gap-2 transition-colors border border-border"
             >
               <span>{t('Go to Home')}</span>
@@ -1169,12 +1248,29 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     })
   }, [isDark])
 
+  // Counts page views as they mount: a tab can get its page view long after it became active
+  // (opened from the Start page, woken from sleep), and Back / Forward must follow the new one
+  const [webviewMounts, setWebviewMounts] = useState(0)
   const registerWebviewRef = useCallback((tabId: string, el: any) => {
+    setWebviewMounts((n) => n + 1)
     webviewsRef.current.set(tabId, el)
     webviewRegistry.set(tabId, el)
   }, [])
 
+  // Tabs opened from the Start page: Back leads there again
+  const fromStartRef = useRef(new Map<string, string>())
+  const lastUrlsRef = useRef(new Map<string, string>())
+  for (const t of tabs) {
+    const before = lastUrlsRef.current.get(t.id)
+    if (before !== t.url) {
+      if (isStartPageUrl(before) && /^https?:/i.test(t.url)) fromStartRef.current.set(t.id, before!)
+      else if (isStartPageUrl(t.url)) fromStartRef.current.delete(t.id)
+      lastUrlsRef.current.set(t.id, t.url)
+    }
+  }
+
   const unregisterWebviewRef = useCallback((tabId: string) => {
+    setWebviewMounts((n) => n + 1)
     webviewRegistry.delete(tabId, webviewsRef.current.get(tabId))
     webviewsRef.current.delete(tabId)
   }, [])
@@ -1192,7 +1288,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     const prevNavRef = { canBack: false, canFwd: false }
     const updateNavState = () => {
       try {
-        const canBack = typeof activeEl.canGoBack === 'function' ? activeEl.canGoBack() : false
+        const canBack = (typeof activeEl.canGoBack === 'function' ? activeEl.canGoBack() : false) || fromStartRef.current.has(activeTabId!)
         const canFwd = typeof activeEl.canGoForward === 'function' ? activeEl.canGoForward() : false
         if (canBack !== prevNavRef.canBack || canFwd !== prevNavRef.canFwd) {
           prevNavRef.canBack = canBack
@@ -1239,14 +1335,20 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         activeEl.removeEventListener('did-stop-loading', updateNavState)
       } catch {}
     }
-  }, [activeTabId, updateTab])
+  }, [activeTabId, updateTab, webviewMounts])
 
   const handleBack = useCallback(() => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
     if (el && typeof el.goBack === 'function' && el.canGoBack()) {
       el.goBack()
+      return
     }
-  }, [activeTabId])
+    const start = activeTabId ? fromStartRef.current.get(activeTabId) : undefined
+    if (activeTabId && start) {
+      const title = start === PRIVATE_START_URL ? PRIVATE_START_TITLE : START_PAGE_TITLE
+      void updateTab(activeTabId, { url: start || START_PAGE_URL, title, favicon: null })
+    }
+  }, [activeTabId, updateTab])
 
   const handleForward = useCallback(() => {
     const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
@@ -1268,31 +1370,6 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       el.reloadIgnoringCache()
     } else if (el && typeof el.reload === 'function') {
       el.reload()
-    }
-  }, [activeTabId])
-
-  const handleZoomIn = useCallback(() => {
-    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
-    if (el && typeof el.getZoomLevel === 'function' && typeof el.setZoomLevel === 'function') {
-      el.getZoomLevel((level: number) => {
-        el.setZoomLevel(Math.min(level + 0.5, 9.0))
-      })
-    }
-  }, [activeTabId])
-
-  const handleZoomOut = useCallback(() => {
-    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
-    if (el && typeof el.getZoomLevel === 'function' && typeof el.setZoomLevel === 'function') {
-      el.getZoomLevel((level: number) => {
-        el.setZoomLevel(Math.max(level - 0.5, -8.0))
-      })
-    }
-  }, [activeTabId])
-
-  const handleZoomReset = useCallback(() => {
-    const el = activeTabId ? webviewsRef.current.get(activeTabId) : null
-    if (el && typeof el.setZoomLevel === 'function') {
-      el.setZoomLevel(0)
     }
   }, [activeTabId])
 
@@ -1359,9 +1436,6 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     const onForward = () => handleForward()
     const onReload = () => handleReload()
     const onHardReload = () => handleHardReload()
-    const onZoomIn = () => handleZoomIn()
-    const onZoomOut = () => handleZoomOut()
-    const onZoomReset = () => handleZoomReset()
     const onPrint = () => handlePrint()
     const onSavePdf = () => handleSavePdf()
 
@@ -1376,7 +1450,9 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
 
     const onToggleFind = () => {
       const store = useBrowserStore.getState()
-      store.setFindBarOpen(!store.findBarOpen)
+      // Already open: just put the cursor there
+      if (store.findBarOpen) window.dispatchEvent(new CustomEvent('tct:focus-find'))
+      else store.setFindBarOpen(true)
     }
 
     const onFoundInPage = (e: any) => {
@@ -1423,9 +1499,6 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     window.addEventListener('tct:webview-forward', onForward)
     window.addEventListener('tct:webview-reload', onReload)
     window.addEventListener('tct:webview-hard-reload', onHardReload)
-    window.addEventListener('tct:webview-zoom-in', onZoomIn)
-    window.addEventListener('tct:webview-zoom-out', onZoomOut)
-    window.addEventListener('tct:webview-zoom-reset', onZoomReset)
     window.addEventListener('tct:webview-print', onPrint)
     window.addEventListener('tct:webview-save-pdf', onSavePdf)
     window.addEventListener('tct:webview-navigate', onNavigate)
@@ -1440,9 +1513,6 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       window.removeEventListener('tct:webview-forward', onForward)
       window.removeEventListener('tct:webview-reload', onReload)
       window.removeEventListener('tct:webview-hard-reload', onHardReload)
-      window.removeEventListener('tct:webview-zoom-in', onZoomIn)
-      window.removeEventListener('tct:webview-zoom-out', onZoomOut)
-      window.removeEventListener('tct:webview-zoom-reset', onZoomReset)
       window.removeEventListener('tct:webview-print', onPrint)
       window.removeEventListener('tct:webview-save-pdf', onSavePdf)
       window.removeEventListener('tct:webview-navigate', onNavigate)
@@ -1450,7 +1520,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
       window.removeEventListener('tct:found-in-page', onFoundInPage)
       window.removeEventListener('tct:toggle-mute-tab', onToggleMuteTab)
     }
-  }, [handleBack, handleForward, handleReload, handleHardReload, handleZoomIn, handleZoomOut, handleZoomReset, handlePrint, handleSavePdf])
+  }, [handleBack, handleForward, handleReload, handleHardReload, handlePrint, handleSavePdf])
 
   // "Last used" bookkeeping: lastVisited is stamped when a tab becomes active AND when it is left,
   // otherwise Memory Saver would put a tab to sleep based on when it was created.

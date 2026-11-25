@@ -35,7 +35,7 @@ import { safeBrowsing } from './essentials/safeBrowsing'
 import { addressService } from './essentials/addresses'
 import { pageTools } from './essentials/pageTools'
 import { applySpellcheck } from './essentials/spellcheck'
-import { attachPagePreload } from './essentials/silentPasskeys'
+import { attachPagePreload, pagePrompts } from './essentials/pagePreloads'
 import { z } from 'zod'
 import {
   SHARED_TAB_PARTITION,
@@ -232,6 +232,7 @@ function openMainWindow(): BrowserWindow {
     }
   })
   recoverUi(win)
+  attachMouseButtons(win)
   guardWindowClose(win)
   return win
 }
@@ -280,6 +281,7 @@ function openPrivateWindow(url?: string): BrowserWindow {
   privateWindows.add(win)
   attachKeyboardShortcuts(win.webContents, false)
   recoverUi(win)
+  attachMouseButtons(win)
   guardWindowClose(win)
   win.on('closed', () => {
     privateWindows.delete(win)
@@ -346,6 +348,7 @@ function openExtraWindow(spaceId: string = newExtraSpaceId(), url?: string): Bro
   extraWindows.set(spaceId, win)
   attachKeyboardShortcuts(win.webContents, false)
   recoverUi(win)
+  attachMouseButtons(win)
   guardWindowClose(win)
   win.on('closed', () => {
     extraWindows.delete(spaceId)
@@ -353,6 +356,16 @@ function openExtraWindow(spaceId: string = newExtraSpaceId(), url?: string): Bro
     if (!isQuitting) localStorageService.removeWindowSpace(spaceId)
   })
   return win
+}
+
+/** Back / forward buttons on the mouse or keyboard (Windows and Linux) */
+function attachMouseButtons(win: BrowserWindow): void {
+  win.on('app-command', (event, command) => {
+    const action = command === 'browser-backward' ? 'back' : command === 'browser-forward' ? 'forward' : null
+    if (!action) return
+    event.preventDefault()
+    win.webContents.send('keyboard-shortcut:trigger', action)
+  })
 }
 
 /** The interface process crashed: load it again instead of leaving a black window */
@@ -459,9 +472,6 @@ nativeTheme.on('updated', () => {
   const script = getWebviewThemeScript(isDark)
   for (const wc of activeWebviewContents) {
     if (!wc.isDestroyed()) {
-      if (typeof (wc as any).setBackgroundColor === 'function') {
-        ;(wc as any).setBackgroundColor(isDark ? '#09090b' : '#ffffff')
-      }
       wc.executeJavaScript(script).catch(() => {})
     }
   }
@@ -568,6 +578,7 @@ if (!gotSingleInstanceLock) {
     addressService.init()
     safeBrowsing.init()
     httpAuthService.init()
+    pagePrompts.init()
     updateService.init()
     updateService.confirmQuit = confirmQuit
     safeBrowsing.onBlocked = (info) => {
@@ -771,11 +782,19 @@ if (!gotSingleInstanceLock) {
         // Attach unified keyboard shortcut handler for webview contents
         attachKeyboardShortcuts(contents, true)
 
-        // Set matching background color to eliminate white flashes on new webview creation / navigation
-        const isDark = nativeTheme.shouldUseDarkColors
-        if (typeof (contents as any).setBackgroundColor === 'function') {
-          ;(contents as any).setBackgroundColor(isDark ? '#09090b' : '#ffffff')
-        }
+        // Ctrl + mouse wheel (one step per notch: the wheel reports several times)
+        let lastWheelZoom = 0
+        contents.on('zoom-changed', (_event, direction) => {
+          if (Date.now() - lastWheelZoom < 60) return
+          lastWheelZoom = Date.now()
+          windowFor(contents)?.webContents.send('keyboard-shortcut:trigger', direction === 'in' ? 'zoom-in' : 'zoom-out')
+        })
+        // Esc stops a loading page (the page still gets the key)
+        contents.on('before-input-event', (_event, input) => {
+          if (input.type === 'keyDown' && input.key === 'Escape' && !input.control && !input.alt && !input.shift && !input.meta && contents.isLoadingMainFrame()) {
+            contents.stop()
+          }
+        })
 
         const customScrollbarCss = `
           /* Horizontal only (blocks swipe-back). Vertical 'overscroll-behavior: none' on the root
@@ -862,7 +881,17 @@ if (!gotSingleInstanceLock) {
             const wantsPopupWindow = isSmallPopup || details.disposition === 'new-window'
             const isAuthFlow = /accounts\.google\.com|\/oauth|\/auth|login|signin|sign-in|sso|saml/i.test(rawUrl)
             const userInitiated = hasRecentUserInput(contents)
-            if (wantsPopupWindow && (isAuthFlow || userInitiated) && ['http:', 'https:', 'about:'].includes(protocol)) {
+            // window.open('') and about:blank: the page fills the window itself (receipts, print views, sign-in)
+            const isBlank = rawUrl === '' || /^about:blank($|#)/.test(rawUrl)
+            // Without a click or key press it is a popup the user did not ask for
+            if (!userInitiated && !isAuthFlow) {
+              const ownerWin = windowFor(contents)
+              if (ownerWin && parsed && ['http:', 'https:'].includes(protocol)) {
+                ownerWin.webContents.send('popup:blocked', { url: rawUrl, host: parsed.host })
+              }
+              return { action: 'deny' }
+            }
+            if ((wantsPopupWindow || isBlank) && ['http:', 'https:', 'about:', ''].includes(protocol)) {
               const startupTheme = themeManager.getStartupTheme()
               return {
                 action: 'allow',
@@ -955,6 +984,9 @@ if (!gotSingleInstanceLock) {
                 x: params.x,
                 y: params.y,
                 linkURL: params.linkURL,
+                linkText: params.linkText,
+                misspelledWord: params.misspelledWord,
+                mediaFlags: params.mediaFlags,
                 srcURL: params.srcURL,
                 mediaType: params.mediaType,
                 hasImageContents: params.hasImageContents,

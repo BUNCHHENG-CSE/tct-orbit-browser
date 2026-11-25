@@ -34,6 +34,26 @@ export const FindInPageBar: React.FC<FindInPageProps> = ({
     }
   }, [isOpen, onStop])
 
+  // Ctrl+F while open, F3 / Shift+F3
+  const nextRef = useRef<() => void>(() => {})
+  const prevRef = useRef<() => void>(() => {})
+  useEffect(() => {
+    const focus = () => {
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+    const next = () => (useBrowserStore.getState().findBarOpen ? nextRef.current() : useBrowserStore.getState().setFindBarOpen(true))
+    const prev = () => (useBrowserStore.getState().findBarOpen ? prevRef.current() : useBrowserStore.getState().setFindBarOpen(true))
+    window.addEventListener('tct:focus-find', focus)
+    window.addEventListener('tct:find-next', next)
+    window.addEventListener('tct:find-prev', prev)
+    return () => {
+      window.removeEventListener('tct:focus-find', focus)
+      window.removeEventListener('tct:find-next', next)
+      window.removeEventListener('tct:find-prev', prev)
+    }
+  }, [])
+
   // Trigger search when query or matchCase changes
   useEffect(() => {
     if (!isOpen) return
@@ -57,6 +77,9 @@ export const FindInPageBar: React.FC<FindInPageProps> = ({
     if (!query) return
     onFind(query, { forward: false, findNext: false, matchCase })
   }
+
+  nextRef.current = handleFindNext
+  prevRef.current = handleFindPrev
 
   // Close find bar
   const handleClose = () => {

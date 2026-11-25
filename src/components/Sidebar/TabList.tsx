@@ -158,7 +158,14 @@ export const TabList: React.FC<TabListProps> = ({
 
   return (
     <TabGroupContext.Provider value={groupActions}>
-      <ScrollArea className="flex-1 w-full min-w-0" data-lenis-prevent>
+      <ScrollArea
+        className="flex-1 w-full min-w-0"
+        data-lenis-prevent
+        onDoubleClick={(e) => {
+          // Empty space below the tabs
+          if (!(e.target as Element).closest('[data-orbit-tab], button, input, a')) void openNewTab()
+        }}
+      >
         <div className={`w-full min-w-0 ${collapsed ? 'px-1' : 'px-2'}`}>
           {/* Pinned tabs section (pinned tabs inside a group render with their group) */}
           <PinnedTabs

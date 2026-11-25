@@ -58,6 +58,8 @@ import { BoostsDialog } from '@/components/Essentials/BoostsDialog'
 import { HighlightsDialog } from '@/components/Essentials/HighlightsDialog'
 import { AskPagePanel } from '@/components/Essentials/AskPagePanel'
 import { AddressesDialog } from '@/components/Essentials/AddressesDialog'
+import { PagePromptDialog } from '@/components/Essentials/PagePromptDialog'
+import { webContentsIdOf } from '@/lib/tabLifecycle'
 
 /** Active tab of a space (falls back to its first tab, like useTabs) */
 function activeTabOf(s: ReturnType<typeof useBrowserStore.getState>, spaceId: string | null) {
@@ -100,6 +102,8 @@ export const App: React.FC = () => {
   const appInfo = useBrowserStore((s) => s.appInfo)
   const setAppInfo = useBrowserStore((s) => s.setAppInfo)
   const zenMode = useBrowserStore((s) => s.zenMode)
+  // A page is showing something in full screen: nothing else may be visible
+  const pageFullscreen = useBrowserStore((s) => s.htmlFullscreenTabId !== null)
   const [topHovered, setTopHovered] = useState(false)
   const [leftHovered, setLeftHovered] = useState(false)
 
@@ -309,6 +313,25 @@ export const App: React.FC = () => {
         case 'new-window':
           void api.essentials.windows.open()
           break
+        case 'find-next':
+          window.dispatchEvent(new CustomEvent('tct:find-next'))
+          break
+        case 'find-prev':
+          window.dispatchEvent(new CustomEvent('tct:find-prev'))
+          break
+        case 'clear-data':
+          window.dispatchEvent(new CustomEvent('open-settings', { detail: { tab: 'privacy' } }))
+          break
+        case 'view-source': {
+          const store = useBrowserStore.getState()
+          const tab = activeTabOf(store, store.activeSpaceId)
+          if (!tab || !/^https?:/i.test(tab.url)) break
+          void api.tabs
+            .create({ spaceId: tab.spaceId, url: `view-source:${tab.url}`, title: `Source of ${tab.title || 'page'}`, isPrivate: !!tab.isPrivate })
+            .then((created) => placeNewTab(tab.spaceId, created))
+            .catch(() => {})
+          break
+        }
         case 'ask-page':
           window.dispatchEvent(new CustomEvent('tct:ask-page'))
           break
@@ -441,9 +464,7 @@ export const App: React.FC = () => {
           const nextState = !useBrowserStore.getState().devtoolsOpen
           setDevToolsOpen(nextState)
           if (nextState) {
-            const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
-            const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
-            api.devtools?.open(wcId)
+            api.devtools?.open(webContentsIdOf(useBrowserStore.getState().activeTabId) ?? undefined)
           } else {
             api.devtools?.close()
           }
@@ -568,7 +589,7 @@ export const App: React.FC = () => {
                   topHovered ? 'translate-y-0 pointer-events-auto' : '-translate-y-full pointer-events-none'
                 }`
               : 'relative z-20 shrink-0'
-          }`}
+          } ${pageFullscreen ? 'hidden' : ''}`}
         >
           {settings?.tabLayout === 'topbar' && <TabStrip />}
           <TitleBar
@@ -594,7 +615,7 @@ export const App: React.FC = () => {
                     leftHovered ? 'translate-x-0 pointer-events-auto' : '-translate-x-full pointer-events-none'
                   }`
                 : 'relative z-30 flex shrink-0 h-full'
-            }`}
+            } ${pageFullscreen ? '!hidden' : ''}`}
           >
             <Sidebar hideTabs={settings?.tabLayout === 'topbar'} />
           </div>
@@ -637,6 +658,7 @@ export const App: React.FC = () => {
         <BoostsDialog />
         <HighlightsDialog />
         <AddressesDialog />
+        <PagePromptDialog />
 
         {/* TCT Orbit spotlight CommandBar overlay */}
         <CommandBar />

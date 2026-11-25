@@ -466,6 +466,13 @@ export function trackUserInput(contents: WebContents): void {
       lastUserInput.set(contents, Date.now())
     }
   })
+  // input-event only covers the top page: clicks and keys in embedded frames arrive here
+  contents.on('before-mouse-event', (_event, mouse) => {
+    if (mouse.type === 'mouseDown') lastUserInput.set(contents, Date.now())
+  })
+  contents.on('before-input-event', (_event, input) => {
+    if (input.type === 'keyDown') lastUserInput.set(contents, Date.now())
+  })
 }
 
 export function hasRecentUserInput(contents: WebContents, withinMs = 5000): boolean {

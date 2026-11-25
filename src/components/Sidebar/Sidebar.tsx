@@ -14,6 +14,7 @@ import { toast } from 'sonner'
 import { PRIVATE_START_URL, PRIVATE_START_TITLE } from '@/lib/startPage'
 import { isPrivateWindow, openPrivateWindow } from '@/lib/privateWindow'
 import { isMainWindow } from '@/lib/extraWindow'
+import { useLinkDrop } from '@/lib/linkDrop'
 import { PrivateWindowBadge } from '@/components/PrivateWindow/PrivateWindowBadge'
 import type { Tab } from '@/types/api'
 
@@ -137,6 +138,8 @@ export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) 
     }
   }
 
+  const { over: linkOver, linkDropProps } = useLinkDrop('vertical')
+
   // Top-bar tab layout: tabs live in <TabStrip />; keep only the dialogs and listeners
   if (hideTabs) {
     return (
@@ -160,6 +163,7 @@ export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) 
         transition={{ duration: 0.2, ease: [0.4, 0, 0.2, 1] }}
         onAnimationComplete={handleWidthAnimationComplete}
         style={{ willChange: 'width', contain: 'strict' }}
+        {...linkDropProps}
         className="absolute inset-y-0 left-0 overflow-hidden bg-sidebar text-sidebar-foreground border-r border-sidebar-border select-none z-30"
       >
       {/* Fixed-width content: does not re-layout while the aside width animates */}
@@ -245,6 +249,11 @@ export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) 
         </div>
 
       </motion.div>
+      {linkOver && (
+        <div className="pointer-events-none absolute inset-1 z-40 rounded-xl border-2 border-dashed border-primary bg-primary/10 flex items-end justify-center pb-16">
+          {!isCollapsed && <span className="px-3 py-1.5 rounded-lg bg-popover text-popover-foreground text-[11.5px] font-medium shadow-lg">Drop to open in a new tab</span>}
+        </div>
+      )}
       </motion.aside>
       </div>
       {/* Settings Dialog (portaled; kept outside the clipped aside) */}

@@ -41,6 +41,18 @@ export interface AuthRequest {
   insecure: boolean
 }
 
+export interface PagePromptRequest {
+  id: string
+  host: string
+  message: string
+  value: string
+}
+
+export interface PopupBlockedInfo {
+  url: string
+  host: string
+}
+
 export interface UnsafeSiteInfo {
   url: string
   host: string
@@ -164,6 +176,18 @@ export interface EssentialsApi {
     respond: (id: string, username: string | null, password: string) => Promise<boolean>
     onRequest: (callback: (req: AuthRequest) => void) => () => void
     onDismiss: (callback: (id: string) => void) => () => void
+  }
+  pagePrompts: {
+    respond: (id: string, value: string | null, mute: boolean) => Promise<boolean>
+    onRequest: (callback: (req: PagePromptRequest) => void) => () => void
+    onDismiss: (callback: (id: string) => void) => () => void
+  }
+  popups: {
+    /** A page tried to open a window without a click */
+    onBlocked: (callback: (info: PopupBlockedInfo) => void) => () => void
+  }
+  spelling: {
+    addWord: (webContentsId: number, word: string) => Promise<boolean>
   }
   safeBrowsing: {
     status: () => Promise<SafeBrowsingStatus>

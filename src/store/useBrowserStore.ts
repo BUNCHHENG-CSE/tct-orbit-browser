@@ -17,6 +17,10 @@ interface BrowserState {
   recentlyClosedTabs: { tab: Tab; spaceId: string }[]
   canGoBack: boolean
   canGoForward: boolean
+  /** Tabs whose page is loading */
+  loadingTabs: Record<string, boolean>
+  /** Tab showing a video (or anything else) in full screen */
+  htmlFullscreenTabId: string | null
   devtoolsOpen: boolean
   devtoolsDetached: boolean
   devtoolsWidth: number
@@ -90,6 +94,8 @@ interface BrowserState {
   pushRecentlyClosedTab: (tab: Tab, spaceId: string) => void
   popRecentlyClosedTab: () => { tab: Tab; spaceId: string } | undefined
   setNavState: (canGoBack: boolean, canGoForward: boolean) => void
+  setTabLoading: (tabId: string, loading: boolean) => void
+  setHtmlFullscreen: (tabId: string | null) => void
   setDevToolsOpen: (open: boolean) => void
   setDevToolsDetached: (detached: boolean) => void
   setDevToolsWidth: (width: number) => void
@@ -154,6 +160,8 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
   recentlyClosedTabs: [],
   canGoBack: false,
   canGoForward: false,
+  loadingTabs: {},
+  htmlFullscreenTabId: null,
   devtoolsOpen: false,
   devtoolsDetached: false,
   devtoolsWidth: 440,
@@ -221,6 +229,15 @@ export const useBrowserStore = create<BrowserState>((set, get) => ({
         ? state
         : { canGoBack, canGoForward }
     ),
+  setTabLoading: (tabId, loading) =>
+    set((state) => {
+      if (!!state.loadingTabs[tabId] === loading) return state
+      const next = { ...state.loadingTabs }
+      if (loading) next[tabId] = true
+      else delete next[tabId]
+      return { loadingTabs: next }
+    }),
+  setHtmlFullscreen: (htmlFullscreenTabId) => set({ htmlFullscreenTabId }),
   setDevToolsOpen: (open) => set({ devtoolsOpen: open }),
   setDevToolsDetached: (detached) => set({ devtoolsDetached: detached }),
   setDevToolsWidth: (width) => set({ devtoolsWidth: width }),

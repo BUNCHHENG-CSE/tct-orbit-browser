@@ -165,3 +165,20 @@ export const HIDE_PICKER_SCRIPT = ELEMENT_PICKER_SCRIPT.replace('Click the part 
   '<button class="p" data-a="page">Whole page</button>',
   '<button data-a="page" hidden></button>'
 )
+
+/**
+ * What a page draws behind itself: 'own' (it sets a background), 'dark' (it supports dark mode) or
+ * 'light'. Browsers put white behind 'light' pages; Orbit's dark canvas would make them black on black.
+ */
+export const PAGE_BASE_SCRIPT = `(() => {
+  try {
+    const set = (el) => {
+      if (!el) return false;
+      const s = getComputedStyle(el);
+      return (s.backgroundColor !== 'transparent' && s.backgroundColor !== 'rgba(0, 0, 0, 0)') || s.backgroundImage !== 'none';
+    };
+    if (set(document.documentElement) || set(document.body)) return 'own';
+    const meta = document.querySelector('meta[name="color-scheme"]');
+    return getComputedStyle(document.documentElement).colorScheme.includes('dark') || (meta && meta.content.includes('dark')) ? 'dark' : 'light';
+  } catch (e) { return 'own'; }
+})()`

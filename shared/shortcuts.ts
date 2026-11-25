@@ -38,13 +38,15 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'switch-tab-last', group: 'Tabs & windows', label: 'Go to last tab', defaults: ['Mod+9'] },
   { id: 'toggle-split-view', group: 'Tabs & windows', label: 'Toggle split view', defaults: ['Mod+\\'] },
 
-  { id: 'focus-address-bar', group: 'Navigation', label: 'Focus address bar', defaults: ['Mod+L', 'Alt+D', 'F6'] },
+  { id: 'focus-address-bar', group: 'Navigation', label: 'Focus address bar', defaults: ['Mod+L', 'Alt+D', 'F6', 'Mod+E'] },
   { id: 'open-command-bar', group: 'Navigation', label: 'Command bar', defaults: ['Mod+K'] },
   { id: 'reload', group: 'Navigation', label: 'Reload', defaults: ['Mod+R', 'F5'] },
   { id: 'hard-reload', group: 'Navigation', label: 'Hard reload (bypass cache)', defaults: ['Mod+Shift+R', 'Mod+F5'] },
   { id: 'back', group: 'Navigation', label: 'Back', defaults: ['Alt+ArrowLeft', 'Mod+['] },
   { id: 'forward', group: 'Navigation', label: 'Forward', defaults: ['Alt+ArrowRight', 'Mod+]'] },
   { id: 'toggle-find', group: 'Navigation', label: 'Find in page', defaults: ['Mod+F'] },
+  { id: 'find-next', group: 'Navigation', label: 'Find next', defaults: ['F3', 'Mod+G'] },
+  { id: 'find-prev', group: 'Navigation', label: 'Find previous', defaults: ['Shift+F3', 'Mod+Shift+G'] },
 
   { id: 'zoom-in', group: 'Page & media', label: 'Zoom in', defaults: ['Mod+=', 'Mod++', 'Mod+Shift+=', 'Mod+Shift++'] },
   { id: 'zoom-out', group: 'Page & media', label: 'Zoom out', defaults: ['Mod+-', 'Mod+Shift+-'] },
@@ -54,6 +56,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'print-page', group: 'Page & media', label: 'Print', defaults: ['Mod+P'] },
   { id: 'take-screenshot', group: 'Page & media', label: 'Web capture', defaults: ['Mod+Shift+S'] },
   { id: 'ask-page', group: 'Page & media', label: 'Ask this page', defaults: ['Mod+Shift+Y'] },
+  { id: 'view-source', group: 'Page & media', label: 'View page source', defaults: ['Mod+U'] },
   { id: 'toggle-bookmark', group: 'Page & media', label: 'Bookmark page', defaults: ['Mod+D'] },
 
   { id: 'toggle-sidebar', group: 'Browser', label: 'Toggle sidebar', defaults: ['Mod+S', 'Mod+B'] },
@@ -64,6 +67,7 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'open-downloads', group: 'Browser', label: 'Downloads', defaults: ['Mod+J'] },
   { id: 'toggle-zen-mode', group: 'Browser', label: 'Zen mode', defaults: ['F11', 'Mod+Shift+F'] },
   { id: 'open-task-manager', group: 'Browser', label: 'Task manager', defaults: ['Shift+Escape'] },
+  { id: 'clear-data', group: 'Browser', label: 'Clear browsing data', defaults: ['Mod+Shift+Delete'] },
   { id: 'toggle-devtools', group: 'Browser', label: 'Developer tools', defaults: ['F12', 'Mod+Shift+I'] },
   { id: 'open-settings', group: 'Browser', label: 'Settings', defaults: ['Mod+,'] },
   { id: 'shortcut-help', group: 'Browser', label: 'Keyboard shortcuts', defaults: ['Mod+/'] }

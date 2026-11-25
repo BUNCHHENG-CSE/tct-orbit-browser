@@ -52,7 +52,7 @@ import { modKey } from '@/lib/platform'
 import { buildSearchUrl, SEARCH_ENGINES, type SearchEngineId } from '@/lib/searchEngines'
 import { resolveIsDark } from '@/lib/theme'
 import { toast } from 'sonner'
-import type { ContextMenuEventData } from '@/types/api'
+import type { ContextMenuEventData, ContextMenuParams } from '@/types/api'
 
 interface ContextMenuState {
   isOpen: boolean
@@ -71,6 +71,9 @@ interface ContextMenuState {
   selectionText?: string
   isEditable?: boolean
   dictionarySuggestions?: string[]
+  linkText?: string
+  misspelledWord?: string
+  mediaFlags?: ContextMenuParams['mediaFlags']
 }
 
 export const BrowserContextMenu: React.FC = () => {
@@ -129,7 +132,15 @@ export const BrowserContextMenu: React.FC = () => {
 
     const unsub = api.contextMenu.onOpen((data: ContextMenuEventData) => {
       // Find the active webview element to get its exact viewport coordinates
-      const activeWebview = document.querySelector('div[style*="display: flex"] webview') || document.querySelector('webview')
+      const all = Array.from(document.querySelectorAll('webview')) as any[]
+      const activeWebview =
+        all.find((w) => {
+          try {
+            return w.getWebContentsId() === data.webContentsId
+          } catch {
+            return false
+          }
+        }) || all[0]
       let windowX = data.params.x
       let windowY = data.params.y
 
@@ -155,7 +166,10 @@ export const BrowserContextMenu: React.FC = () => {
         hasImageContents: data.params.hasImageContents,
         selectionText: data.params.selectionText,
         isEditable: data.params.isEditable,
-        dictionarySuggestions: data.params.dictionarySuggestions
+        dictionarySuggestions: data.params.dictionarySuggestions,
+        linkText: data.params.linkText,
+        misspelledWord: data.params.misspelledWord,
+        mediaFlags: data.params.mediaFlags
       })
       setActiveSubmenu(null)
       setFocusedIndex(-1)
@@ -544,6 +558,32 @@ export const BrowserContextMenu: React.FC = () => {
     setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 60)
   }
 
+  /** Play, mute, loop ... on the video or audio under the pointer */
+  const mediaAction = (code: string) => () => {
+    closeMenu()
+    const el = (Array.from(document.querySelectorAll('webview')) as any[]).find((w) => {
+      try {
+        return w.getWebContentsId() === menu.webContentsId
+      } catch {
+        return false
+      }
+    })
+    const x = Math.round(menu.webContentsX)
+    const y = Math.round(menu.webContentsY)
+    el?.executeJavaScript(
+      `(() => { const m = document.elementsFromPoint(${x}, ${y}).find((e) => e instanceof HTMLMediaElement) || document.querySelector('video, audio'); if (m) { ${code} } })()`,
+      true
+    ).catch(() => {})
+  }
+  const openableMedia = !!menu.srcURL && /^https?:/i.test(menu.srcURL)
+
+  const handleAddToDictionary = () => {
+    closeMenu()
+    if (!menu.misspelledWord) return
+    const word = menu.misspelledWord
+    void api.essentials.spelling.addWord(menu.webContentsId, word).then((ok) => ok && toast.success(`“${word}” added to the dictionary`))
+  }
+
   // Editable input actions
   const handleUndo = () => {
     closeMenu()
@@ -571,7 +611,8 @@ export const BrowserContextMenu: React.FC = () => {
   }
 
   const isLink = !!menu.linkURL
-  const isImage = !!menu.srcURL || !!menu.hasImageContents || menu.mediaType === 'image'
+  const isMedia = menu.mediaType === 'video' || menu.mediaType === 'audio'
+  const isImage = !isMedia && (menu.mediaType === 'image' || !!menu.hasImageContents)
   const isTextSelected = !!menu.selectionText && menu.selectionText.trim().length > 0
   const isEditable = !!menu.isEditable
 
@@ -633,6 +674,16 @@ export const BrowserContextMenu: React.FC = () => {
             label="Copy link address"
             onClick={handleCopyLink}
           />
+          {menu.linkText?.trim() && (
+            <MenuItem
+              icon={<Copy className="w-4 h-4" />}
+              label="Copy link text"
+              onClick={() => {
+                closeMenu()
+                void navigator.clipboard.writeText(menu.linkText!.trim())
+              }}
+            />
+          )}
           <MenuItem
             icon={<ShieldCheck className="w-4 h-4 text-emerald-500" />}
             label="Copy Clean Link (No Trackers)"
@@ -648,6 +699,28 @@ export const BrowserContextMenu: React.FC = () => {
             label="Create QR Code for this link"
             onClick={() => handleCreateQr(menu.linkURL!, 'Link QR Code')}
           />
+          <Divider />
+        </>
+      )}
+
+      {/* VIDEO / AUDIO CONTEXT */}
+      {isMedia && (
+        <>
+          <MenuItem icon={<Volume2 className="w-4 h-4 text-primary" />} label={menu.mediaFlags?.isPaused ? 'Play' : 'Pause'} onClick={mediaAction('m.paused ? m.play() : m.pause()')} />
+          <MenuItem icon={<VolumeX className="w-4 h-4" />} label={menu.mediaFlags?.isMuted ? 'Unmute' : 'Mute'} onClick={mediaAction('m.muted = !m.muted')} />
+          <MenuItem icon={<RotateCw className="w-4 h-4" />} label={menu.mediaFlags?.isLooping ? 'Stop looping' : 'Loop'} onClick={mediaAction('m.loop = !m.loop')} />
+          <MenuItem icon={<Check className="w-4 h-4" />} label={menu.mediaFlags?.isControlsVisible ? 'Hide controls' : 'Show controls'} onClick={mediaAction('m.controls = !m.controls')} />
+          {menu.mediaType === 'video' && (
+            <MenuItem icon={<AppWindow className="w-4 h-4" />} label="Picture-in-Picture" onClick={mediaAction('m.requestPictureInPicture && m.requestPictureInPicture().catch(() => {})')} />
+          )}
+          {openableMedia && (
+            <>
+              <Divider />
+              <MenuItem icon={<ExternalLink className="w-4 h-4 text-primary" />} label="Open video in new tab" onClick={handleOpenImageInNewTab} />
+              <MenuItem icon={<Save className="w-4 h-4" />} label="Save video as..." onClick={handleSaveImage} />
+              <MenuItem icon={<Copy className="w-4 h-4" />} label="Copy video address" onClick={handleCopyImageAddress} />
+            </>
+          )}
           <Divider />
         </>
       )}
@@ -738,6 +811,9 @@ export const BrowserContextMenu: React.FC = () => {
       {/* 4. EDITABLE INPUT CONTEXT */}
       {isEditable && (
         <>
+          {menu.misspelledWord && (
+            <MenuItem icon={<BookmarkPlus className="w-4 h-4" />} label="Add to dictionary" onClick={handleAddToDictionary} />
+          )}
           {menu.dictionarySuggestions && menu.dictionarySuggestions.length > 0 && (
             <>
               {menu.dictionarySuggestions.slice(0, 3).map((sug, i) => (
@@ -802,7 +878,7 @@ export const BrowserContextMenu: React.FC = () => {
       )}
 
       {/* 5. BLANK PAGE CONTEXT (when neither Link, Image, Selection, nor Editable) */}
-      {!isLink && !isImage && !isTextSelected && !isEditable && (
+      {!isLink && !isImage && !isMedia && !isTextSelected && !isEditable && (
         <>
           <MenuItem
             icon={<ArrowLeft className="w-4 h-4" />}
@@ -828,7 +904,6 @@ export const BrowserContextMenu: React.FC = () => {
           <MenuItem
             icon={<Save className="w-4 h-4" />}
             label="Save as..."
-            shortcut={`${modKey}+S`}
             onClick={handleSaveAs}
           />
           <MenuItem

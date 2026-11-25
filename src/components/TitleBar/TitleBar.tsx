@@ -22,6 +22,7 @@ import {
 import type { BookmarkItem } from '@/types/api'
 import { api } from '@/lib/ipc'
 import { isPrivateWindow } from '@/lib/privateWindow'
+import { placeNewTab } from '@/lib/tabPlacement'
 import { PrivatePill } from '@/components/PrivateWindow/PrivateWindowBadge'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSettings } from '@/hooks/useSettings'
@@ -290,7 +291,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
 
   const handleBack = () => window.dispatchEvent(new CustomEvent('tct:webview-back'))
   const handleForward = () => window.dispatchEvent(new CustomEvent('tct:webview-forward'))
-  const handleReload = () => window.dispatchEvent(new CustomEvent('tct:webview-reload'))
+  const isLoading = useBrowserStore((s) => !!activeTab && !!s.loadingTabs[activeTab.id])
+  const handleReload = () => window.dispatchEvent(new CustomEvent(isLoading ? 'tct:webview-stop' : 'tct:webview-reload'))
   const handleNewTab = () => void openNewTab()
   const topBarTabs = settings?.tabLayout === 'topbar'
 
@@ -377,6 +379,29 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         if (e.key === 'ArrowDown') return i >= max ? -1 : i + 1
         return i <= -1 ? max : i - 1
       })
+      return
+    }
+    if (e.key === 'Enter' && (e.altKey || e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      const sug = selectedIndex >= 0 ? allSuggestions[selectedIndex] : undefined
+      let text = inputValue.trim()
+      if (!text) return
+      // Ctrl+Enter: "example" -> www.example.com
+      if (!e.altKey && !sug && /^[a-z0-9-]+$/i.test(text)) text = `https://www.${text}.com/`
+      const url = sug ? sug.url : isUrl(text) ? normalizeUrl(text) : buildSearchUrl(text, currentEngine, resolveIsDark(settings?.theme))
+      if (!e.altKey) {
+        handleNavigateTo(url, text)
+        return
+      }
+      // Alt+Enter: in a new tab
+      setIsFocused(false)
+      inputRef.current?.blur()
+      if (activeSpaceId) {
+        void api.tabs
+          .create({ spaceId: activeSpaceId, url, title: text, isPrivate: isPrivateTab })
+          .then((tab) => placeNewTab(activeSpaceId, tab))
+          .catch(() => {})
+      }
       return
     }
     if (e.key === 'Enter') {
@@ -469,9 +494,9 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           <button
             onClick={handleReload}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-            title={`Reload (${modKey}+R)`}
+            title={isLoading ? 'Stop (Esc)' : `Reload (${modKey}+R)`}
           >
-            <RotateCw className="w-3.5 h-3.5" />
+            {isLoading ? <X className="w-3.5 h-3.5" /> : <RotateCw className="w-3.5 h-3.5" />}
           </button>
         </div>
       </div>
