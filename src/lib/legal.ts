@@ -6,7 +6,7 @@
  * "Connections TCT Orbit makes on its own" section and LEGAL_LAST_UPDATED in the same change.
  */
 
-export const LEGAL_LAST_UPDATED = 'November 23, 2026'
+export const LEGAL_LAST_UPDATED = 'November 25, 2026'
 export const LEGAL_PUBLISHER = 'TCT'
 export const LEGAL_CONTACT_EMAIL = 'support@tctorbit.com'
 export const LEGAL_WEBSITE = 'https://tctorbit.com'
@@ -48,6 +48,8 @@ export const PRIVACY_POLICY: LegalDocument = {
             'Spaces, open and pinned tabs, and browser settings.',
             'Browsing history, bookmarks and reading list, and Space notes.',
             'Your download list (the files themselves go to the folder you choose).',
+            'Saved passwords and addresses, encrypted with your operating system account. Exported password files (.csv) are not encrypted.',
+            'Page highlights, boosts (custom styles and hidden elements), link routing rules and keyboard shortcuts.',
             'Privacy settings, per-site permission choices (camera, microphone, location, notifications and similar), per-site zoom, and the counters behind the Privacy Report.',
             'Cookies, cache and site storage created by the websites you visit, as in any browser.',
             'Window size and position, and the ad-blocking filter lists.'
@@ -73,15 +75,21 @@ export const PRIVACY_POLICY: LegalDocument = {
         {
           list: [
             'Ad and tracker filter lists: downloaded from GitHub (raw.githubusercontent.com) about every three days. GitHub can see your IP address and that a TCT Orbit filter update was requested.',
+            'Phishing and malware lists: downloaded from malware-filter.gitlab.io about every twelve hours (on by default). GitLab can see your IP address and that the list was requested. Addresses you visit are compared with the list on your computer and are not sent.',
+            'Updates: the installed version asks GitHub Releases for a new version every few hours and downloads it (on by default, Settings → About). GitHub can see your IP address and the version requested. The Microsoft Store version is updated by the Store instead.',
+            'Spelling dictionaries: downloaded once per language from Google servers when spell checking is on (the default, except on macOS, which uses its own dictionaries). What you type is checked on your computer.',
+            '"Translate page" and "Translate selection": open Google Translate, only when you choose them. Google receives the page address or the selected text.',
+            '"Create QR Code": sends the address to api.qrserver.com to draw the code, only when you choose it.',
+            '"Ask this page": sends the page text to an Ollama model running on your own computer (127.0.0.1), only when you ask. It does not leave your computer through TCT Orbit.',
             'Encrypted DNS (DNS over HTTPS): when enabled (on by default), the names of the sites you visit are resolved through the provider you choose (Cloudflare by default, or Mullvad, Quad9 or AdGuard) instead of your internet provider. That provider handles those lookups under its own privacy policy.',
-            'Your search engine: searches typed in the address bar or command bar are sent to the search engine you choose (DuckDuckGo by default). Address-bar suggestions come only from your own tabs, bookmarks and history and are not sent anywhere.',
+            'Your search engine: searches typed in the address bar or command bar are sent to the search engine you choose (DuckDuckGo by default). When search suggestions are on (Settings → Search Engine), what you type is also sent to that search engine; they are never used in private tabs.',
             'Site icons: to show a site icon in your tabs, bookmarks and settings, the browser may request it from that site.',
             '"Check my IP" (Settings → Privacy): contacts check.torproject.org, only when you press the button.',
             'A proxy or Tor connection, only if you configure one. That proxy can see the traffic it carries.'
           ]
         },
         {
-          p: 'TCT Orbit does not include an automatic update service, advertising, analytics or crash-reporting libraries, and Chromium’s own background services (sync, telemetry, crash uploads, component updates) are turned off.'
+          p: 'TCT Orbit does not include advertising, analytics or crash-reporting libraries, and Chromium’s own background services (sync, telemetry, crash uploads, component updates) are turned off.'
         }
       ]
     },
@@ -105,7 +113,7 @@ export const PRIVACY_POLICY: LegalDocument = {
       heading: '7. Website permissions',
       blocks: [
         {
-          p: 'Websites must ask before using your camera, microphone, location, notifications, clipboard or MIDI devices. Your answer is stored on your computer for that site, and you can change it in Settings → Site Settings. Other sensitive device access (USB, serial, Bluetooth, HID and similar) is blocked.'
+          p: 'Websites must ask before using your camera, microphone, location, notifications, clipboard or MIDI devices. Your answer is stored on your computer for that site, and you can change it in Settings → Site Settings. Screen sharing asks every time, and you choose the screen or window. Other sensitive device access (USB, serial, Bluetooth, HID and similar) is blocked.'
         }
       ]
     },
