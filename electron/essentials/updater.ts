@@ -85,10 +85,10 @@ class UpdateService {
     return this.state
   }
 
-  /** Restart into the downloaded update */
+  /** Restart into the downloaded update. Silent: no setup wizard, same folder and user as before. */
   public async install(): Promise<boolean> {
     if (this.state.phase !== 'ready' || !(await this.confirmQuit())) return false
-    setImmediate(() => autoUpdater.quitAndInstall(false, true))
+    setImmediate(() => autoUpdater.quitAndInstall(true, true))
     return true
   }
 }
