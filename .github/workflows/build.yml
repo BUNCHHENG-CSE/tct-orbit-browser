@@ -41,21 +41,38 @@ jobs:
         uses: actions/setup-node@v5
         with:
           node-version: 22
-          cache: 'npm'
+          package-manager-cache: false
 
-      - name: Cache Electron Binaries
-        uses: actions/cache@v5
+      # One cache per platform. Its key ignores the app's own version, so a release does not make a
+      # new one, and only main saves it (a cache saved by a tag can't be used by any other run).
+      - name: Compute cache key
+        id: deps
+        shell: bash
+        run: |
+          node -e "
+            const lock = JSON.parse(require('fs').readFileSync('package-lock.json', 'utf8'));
+            delete lock.version;
+            delete lock.packages[''].version;
+            const hash = require('crypto').createHash('sha256').update(JSON.stringify(lock)).digest('hex').slice(0, 20);
+            console.log('hash=' + hash);
+          " >> "$GITHUB_OUTPUT"
+
+      - name: Restore downloads cache
+        id: cache
+        uses: actions/cache/restore@v5
         with:
           path: |
+            ~/.npm
+            ~/AppData/Local/npm-cache
             ~/.cache/electron
             ~/.cache/electron-builder
             ~/AppData/Local/electron/Cache
             ~/AppData/Local/electron-builder/Cache
             ~/Library/Caches/electron
             ~/Library/Caches/electron-builder
-          key: ${{ runner.os }}-electron-cache-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-deps-${{ steps.deps.outputs.hash }}
           restore-keys: |
-            ${{ runner.os }}-electron-cache-
+            ${{ runner.os }}-deps-
 
       # The installers take their version from package.json, the website from the tag
       - name: Check the tag matches package.json
@@ -89,6 +106,22 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Save downloads cache
+        if: github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@v5
+        with:
+          path: |
+            ~/.npm
+            ~/AppData/Local/npm-cache
+            ~/.cache/electron
+            ~/.cache/electron-builder
+            ~/AppData/Local/electron/Cache
+            ~/AppData/Local/electron-builder/Cache
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ steps.cache.outputs.cache-primary-key }}
 
       - name: Prune Old Run Artifacts
         continue-on-error: true
