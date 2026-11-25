@@ -35,6 +35,7 @@ import { safeBrowsing } from './essentials/safeBrowsing'
 import { addressService } from './essentials/addresses'
 import { pageTools } from './essentials/pageTools'
 import { applySpellcheck } from './essentials/spellcheck'
+import { attachPagePreload } from './essentials/silentPasskeys'
 import { z } from 'zod'
 import {
   SHARED_TAB_PARTITION,
@@ -640,10 +641,12 @@ if (!gotSingleInstanceLock) {
     // Screen sharing picker and spellcheck for every tab session (shared, private, space profiles)
     const privateSession = session.fromPartition(PRIVATE_PARTITION)
     for (const ses of [tabSession, privateSession]) {
+      attachPagePreload(ses)
       screenShareService.attach(ses)
       applySpellcheck(ses, localStorageService.getSettings())
     }
     onTabSessionCreated((ses) => {
+      attachPagePreload(ses)
       screenShareService.attach(ses)
       applySpellcheck(ses, localStorageService.getSettings())
     })

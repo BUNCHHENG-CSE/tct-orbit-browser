@@ -46,7 +46,9 @@ export default defineConfig({
       sourcemap: false,
       rollupOptions: {
         input: {
-          index: resolve('electron/preload.ts')
+          index: resolve('electron/preload.ts'),
+          // Runs in web pages (electron/essentials/silentPasskeys.ts)
+          page: resolve('electron/pagePreload.ts')
         }
       }
     }
