@@ -57,6 +57,17 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-electron-cache-
 
+      # The installers take their version from package.json, the website from the tag
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json ($version)"
+            exit 1
+          fi
+
       - name: Install dependencies
         run: npm ci
 
@@ -159,3 +170,29 @@ jobs:
             dist/*.deb
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # After every platform has uploaded its installers, the website reads the release from GitHub.
+  # Needs two Actions secrets: WEBSITE_URL and WEBSITE_WEBHOOK_SECRET (the site's GITHUB_WEBHOOK_SECRET).
+  notify-website:
+    needs: build
+    # Stable releases only (v1.2.3, not v1.2.3-beta)
+    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+
+    steps:
+      - name: Publish the release on the website
+        env:
+          WEBSITE_URL: ${{ secrets.WEBSITE_URL }}
+          WEBHOOK_SECRET: ${{ secrets.WEBSITE_WEBHOOK_SECRET }}
+        run: |
+          if [ -z "$WEBSITE_URL" ] || [ -z "$WEBHOOK_SECRET" ]; then
+            echo "::warning::WEBSITE_URL or WEBSITE_WEBHOOK_SECRET is not set; the website was not updated"
+            exit 0
+          fi
+          curl --fail-with-body --silent --show-error --max-time 60 --retry 4 --retry-delay 10 \
+            -X POST "${WEBSITE_URL%/}/api/webhooks/github-release" \
+            -H "Content-Type: application/json" \
+            -H "x-orbit-webhook-secret: $WEBHOOK_SECRET" \
+            -d "{\"tag\":\"$GITHUB_REF_NAME\"}"
