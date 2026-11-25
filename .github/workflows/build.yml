@@ -25,7 +25,7 @@ jobs:
             args: --win --x64
           - os: macos-latest
             platform: mac
-            args: --mac dmg --arm64
+            args: --mac dmg --arm64 --x64
           - os: ubuntu-22.04
             platform: linux
             args: --linux AppImage deb --x64
@@ -106,6 +106,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
           WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+      - name: Check the Linux packages install and start
+        if: matrix.platform == 'linux'
+        run: bash build/verify-linux.sh
+
+      - name: Check the Mac apps are signed and start
+        if: matrix.platform == 'mac'
+        run: bash build/verify-mac.sh
 
       - name: Save downloads cache
         if: github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true'

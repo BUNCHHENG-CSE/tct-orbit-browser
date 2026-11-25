@@ -10,6 +10,7 @@
     "url": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser.git"
   },
   "main": "./out/main/index.js",
+  "desktopName": "tct-orbit.desktop",
   "author": "TCT <BUNCHHENG-CSE@users.noreply.github.com>",
   "engines": {
     "node": ">=20.0.0",

@@ -78,7 +78,8 @@ function setupCustomUserAgent(): string {
 
   let cleaned = fallback
     .replace(/Electron\/[0-9.]+\s?/gi, '')
-    .replace(/(tct-orbit|tct-orbit-[a-z]+|arc-browser)\/[0-9.]+\s?/gi, '')
+    // The app's own token (its name and version), whatever the app is called
+    .replace(/(like Gecko\)).*?(Chrome\/)/, '$1 $2')
     .replace(/\s+/g, ' ')
     .trim()
 

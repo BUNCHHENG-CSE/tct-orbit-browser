@@ -6,6 +6,9 @@
     <true/>
     <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
+    <!-- Ad-hoc signed parts share no team, so the app could not load its own frameworks without this -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
     <key>com.apple.security.device.camera</key>
     <true/>
     <key>com.apple.security.device.audio-input</key>

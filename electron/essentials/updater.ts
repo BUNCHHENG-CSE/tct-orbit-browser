@@ -17,7 +17,9 @@ function unsupportedReason(): string | null {
   if (!app.isPackaged) return 'Development build'
   if (process.windowsStore) return 'The Microsoft Store keeps this app up to date'
   if (process.env.PORTABLE_EXECUTABLE_DIR) return 'The portable version does not update itself'
-  if (process.platform === 'linux' && !process.env.APPIMAGE) return 'Update through your package manager'
+  // macOS only installs updates signed with an Apple Developer ID
+  if (process.platform === 'darwin') return 'On Mac, download new versions from the website'
+  if (process.platform === 'linux' && !process.env.APPIMAGE) return 'Download new versions from the website'
   return null
 }
 

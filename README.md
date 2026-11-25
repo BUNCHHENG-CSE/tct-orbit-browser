@@ -1,4 +1,4 @@
-# TCT Orbit (`v0.1.2`)
+# TCT Orbit
 
 A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, and 100% private local machine storage.
 
@@ -10,7 +10,7 @@ A fast, clean, and modern web browser built for smooth navigation and distractio
 - **Docked Right-Side DevTools (`Inspect`)**: Docked DevTools powered by Chromium's `WebContentsView` with real-time DOM element inspection, interactive splitter handle, tab-switch sync, and detach-to-window capability.
 - **Unified Theme Engine**: Zero-flash startup with pre-rendered blocking script, system sync, light/dark modes, 6 accent color presets (`Orbit Blue`, `Nebula Violet`, `Emerald`, `Amber`, `Rose`, `Monochrome`), and native website color scheme pass-through without CSS inversion filters.
 - **Smart Link Navigation & Automatic Tab Opening**: Intercepts `target="_blank"` and `window.open()` to immediately open and activate new tabs next to the active tab, while middle-click or `Ctrl/Cmd+Click` opens background tabs smoothly without losing focus.
-- **Spotlight Command Bar**: Instant omnibox (`Cmd/Ctrl+T` or `Cmd/Ctrl+L`) with real-time address detection, search engine switching (DuckDuckGo, Google, Bing), and tab switching.
+- **Spotlight Command Bar**: Instant search (`Cmd/Ctrl+K`) with real-time address detection, search engine switching (DuckDuckGo, Google, Bing), and tab switching.
 - **Vertical Spaces & Sidebar**: Collapsible vertical sidebar dock with custom workspaces (Spaces) including Personal, Work, and Research with custom icons and colors.
 - **100% Private Local Storage**: All browsing history, tabs, spaces, and preferences are stored exclusively on your machine with zero cloud telemetry.
 - **Chromium Native User-Agent**: Sanitized User-Agent string removing Electron signatures for seamless Google Auth and Cloudflare verification.
@@ -21,13 +21,63 @@ A fast, clean, and modern web browser built for smooth navigation and distractio
 - **Page tools**: web capture with drawing, highlights saved to Space Notes, boosts (custom CSS, hidden elements), page translation.
 - **Ask this page**: questions answered by a model on your own computer ([Ollama](https://ollama.com)); pages never leave it.
 - **Windows and routing**: several windows, tabs that move between them, and sites that always open in a chosen Space.
+- **Downloads you can see**: a message and a toolbar progress button when a download starts; pause, resume and automatic retry after a lost connection.
+- **Favorites**: favorites bar with folders.
+- **Ad and tracker blocking**: filter lists checked on your computer.
 - **Make it yours**: custom keyboard shortcuts; interface in English, Spanish, French or German.
+
+---
+
+## Install
+
+Download the file for your computer from the [latest release](https://github.com/BUNCHHENG-CSE/tct-orbit-browser/releases/latest). In the names below, `<version>` is the release number.
+
+| System | File | Notes |
+|---|---|---|
+| **Windows 10 / 11** (x64) | `tct-orbit-<version>-x64-setup.exe` | If SmartScreen appears: **More info → Run anyway** |
+| **macOS 13+, Apple Silicon** (M series) | `tct-orbit-<version>-arm64.dmg` | See [First start on a Mac](#first-start-on-a-mac) |
+| **macOS 13+, Intel** | `tct-orbit-<version>-x64.dmg` | See [First start on a Mac](#first-start-on-a-mac) |
+| **Ubuntu / Debian** (x64) | `tct-orbit-<version>-amd64.deb` | `sudo apt install ./tct-orbit-<version>-amd64.deb` |
+| **Other Linux** (x64) | `tct-orbit-<version>-x86_64.AppImage` | `chmod +x` the file, then run it |
+
+### First start on a Mac
+
+The Mac app is not notarized by Apple, so macOS asks once for each version:
+
+1. Drag **TCT Orbit** into Applications and open it. macOS shows a warning; close it.
+2. Open **System Settings → Privacy & Security** and choose **Open Anyway**.
+
+Versions up to 0.1.8 were not signed, so macOS calls them "damaged". Install a newer version.
+
+### Linux notes
+
+- Use the `.deb` on Ubuntu 24.04 and newer. These systems only allow Chromium's sandbox to packages that ask for it, which the `.deb` does. There the AppImage starts **without the sandbox**.
+- Only the `.deb` can become the default browser.
+
+### Updates
+
+| Version | Updates |
+|---|---|
+| Windows installer, Linux AppImage | Automatic, from GitHub Releases |
+| macOS, Linux `.deb` | Download the new version |
 
 ---
 
 ## Publishing an update
 
-Push a `v*` tag. CI attaches the installers and their `latest*.yml` files to the GitHub Release, which installed copies read. The tag must match `version` in `package.json` (e.g. `v0.1.3`). The repository must stay **public**. macOS updates need a signed app.
+```bash
+npm version patch -m "release: v%s"
+git push origin main --follow-tags
+```
+
+The `v*` tag starts CI, which attaches the installers and their `latest*.yml` files to the GitHub Release that installed copies read. The tag must match `version` in `package.json`, and the repository must stay **public**.
+
+Before publishing, CI checks that:
+
+- the Mac apps (Apple Silicon and Intel) are validly signed and start (`build/verify-mac.sh`),
+- the `.deb` installs, and the `.deb` and the AppImage start (`build/verify-linux.sh`).
+
+Automatic Mac updates and a start without "Open Anyway" need an Apple Developer ID; `electron-builder.yml` says what to change then.
 
 ---
 
@@ -50,19 +100,20 @@ Channels automatically isolate their respective `userData` directory, state file
 
 All application data is centralized around `app.getPath('userData')`:
 
-- **Windows**: `%APPDATA%\<channel>\` (e.g. `%APPDATA%\tct-orbit\`)
-- **macOS**: `~/Library/Application Support/<channel>/`
-- **Linux**: `~/.config/<channel>/`
+- **Windows**: `%LOCALAPPDATA%\TCTOrbit\User Data\`
+- **macOS**: `~/Library/Application Support/TCTOrbit/`
+- **Linux**: `~/.config/tct-orbit/`
+
+Other channels use their own folder. Data from older locations is moved once, on the first start.
 
 ### Folder Hierarchy
 
 ```
-tct-orbit/
-├── User Data/
-│   └── Default/
-│       ├── state.json       # Tabs, spaces, tab groups and settings (atomic writes)
-│       ├── bookmarks.json   # Bookmarks and reading list
-│       └── notes.json       # Space Notes
+<data folder>/
+├── Default/
+│   ├── state.json           # Tabs, spaces, tab groups and settings (atomic writes)
+│   ├── bookmarks.json       # Bookmarks and reading list
+│   └── notes.json           # Space Notes
 ├── passwords.json, addresses.json   # Encrypted with the OS account
 ├── boosts.json, highlights.json, space-routes.json
 ├── safe-browsing/           # Phishing and malware lists (checked locally)
@@ -72,7 +123,7 @@ tct-orbit/
 ### Storage Resilience & Migration
 
 1. **Atomic File Writes**: All mutations to `state.json` write to a temporary file (`state.json.<timestamp>.<rand>.tmp`) on the same volume before performing an atomic `fs.renameSync`, preventing corruptions during unexpected power loss.
-2. **Safe Startup Migration**: On first launch of `v0.1.0`, the browser automatically checks for legacy `%APPDATA%\TCT Orbit Browser\tct-orbit-data.json` or legacy SQLite databases. If found and `User Data/Default/state.json` does not exist, files are safely migrated to `User Data/Default/` without deleting the original backup.
+2. **Safe Startup Migration**: Data from older versions and folders is moved to the current folder once.
 3. **Directory Overrides**: You can override the user data directory before launch using:
    - CLI Switch: `--user-data-dir="C:/path/to/custom/dir"`
    - Environment Variable: `TCT_ORBIT_DATA_DIR="C:/path/to/custom/dir"`
@@ -105,37 +156,38 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 
 | Shortcut | Description |
 |---|---|
-| `Cmd/Ctrl + T` | Open new tab & spotlight command bar |
+| `Cmd/Ctrl + T` | New tab |
+| `Cmd/Ctrl + K` | Command bar |
 | `Cmd/Ctrl + W` | Close active tab |
 | `Cmd/Ctrl + Shift + T` | Reopen last closed tab |
 | `Cmd/Ctrl + L` | Focus address bar / Omnibox |
 | `Cmd/Ctrl + S` | Toggle sidebar rail |
-| `Cmd/Ctrl + R` | Reload active tab |
+| `Cmd/Ctrl + R` or `F5` | Reload active tab |
 | `Cmd/Ctrl + Shift + R` | Hard reload & clear cache |
 | `Cmd/Ctrl + N` | New window |
+| `Alt + Shift + N` | New private window |
+| `Cmd/Ctrl + J` | Downloads |
 | `Cmd/Ctrl + Shift + S` | Web capture (copies the visible page, opens the editor) |
 | `Cmd/Ctrl + Shift + Y` | Ask this page |
 | `F12` or `Cmd/Ctrl + Shift + I` | Toggle docked Developer Tools |
 | `Cmd/Ctrl + ,` | Open browser settings |
-| `Cmd/Ctrl + 1..9` | Switch directly to tab N |
+| `Cmd/Ctrl + 1..8` | Switch directly to tab N |
+| `Cmd/Ctrl + 9` | Go to the last tab |
+| `Cmd/Ctrl + /` | All shortcuts (they can be changed in Settings) |
 
 ---
 
 ## Packaging & Installer Artifacts
 
-Configured in `electron-builder.yml` with updates from GitHub Releases:
+Configured in `electron-builder.yml`. CI publishes these:
 
-| Platform | Architecture | Format | Output Artifact Name (`v0.1.2`) |
-|---|---|---|---|
-| **Windows** | x64, ARM64 | NSIS Installer | `tct-orbit-0.1.2-${arch}-setup.exe` |
-| **Windows** | x64, ARM64 | Portable Executable | `tct-orbit-0.1.2-${arch}-portable.exe` |
-| **macOS** | Apple Silicon, Intel, Universal | Apple Disk Image (LZMA) | `tct-orbit-0.1.2-${arch}.dmg` |
-| **macOS** | Apple Silicon, Intel, Universal | Compressed Archive | `tct-orbit-0.1.2-${arch}.zip` |
-| **Linux** | x64, ARM64 | AppImage | `tct-orbit-0.1.2-${arch}.AppImage` |
-| **Linux** | x64, ARM64 | Debian Package (Ubuntu/Debian) | `tct-orbit-0.1.2-${arch}.deb` |
-| **Linux** | x64, ARM64 | RPM Package (Fedora/RHEL/openSUSE) | `tct-orbit-0.1.2-${arch}.rpm` |
-| **Linux** | x64, ARM64 | Pacman Package (Arch Linux) | `tct-orbit-0.1.2-${arch}.pkg.tar.zst` |
-| **Linux** | x64, ARM64 | Tarball | `tct-orbit-0.1.2-${arch}.tar.gz` |
+| Platform | Architecture | Format |
+|---|---|---|
+| **Windows** | x64 | NSIS installer (`.exe`) |
+| **macOS 13+** | Apple Silicon, Intel | Disk image (`.dmg`), ad-hoc signed |
+| **Linux** | x64 | `.deb`, AppImage |
+
+The `dist:*` scripts in `package.json` can also build Windows ARM64, a universal Mac app, and `.rpm` and pacman packages for Linux. CI does not publish or test those.
 
 ---
 

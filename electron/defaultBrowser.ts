@@ -90,6 +90,8 @@ export async function getDefaultBrowserStatus(): Promise<DefaultBrowserStatus> {
     if (process.platform === 'darwin') {
       return { isDefault: app.isDefaultProtocolClient('https') && app.isDefaultProtocolClient('http'), canSet: true }
     }
+    // An AppImage has no menu entry that other programs could open links with
+    if (process.env.APPIMAGE) return { isDefault: false, canSet: false, reason: 'Install the .deb package to make TCT Orbit your default browser' }
     const { stdout } = await run('xdg-settings', ['get', 'default-web-browser'])
     return { isDefault: stdout.trim() === LINUX_DESKTOP, canSet: true }
   } catch {

@@ -106,7 +106,12 @@ portable:
 mac:
   category: public.app-category.productivity
   icon: build/icon.icns
-  minimumSystemVersion: 10.15.0
+  # What Electron 45 itself needs
+  minimumSystemVersion: 13.0.0
+  # Ad-hoc signature: free, no Apple account. Without any signature macOS calls the app "damaged";
+  # with this one it asks for "Open Anyway" once. With an Apple Developer ID, remove this line, the
+  # disable-library-validation entitlement and the updater's macOS check, and turn notarize on.
+  identity: "-"
   hardenedRuntime: true
   gatekeeperAssess: false
   entitlements: build/entitlements.mac.plist
@@ -159,15 +164,20 @@ dmg:
 # ==============================================================================
 linux:
   executableName: tct-orbit
+  # Links running windows to the menu entry (icon in the dock, also on Wayland)
+  syncDesktopName: true
   maintainer: TCT <BUNCHHENG-CSE@users.noreply.github.com>
   category: Network;WebBrowser;
-  icon: resources/browser-logo.png
+  # Every size the Linux icon theme knows: a single 1024px icon is not found by menus
+  icon: build/icons
+  mimeTypes:
+    - text/html
+    - application/xhtml+xml
   synopsis: Fast, Clean, and Modern Desktop Web Browser
   description: TCT Orbit is a fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.
   desktop:
     entry:
       StartupWMClass: tct-orbit
-      MimeType: text/html;text/xml;application/xhtml+xml;application/xml;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/tct-orbit;
       Terminal: false
       Categories: Network;WebBrowser;
   target:
@@ -191,6 +201,10 @@ linux:
       arch:
         - x64
         - arm64
+
+# The current AppImage runtime starts without libfuse2, which new Linux systems no longer have
+toolsets:
+  appimage: 1.0.3
 
 appImage:
   artifactName: tct-orbit-${version}-${arch}.${ext}
