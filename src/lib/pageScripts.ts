@@ -159,3 +159,9 @@ export const ELEMENT_PICKER_SCRIPT = `new Promise(function (resolve) {
     document.addEventListener('keydown', onKey, true);
   } catch (e) { window.__tctPicking = false; resolve(null); }
 })`
+
+/** Same picker, for "Hide an element": always returns a selector (no "Whole page" choice) */
+export const HIDE_PICKER_SCRIPT = ELEMENT_PICKER_SCRIPT.replace('Click the part of the page to watch', 'Click the element to hide').replace(
+  '<button class="p" data-a="page">Whole page</button>',
+  '<button data-a="page" hidden></button>'
+)

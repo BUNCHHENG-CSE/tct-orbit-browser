@@ -7,7 +7,7 @@ export default defineConfig({
     // Bundle and tree-shake all lightweight pure-JS dependencies into out/main/index.js
     plugins: [
       externalizeDepsPlugin({
-        exclude: ['@ghostery/adblocker-electron', 'dotenv', 'zod']
+        exclude: ['@ghostery/adblocker-electron', 'dotenv', 'zod', 'electron-updater']
       })
     ],
     resolve: {

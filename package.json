@@ -6,7 +6,7 @@
   "homepage": "https://tctorbit.com",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tctorbit/tct-orbit.git"
+    "url": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser.git"
   },
   "main": "./out/main/index.js",
   "author": "TCT <support@tctorbit.com>",
@@ -41,6 +41,7 @@
     "dist:linux:all": "electron-vite build && electron-builder --linux AppImage deb rpm pacman tar.gz --publish never",
     "dist:all": "electron-vite build && electron-builder -mwl --publish never",
     "dist:publish": "electron-vite build && electron-builder --publish always",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --project tsconfig.node.json --noEmit && tsc --project tsconfig.web.json --noEmit"
   },
   "dependencies": {
@@ -72,6 +73,7 @@
     "dotenv": "^16.4.7",
     "electron": "^45.3.4",
     "electron-builder": "^26.18.1",
+    "electron-updater": "^6.8.11",
     "electron-vite": "^3.1.0",
     "framer-motion": "^11.11.17",
     "lenis": "^1.3.27",
@@ -85,6 +87,7 @@
     "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.7.2",
     "vite": "^6.4.6",
+    "vitest": "^3.2.7",
     "zod": "^4.6.7",
     "zustand": "^4.5.5"
   },

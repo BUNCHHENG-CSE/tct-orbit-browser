@@ -8,7 +8,9 @@ import {
   Moon,
   Zap,
   BookOpen,
-  ShieldBan
+  ShieldBan,
+  ShieldAlert,
+  Frown
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTabs } from '@/hooks/useTabs'
@@ -35,6 +37,8 @@ import { useMeetingStore } from '@/store/useMeetingStore'
 import { CompareToolbar } from '@/components/Smart/CompareToolbar'
 import { installTabDragGuard } from '@/lib/tabDragGuard'
 import { safeImageUrl } from '@/lib/sanitizeHtml'
+import { useT } from '@/lib/i18n'
+import type { UnsafeSiteInfo } from '@/types/essentials'
 
 // Drag overlays (split-view drop zone, sidebar drop zones) must never get stuck after a drag
 installTabDragGuard()
@@ -124,6 +128,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   const [hasError, setHasError] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const t = useT()
+  // The page's process ended unexpectedly
+  const [crashed, setCrashed] = useState<'crash' | 'memory' | null>(null)
+  // Known phishing / malware site
+  const [danger, setDanger] = useState<UnsafeSiteInfo | null>(null)
   // Focus rule for this space blocked a navigation: { domain, url }
   const [blocked, setBlocked] = useState<{ domain: string; url: string } | null>(null)
   // Saved reading position offered as "Continue reading"
@@ -342,7 +351,21 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     const handleStartLoading = () => {
       setIsLoading(true)
       setHasError(false)
+      setCrashed(null)
     }
+
+    const handleProcessGone = (e: any) => {
+      const reason = e?.details?.reason ?? e?.reason
+      if (reason === 'clean-exit') return
+      setIsLoading(false)
+      setCrashed(reason === 'oom' ? 'memory' : 'crash')
+    }
+
+    const offUnsafe = api.essentials?.safeBrowsing.onBlocked((info) => {
+      try {
+        if (info.webContentsId === el.getWebContentsId()) setDanger(info)
+      } catch {}
+    })
 
     const handleStopLoading = () => {
       setIsLoading(false)
@@ -433,7 +456,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         // -20 ERR_BLOCKED_BY_CLIENT: cancelled by TCT Orbit itself (Focus Sprint block list)
         setErrorMessage(
           e.errorCode === -20
-            ? 'This site is on your Focus Sprint block list. It opens again when the sprint ends.'
+            ? 'This site is blocked: it is on your Focus Sprint list, or TCT Orbit stopped it.'
             : e.errorDescription || 'Failed to load webpage'
         )
       }
@@ -493,6 +516,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         return
       }
       setBlocked(null)
+      setDanger(null)
       setResumeAt(null)
       useSmartStore.getState().setProgress(tab.id, null)
     }
@@ -611,6 +635,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     el.addEventListener('page-title-updated', handleTitleUpdated)
     el.addEventListener('did-fail-load', handleDidFailLoad)
     el.addEventListener('new-window', handleNewWindow)
+    el.addEventListener('render-process-gone', handleProcessGone)
 
     return () => {
       unregisterWebviewRef(tab.id)
@@ -631,6 +656,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
       el.removeEventListener('page-title-updated', handleTitleUpdated)
       el.removeEventListener('did-fail-load', handleDidFailLoad)
       el.removeEventListener('new-window', handleNewWindow)
+      el.removeEventListener('render-process-gone', handleProcessGone)
+      offUnsafe?.()
     }
   }, [tab.id, registerWebviewRef, unregisterWebviewRef])
 
@@ -677,7 +704,31 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
     api.tabs.remove(tab.id).catch(() => {})
   }
 
+  const handleLeaveDanger = () => {
+    const el = webviewRef.current
+    setDanger(null)
+    setHasError(false)
+    try {
+      // The blocked page was never shown: the previous page is still there
+      const live = el?.getURL()
+      if (live && live !== 'about:blank' && live !== danger?.url) return
+      if (el?.canGoBack()) return el.goBack()
+    } catch {}
+    useBrowserStore.getState().removeTabFromStore(tab.id)
+    api.tabs.remove(tab.id).catch(() => {})
+  }
+
+  const handleOpenDanger = async () => {
+    if (!danger) return
+    await api.essentials.safeBrowsing.allow(danger.host)
+    const url = danger.url
+    setDanger(null)
+    setHasError(false)
+    loadUrlWithRetry(webviewRef.current, url)
+  }
+
   const handleRetry = () => {
+    setCrashed(null)
     setHasError(false)
     if (webviewRef.current) {
       webviewRef.current.reload()
@@ -755,7 +806,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
           // while the bottom is clipped. (h-full also overflowed by the split-pane header height.)
           className="w-full flex-1 min-h-0 min-w-0 bg-background border-none outline-none flex"
           {...({ allowpopups: 'true' } as any)}
-          webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes, spellcheck=no"
+          webpreferences="contextIsolation=yes, javascript=yes, sandbox=yes, backgroundThrottling=yes"
         />
       )}
 
@@ -833,14 +884,59 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
         </div>
       )}
 
+      {/* Known phishing / malware site */}
+      {danger && (
+        <div role="alertdialog" aria-label={t('Dangerous site')} className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-20">
+          <div className="w-14 h-14 rounded-2xl bg-destructive text-destructive-foreground flex items-center justify-center mb-4">
+            <ShieldAlert className="w-7 h-7" />
+          </div>
+          <h3 className="text-lg font-semibold text-foreground mb-1">{t('Dangerous site')}</h3>
+          <p className="text-xs font-mono text-muted-foreground mb-3 break-all max-w-md">{danger.host}</p>
+          <p className="text-xs text-muted-foreground max-w-sm mb-5">
+            {danger.kind === 'phishing'
+              ? t('This site is on a list of phishing sites. It may try to steal your passwords or card details.')
+              : t('This site is on a list of sites that spread malware. It may try to harm your computer.')}
+          </p>
+          <div className="flex items-center gap-2">
+            <button autoFocus onClick={handleLeaveDanger} className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-semibold">
+              {t('Back to safety')}
+            </button>
+            <button onClick={() => void handleOpenDanger()} className="px-4 py-2 rounded-xl text-muted-foreground hover:bg-muted text-xs">
+              {t('Open anyway')}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* The page's process crashed */}
+      {crashed && !danger && (
+        <div role="alert" className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-[15]">
+          <div className="w-12 h-12 rounded-2xl bg-muted text-muted-foreground flex items-center justify-center mb-4">
+            <Frown className="w-6 h-6" />
+          </div>
+          <h3 className="text-base font-semibold text-foreground mb-1">{t('This tab crashed')}</h3>
+          <p className="text-xs text-muted-foreground max-w-sm mb-4">
+            {crashed === 'memory'
+              ? t('This page used too much memory and was stopped. Reload it to continue.')
+              : t('Something went wrong while showing this page. Reload it to continue.')}
+          </p>
+          <button
+            onClick={handleRetry}
+            className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium flex items-center gap-2"
+          >
+            <RefreshCw className="w-3.5 h-3.5" /> {t('Reload')}
+          </button>
+        </div>
+      )}
+
       {/* Error overlay on did-fail-load */}
-      {hasError && (
+      {hasError && !danger && (
         <div className="absolute inset-0 bg-background flex flex-col items-center justify-center p-6 text-center z-10">
           <div className="w-12 h-12 rounded-2xl bg-destructive/10 text-destructive flex items-center justify-center mb-4">
             <AlertCircle className="w-6 h-6" />
           </div>
           <h3 className="text-base font-semibold text-foreground mb-1">
-            Unable to reach webpage
+            {t('Unable to reach webpage')}
           </h3>
           <p className="text-xs text-muted-foreground max-w-sm mb-4">
             {errorMessage || 'Check your internet connection or the URL.'}
@@ -851,13 +947,13 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
               className="px-4 py-2 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground text-xs font-medium flex items-center gap-2 transition-colors shadow-sm"
             >
               <RefreshCw className="w-3.5 h-3.5" />
-              <span>Retry</span>
+              <span>{t('Retry')}</span>
             </button>
             <button
               onClick={() => onOpenNewTab('https://duckduckgo.com')}
               className="px-4 py-2 rounded-xl bg-muted hover:bg-muted/80 text-foreground text-xs font-medium flex items-center gap-2 transition-colors border border-border"
             >
-              <span>Go to Home</span>
+              <span>{t('Go to Home')}</span>
             </button>
           </div>
         </div>

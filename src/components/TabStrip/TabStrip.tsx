@@ -15,7 +15,8 @@ import {
   PanelLeft,
   Settings,
   UserRound,
-  SlidersHorizontal
+  SlidersHorizontal,
+  AppWindow
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useSpaces } from '@/hooks/useSpaces'
@@ -25,12 +26,15 @@ import { openNewTab, isStartPageUrl } from '@/lib/startPage'
 import { modKey, isMac } from '@/lib/platform'
 import { WindowControls } from '@/components/TitleBar/WindowControls'
 import { BrandMark } from '@/components/TitleBar/BrandMark'
-import { useDraggingTabId, useTabDrop, tabDragProps, type DropPosition } from '@/components/Sidebar/TabReorder'
+import { useDraggingTabId, useTabDrop, tabDragProps, droppedOutside, type DropPosition } from '@/components/Sidebar/TabReorder'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSmartStore } from '@/store/useSmartStore'
 import { SnoozeMenu } from '@/components/Smart/SnoozeMenu'
 import { api } from '@/lib/ipc'
 import { isPrivateWindow } from '@/lib/privateWindow'
+import { canMoveToNewWindow, isExtraWindow, isMainWindow } from '@/lib/extraWindow'
+import { moveTabToOtherWindow } from '@/lib/tabLifecycle'
+import { useT } from '@/lib/i18n'
 import {
   ContextMenu,
   ContextMenuContent,
@@ -117,6 +121,11 @@ export const TabStrip: React.FC = () => {
     api.tabs.reorder(activeSpaceId, next.map((t) => t.id)).catch((err) => console.error('[TabStrip] Reorder failed:', err))
   }
   const accent = activeSpace?.color || '#6366f1'
+  const t = useT()
+  const movable = (tab: Tab) => canMoveToNewWindow(tab, !!activeSpace?.isolated)
+  const tearOff = (tab: Tab) => (e: React.DragEvent) => {
+    if (movable(tab) && !isExtraWindow && droppedOutside(e)) void moveTabToOtherWindow(tab.id)
+  }
 
   // Keep the active tab in view
   useEffect(() => {
@@ -152,7 +161,12 @@ export const TabStrip: React.FC = () => {
           <RotateCw className="w-3.5 h-3.5" /> Reload
         </ContextMenuItem>
       )}
-      <SnoozeMenu tab={tab} onClose={() => removeTab(tab.id)} className={menuItem} />
+      {movable(tab) && (
+        <ContextMenuItem onClick={() => void moveTabToOtherWindow(tab.id)} className={menuItem}>
+          <AppWindow className="w-3.5 h-3.5" /> {t(isExtraWindow ? 'Move to main window' : 'Move to new window')}
+        </ContextMenuItem>
+      )}
+      {!isExtraWindow && <SnoozeMenu tab={tab} onClose={() => removeTab(tab.id)} className={menuItem} />}
       <ContextMenuSeparator />
       <ContextMenuItem onClick={() => void removeTab(tab.id)} className={menuItem}>
         <X className="w-3.5 h-3.5" /> Close tab
@@ -180,7 +194,7 @@ export const TabStrip: React.FC = () => {
             aria-selected={active}
             title={tab.title || tab.url}
             onClick={() => setActiveTab(tab.id)}
-            {...tabDragProps(tab)}
+            {...tabDragProps(tab, tearOff(tab))}
             {...dropProps}
             className={`relative w-7 h-7 flex items-center justify-center rounded-md transition-colors ${
               active ? 'bg-chrome shadow-sm' : 'hover:bg-background/40'
@@ -213,10 +227,22 @@ export const TabStrip: React.FC = () => {
           <div
             data-tab-id={tab.id}
             role="tab"
+            tabIndex={0}
             aria-selected={active}
             title={tab.title || tab.url}
             onClick={() => setActiveTab(tab.id)}
-            {...tabDragProps(tab)}
+            onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault()
+                setActiveTab(tab.id)
+              } else if (e.key === 'Delete') void removeTab(tab.id)
+              else if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+                const all = Array.from(scrollRef.current?.querySelectorAll<HTMLElement>('[role="tab"]') ?? [])
+                all[all.indexOf(e.currentTarget) + (e.key === 'ArrowRight' ? 1 : -1)]?.focus()
+              }
+            }}
+            {...tabDragProps(tab, tearOff(tab))}
             {...dropProps}
             onAuxClick={(e) => {
               if (e.button === 1) {
@@ -303,7 +329,8 @@ export const TabStrip: React.FC = () => {
           </span>
         )}
         {/* Space chip: opens the space menu; pinned tabs sit inside it */}
-        {!isPrivateWindow && (
+        {isExtraWindow && pinned.map(renderPinned)}
+        {isMainWindow && (
         <div className="flex items-center gap-0.5 h-8 pl-1 pr-1 rounded-lg bg-muted/60">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

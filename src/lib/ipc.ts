@@ -1,5 +1,6 @@
 import type { ElectronAPI, AppInfo } from '@/types/api'
 import { isPrivateWindow, PRIVATE_SPACE, PRIVATE_WINDOW_SPACE_ID } from '@/lib/privateWindow'
+import { isExtraWindow, EXTRA_BASE_SPACE_ID, EXTRA_SPACE, EXTRA_SPACE_ID } from '@/lib/extraWindow'
 
 export const getApi = (): ElectronAPI => {
   if (typeof window !== 'undefined' && window.api) {
@@ -21,6 +22,13 @@ export const api = {
   },
   get tabs() {
     const tabs = getApi().tabs
+    if (isExtraWindow) {
+      // Extra window: every tab lives in the window's own space
+      return {
+        ...tabs,
+        create: (data: Parameters<typeof tabs.create>[0]) => tabs.create({ ...data, spaceId: EXTRA_SPACE_ID, isPrivate: false })
+      }
+    }
     if (!isPrivateWindow) return tabs
     // Private window: every tab is private and lives in the private window's own space
     return {
@@ -33,6 +41,18 @@ export const api = {
   },
   get spaces() {
     const spaces = getApi().spaces
+    if (isExtraWindow) {
+      return {
+        ...spaces,
+        list: async () => [{ ...EXTRA_SPACE }],
+        setActive: async () => ({ ...EXTRA_SPACE }),
+        update: async () => ({ ...EXTRA_SPACE }),
+        create: async () => {
+          throw new Error('Spaces are managed in the main window')
+        },
+        remove: async () => false
+      }
+    }
     if (!isPrivateWindow) return spaces
     // Private window: one virtual "Private" space; spaces can't be created or switched here
     return {
@@ -101,7 +121,18 @@ export const api = {
     return getApi().history
   },
   get notes() {
-    return getApi().notes
+    const notes = getApi().notes
+    const base = EXTRA_BASE_SPACE_ID
+    if (!isExtraWindow || !base) return notes
+    // Extra windows share the notes of the space they were opened from
+    return {
+      ...notes,
+      get: () => notes.get(base),
+      save: (_spaceId: string, content: string) => notes.save(base, content)
+    }
+  },
+  get essentials() {
+    return getApi().essentials
   },
   get bookmarks() {
     return getApi().bookmarks

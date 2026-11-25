@@ -47,8 +47,22 @@ export function useClearOnDragEnd(active: boolean, setActive: (value: boolean) =
   }, [active, setActive])
 }
 
+/** The drag ended outside this window (and no other app took it): tear the tab off */
+export function droppedOutside(e: React.DragEvent): boolean {
+  if (e.dataTransfer.dropEffect !== 'none') return false
+  // Esc cancels with coordinates 0,0
+  if (e.screenX === 0 && e.screenY === 0) return false
+  const margin = 24
+  return (
+    e.screenX < window.screenX - margin ||
+    e.screenY < window.screenY - margin ||
+    e.screenX > window.screenX + window.outerWidth + margin ||
+    e.screenY > window.screenY + window.outerHeight + margin
+  )
+}
+
 /** Props that make an element a draggable tab (same payload as the sidebar: split view, groups…) */
-export function tabDragProps(tab: Tab) {
+export function tabDragProps(tab: Tab, onTearOff?: (e: React.DragEvent) => void) {
   return {
     draggable: true,
     onDragStart: (e: React.DragEvent) => {
@@ -57,7 +71,10 @@ export function tabDragProps(tab: Tab) {
       e.dataTransfer.effectAllowed = 'move'
       window.dispatchEvent(new CustomEvent('tct:tab-drag-start', { detail: { tabId: tab.id } }))
     },
-    onDragEnd: () => window.dispatchEvent(new CustomEvent('tct:tab-drag-end'))
+    onDragEnd: (e: React.DragEvent) => {
+      window.dispatchEvent(new CustomEvent('tct:tab-drag-end'))
+      onTearOff?.(e)
+    }
   }
 }
 

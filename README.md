@@ -1,6 +1,6 @@
 # TCT Orbit (`v0.1.2`)
 
-A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, Prisma, and 100% private local machine storage.
+A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows. Powered by `electron-vite`, React 18, TypeScript, Tailwind CSS, Zustand, and 100% private local machine storage.
 
 ---
 
@@ -14,7 +14,20 @@ A fast, clean, and modern web browser built for smooth navigation and distractio
 - **Vertical Spaces & Sidebar**: Collapsible vertical sidebar dock with custom workspaces (Spaces) including Personal, Work, and Research with custom icons and colors.
 - **100% Private Local Storage**: All browsing history, tabs, spaces, and preferences are stored exclusively on your machine with zero cloud telemetry.
 - **Chromium Native User-Agent**: Sanitized User-Agent string removing Electron signatures for seamless Google Auth and Cloudflare verification.
-- **Multi-Channel Release Isolation**: Run Stable, Nova, Deep, and Canary releases side-by-side with separate `userData` folders and isolated database instances.
+- **Multi-Channel Release Isolation**: Run Stable, Nova, Deep, and Canary releases side-by-side with separate `userData` folders.
+
+- **Screen sharing, spellcheck and sign-in prompts**: pick a screen or window for every call, local spellchecking, HTTP and proxy sign-in.
+- **Safer browsing**: phishing and malware lists checked on your computer, "Leave site?" warnings, crashed-tab recovery.
+- **Page tools**: web capture with drawing, highlights saved to Space Notes, boosts (custom CSS, hidden elements), page translation.
+- **Ask this page**: questions answered by a model on your own computer ([Ollama](https://ollama.com)); pages never leave it.
+- **Windows and routing**: several windows, tabs that move between them, and sites that always open in a chosen Space.
+- **Make it yours**: custom keyboard shortcuts; interface in English, Spanish, French or German.
+
+---
+
+## Publishing an update
+
+Push a `v*` tag. CI attaches the installers and their `latest*.yml` files to the GitHub Release, which installed copies read. The repository (or a separate releases repository set in `electron-builder.yml`) must be **public**, and macOS updates need a signed app.
 
 ---
 
@@ -29,7 +42,7 @@ TCT Orbit supports four release channels configured via `APP_CHANNEL` or `VITE_A
 | **`deep`** | `TCT Orbit Deep` | `com.tctorbit.browser.deep` | `tct-orbit-deep` | Nightly bleeding-edge testers |
 | **`canary`** | `TCT Orbit Canary` | `com.tctorbit.browser.canary` | `tct-orbit-canary` | Developer preview builds |
 
-Channels automatically isolate their respective `userData` directory, state files, and SQLite databases. Pre-release channels render dedicated channel badges in the title bar and settings modal.
+Channels automatically isolate their respective `userData` directory, state files and browsing data. Pre-release channels render dedicated channel badges in the title bar and settings modal.
 
 ---
 
@@ -47,8 +60,12 @@ All application data is centralized around `app.getPath('userData')`:
 tct-orbit/
 ├── User Data/
 │   └── Default/
-│       ├── state.json       # Primary JSON state (tabs, spaces, settings) with atomic writes
-│       └── orbit.db         # Channel-isolated SQLite database (Prisma)
+│       ├── state.json       # Tabs, spaces, tab groups and settings (atomic writes)
+│       ├── bookmarks.json   # Bookmarks and reading list
+│       └── notes.json       # Space Notes
+├── passwords.json, addresses.json   # Encrypted with the OS account
+├── boosts.json, highlights.json, space-routes.json
+├── safe-browsing/           # Phishing and malware lists (checked locally)
 └── Logs/                    # Native application logs (app.setAppLogsPath)
 ```
 
@@ -67,7 +84,7 @@ tct-orbit/
 To ensure seamless compatibility with Google Authentication, Cloudflare Turnstile, and modern web applications, TCT Orbit configures `app.userAgentFallback` and all `BrowserWindow` / `<webview>` instances to strip out `Electron/<version>` and raw application tokens:
 
 ```
-Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 TCTOrbit/0.1.0
+Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/<bundled Chromium version> Safari/537.36
 ```
 
 ---
@@ -79,7 +96,7 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 - **Link**: Open in new tab (next to current tab), Open in new window, Copy link address, Save link as..., Create QR Code for link, Inspect.
 - **Image**: Open image in new tab, Save image as..., Copy image, Copy image address, Inspect.
 - **Selection**: Copy, Search web for query in new tab, Print..., Inspect.
-- **Editable Input**: Spellcheck replacements, Undo, Redo, Cut, Copy, Paste, Paste as plain text, Select all, Inspect.
+- **Editable Input**: Spelling suggestions, Undo, Redo, Cut, Copy, Paste, Paste as plain text, Select all, Inspect.
 - **Inspect Element**: Directly opens the docked right-side DevTools `WebContentsView` (or detached window) and highlights the exact clicked DOM node via `inspectElement(x, y)`.
 
 ---
@@ -95,9 +112,10 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 | `Cmd/Ctrl + S` | Toggle sidebar rail |
 | `Cmd/Ctrl + R` | Reload active tab |
 | `Cmd/Ctrl + Shift + R` | Hard reload & clear cache |
-| `Cmd/Ctrl + Shift + S` | Capture page screenshot to clipboard |
+| `Cmd/Ctrl + N` | New window |
+| `Cmd/Ctrl + Shift + S` | Web capture (copies the visible page, opens the editor) |
+| `Cmd/Ctrl + Shift + Y` | Ask this page |
 | `F12` or `Cmd/Ctrl + Shift + I` | Toggle docked Developer Tools |
-| `Cmd/Ctrl + U` | View page source |
 | `Cmd/Ctrl + ,` | Open browser settings |
 | `Cmd/Ctrl + 1..9` | Switch directly to tab N |
 
@@ -105,7 +123,7 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 
 ## Packaging & Installer Artifacts
 
-Configured in `electron-builder.yml` with update feed at `https://updates.tctorbit.com`:
+Configured in `electron-builder.yml` with updates from GitHub Releases:
 
 | Platform | Architecture | Format | Output Artifact Name (`v0.1.2`) |
 |---|---|---|---|
@@ -133,6 +151,4 @@ Configured in `electron-builder.yml` with update feed at `https://updates.tctorb
 | `npm run build:canary` | `cross-env APP_CHANNEL=canary ...` | Build production bundles for Canary channel |
 | `npm run typecheck` | `tsc --noEmit && ...` | Run TypeScript type checks across root, node, and web |
 | `npm run dist` | `electron-vite build && electron-builder` | Package production installer for your platform |
-| `npm run db:generate` | `prisma generate` | Generate Prisma client bindings |
-| `npm run db:migrate` | `prisma migrate dev` | Run database migrations |
-| `npm run db:seed` | `prisma db seed` | Run database seed script |
+| `npm test` | `vitest run` | Run unit tests |

@@ -13,6 +13,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { toast } from 'sonner'
 import { PRIVATE_START_URL, PRIVATE_START_TITLE } from '@/lib/startPage'
 import { isPrivateWindow, openPrivateWindow } from '@/lib/privateWindow'
+import { isMainWindow } from '@/lib/extraWindow'
 import { PrivateWindowBadge } from '@/components/PrivateWindow/PrivateWindowBadge'
 import type { Tab } from '@/types/api'
 
@@ -171,7 +172,7 @@ export const Sidebar: React.FC<{ hideTabs?: boolean }> = ({ hideTabs = false }) 
       >
         {/* Space Switcher Top Header */}
         <div className={`pt-2 ${isCollapsed ? 'px-0 flex flex-col items-center' : 'px-1'}`}>
-          {isPrivateWindow ? <PrivateWindowBadge collapsed={isCollapsed} /> : <SpaceSwitcher collapsed={isCollapsed} />}
+          {isPrivateWindow ? <PrivateWindowBadge collapsed={isCollapsed} /> : isMainWindow ? <SpaceSwitcher collapsed={isCollapsed} /> : null}
         </div>
 
         {/* Current Space Title & Active Indicator */}

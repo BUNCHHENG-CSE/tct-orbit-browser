@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react'
-import { KeyRound, Search, Eye, EyeOff, Copy, Trash2, Pencil, Check, X, ShieldCheck, AlertTriangle } from 'lucide-react'
+import { KeyRound, Search, Eye, EyeOff, Copy, Trash2, Pencil, Check, X, ShieldCheck, AlertTriangle, Upload, Download } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
@@ -125,6 +125,34 @@ export const PasswordsDialog: React.FC = () => {
     if (open) refresh()
   }, [open, refresh])
 
+  const importCsv = async () => {
+    const res = await api.essentials.passwordFiles.importCsv()
+    if (res.canceled) return
+    if (!res.ok) {
+      toast.error('Passwords were not imported', { description: res.error })
+      return
+    }
+    refresh()
+    const parts = [`${res.added} added`, res.updated ? `${res.updated} updated` : '', res.skipped ? `${res.skipped} skipped` : ''].filter(Boolean)
+    const file = res.filePath
+    toast.success(parts.join(', '), {
+      description: 'The file you imported is not encrypted. Delete it when you no longer need it.',
+      duration: 20_000,
+      action: file
+        ? {
+            label: 'Move to trash',
+            onClick: () =>
+              void api.essentials.passwordFiles.deleteImported(file).then((ok) => (ok ? toast.success('File moved to the trash') : toast.error('The file could not be moved')))
+          }
+        : undefined
+    })
+  }
+  const exportCsv = async () => {
+    const res = await api.essentials.passwordFiles.exportCsv()
+    if (res.ok) toast.success(`${res.count} passwords exported`, { description: 'The file is not encrypted.' })
+    else if (!res.canceled) toast.error('Passwords were not exported', { description: res.error })
+  }
+
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     return q ? list.filter((e) => e.origin.toLowerCase().includes(q) || e.username.toLowerCase().includes(q)) : list
@@ -158,6 +186,19 @@ export const PasswordsDialog: React.FC = () => {
               : 'System encryption is not available, so new passwords are not saved.'}
           </p>
         )}
+
+        <div className="flex gap-2">
+          <button onClick={() => void importCsv()} className="h-8 px-3 rounded-lg text-xs border border-border hover:bg-muted inline-flex items-center gap-1.5">
+            <Upload className="w-3.5 h-3.5" /> Import CSV
+          </button>
+          <button
+            onClick={() => void exportCsv()}
+            disabled={list.length === 0}
+            className="h-8 px-3 rounded-lg text-xs border border-border hover:bg-muted inline-flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Download className="w-3.5 h-3.5" /> Export CSV
+          </button>
+        </div>
 
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />

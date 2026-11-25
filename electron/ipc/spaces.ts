@@ -3,6 +3,7 @@ import type { CreateSpaceData, UpdateSpaceData } from '../../src/types/api'
 import { localStorageService } from '../storage/localStorage'
 import { secureHandle, Schemas } from '../security'
 import { privacyEngine } from '../privacy/privacyEngine'
+import { pageTools } from '../essentials/pageTools'
 import { clearProfileSession, ensureProfileSession, profilePartitionFor } from '../sessions'
 
 export function register(ipcMain: IpcMain): void {
@@ -30,6 +31,7 @@ export function register(ipcMain: IpcMain): void {
     const hadPrivate = localStorageService.hasPrivateTabs()
     const hadProfile = localStorageService.isSpaceIsolated(id)
     const result = localStorageService.removeSpace(id)
+    pageTools.forgetSpace(id)
     // The space's own profile (cookies, logins, storage) goes with it
     if (hadProfile) void clearProfileSession(id)
     // The space held the last private tab(s): wipe the private session like tabs:remove does

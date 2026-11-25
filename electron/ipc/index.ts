@@ -2,7 +2,6 @@ import {
   app,
   shell,
   dialog,
-  clipboard,
   webContents,
   session,
   type IpcMain,
@@ -24,6 +23,8 @@ import { register as registerSite } from './site'
 import { register as registerFeatures } from './features'
 import { register as registerBrowserFeatures } from './browserFeatures'
 import { register as registerSmart } from './smart'
+import { register as registerEssentials } from './essentials'
+import { copyPng } from '../essentials/capture'
 import { getAppPaths } from '../storage/paths'
 import { themeManager } from '../theme/themeManager'
 import { devtoolsManager } from '../devtools/devtoolsManager'
@@ -48,6 +49,7 @@ export function registerAllIpc(
   registerFeatures(ipcMain, getMainWindow)
   registerBrowserFeatures(ipcMain, getMainWindow)
   registerSmart(ipcMain)
+  registerEssentials(ipcMain)
   themeManager.init(ipcMain, getMainWindow)
 
   // App channel metadata & versioning
@@ -317,6 +319,9 @@ export function registerAllIpc(
         return false
       }
 
+      // Saving a link or image: web addresses only (data: images are fine, file: is not)
+      if (method === 'downloadURL' && !/^(https?:|data:image\/|blob:)/i.test(String(args[0] ?? ''))) return false
+
       if (typeof (wc as any)[method] === 'function') {
         try {
           return (wc as any)[method](...args)
@@ -393,18 +398,7 @@ export function registerAllIpc(
     if (wc && !wc.isDestroyed()) {
       try {
         const img = await wc.capturePage()
-        const clip = clipboard as any
-        if (typeof clip.writeImage === 'function') {
-          clip.writeImage(img)
-        } else if (typeof clip.write === 'function') {
-          const pngBuffer = new Uint8Array(img.toPNG())
-          const blob = new Blob([pngBuffer], { type: 'image/png' })
-          const ItemClass = clip.ClipboardItem || (globalThis as any).ClipboardItem
-          if (ItemClass) {
-            await clip.write([new ItemClass({ 'image/png': blob })])
-          }
-        }
-        return true
+        return await copyPng(img.toPNG())
       } catch (err) {
         console.error('[IPC page:capture-screenshot] Error capturing page:', err)
       }

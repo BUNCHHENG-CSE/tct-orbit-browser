@@ -16,7 +16,11 @@ import {
   Search,
   AppWindow,
   LayoutTemplate,
-  ShieldCheck
+  ShieldCheck,
+  Bot,
+  Languages,
+  Camera,
+  Highlighter
 } from 'lucide-react'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { usePomodoroStore } from '@/store/usePomodoroStore'
@@ -65,6 +69,10 @@ export const HEADER_FEATURES = {
   find: { label: 'Find in Page', icon: Search, run: () => emit('tct:toggle-find') },
   'tab-search': { label: 'Search Tabs', icon: AppWindow, iconCls: 'text-primary', run: () => emit('tct:open-tab-search') },
   templates: { label: 'Space Templates', icon: LayoutTemplate, run: () => emit('tct:open-space-templates') },
+  ask: { label: 'Ask this page', icon: Bot, iconCls: 'text-primary', run: () => emit('tct:ask-page') },
+  translate: { label: 'Translate page', icon: Languages, run: () => emit('tct:translate-page') },
+  capture: { label: 'Web capture', icon: Camera, iconCls: 'text-amber-500', run: () => emit('tct:web-capture') },
+  highlights: { label: 'Highlights', icon: Highlighter, iconCls: 'text-yellow-500', run: () => emit('tct:open-highlights') },
   privacy: { label: 'Privacy Report', icon: ShieldCheck, iconCls: 'text-emerald-500', run: () => emit('tct:open-privacy-report') }
 } satisfies Record<string, HeaderFeature>
 

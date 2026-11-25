@@ -4,6 +4,8 @@ import fs from 'fs'
 import path from 'path'
 import { safeStorageVault } from './security'
 import { PRIVATE_PARTITION } from './privacy/types'
+import { promptWindowFor } from './essentials/windowOf'
+import type { CsvLogin } from '../shared/csv'
 import type { PasswordEntryInfo, PasswordSaveOffer, PasswordSettings } from '../src/types/api'
 
 /**
@@ -312,17 +314,17 @@ class PasswordManager {
           return
         }
       }
-      this.offer(origin, user, m.p, sameUser?.id)
+      this.offer(contents, origin, user, m.p, sameUser?.id)
     }
   }
 
-  private offer(origin: string, username: string, password: string, existingId?: string): void {
+  private offer(contents: WebContents, origin: string, username: string, password: string, existingId?: string): void {
     const now = Date.now()
     for (const [token, p] of this.pending) if (now - p.createdAt > OFFER_TTL_MS) this.pending.delete(token)
     const token = crypto.randomBytes(12).toString('hex')
     this.pending.set(token, { origin, username, password, existingId, createdAt: now })
     const offer: PasswordSaveOffer = { token, origin, username, isUpdate: !!existingId }
-    const win = this.getMainWindow()
+    const win = promptWindowFor(contents) ?? this.getMainWindow()
     if (win && !win.isDestroyed()) win.webContents.send('passwords:offer', offer)
   }
 
@@ -358,6 +360,47 @@ class PasswordManager {
     }
     this.save()
     return true
+  }
+
+  /** Add logins from another browser. An existing login (same site and username) gets the new password. */
+  public importLogins(logins: CsvLogin[]): { added: number; updated: number } {
+    let added = 0
+    let updated = 0
+    const now = new Date().toISOString()
+    const byKey = new Map(this.data.logins.map((l) => [`${l.origin}|${l.username}`, l]))
+    for (const l of logins.slice(0, 20_000)) {
+      const origin = loginOrigin(l.url)
+      if (!origin) continue
+      const key = `${origin}|${l.username}`
+      const existing = byKey.get(key)
+      if (existing) {
+        if (safeStorageVault.decryptString(existing.password) === l.password) continue
+        existing.password = safeStorageVault.encryptString(l.password)
+        existing.updatedAt = now
+        updated++
+        continue
+      }
+      const login: StoredLogin = {
+        id: crypto.randomBytes(8).toString('hex'),
+        origin,
+        username: l.username,
+        password: safeStorageVault.encryptString(l.password),
+        createdAt: now,
+        updatedAt: now
+      }
+      this.data.logins.push(login)
+      byKey.set(key, login)
+      added++
+    }
+    this.save()
+    return { added, updated }
+  }
+
+  /** Every login in readable form (password export; the user confirmed) */
+  public exportLogins(): CsvLogin[] {
+    return this.data.logins
+      .map((l) => ({ url: l.origin, username: l.username, password: safeStorageVault.decryptString(l.password) }))
+      .filter((l) => l.password)
   }
 
   public list(): PasswordEntryInfo[] {

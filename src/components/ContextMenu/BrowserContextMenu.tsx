@@ -30,10 +30,20 @@ import {
   PinOff,
   ShieldCheck,
   EyeOff,
-  StickyNote
+  StickyNote,
+  AppWindow,
+  Highlighter,
+  Languages,
+  Bot,
+  Paintbrush
 } from 'lucide-react'
 import { cleanUrl } from '@/lib/urlCleaner'
 import { api } from '@/lib/ipc'
+import { useT } from '@/lib/i18n'
+import { translateTextUrl } from '@/lib/translatePage'
+import { openInNewTab } from '@/components/Essentials/EssentialsRuntime'
+import { HIGHLIGHT_SWATCH } from '@/components/Essentials/HighlightsDialog'
+import type { HighlightColor } from '@/types/essentials'
 import { isPrivateWindow, openPrivateWindow } from '@/lib/privateWindow'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useThemeStore } from '@/store/useThemeStore'
@@ -95,6 +105,7 @@ export const BrowserContextMenu: React.FC = () => {
   const setQrModal = useBrowserStore((s) => s.setQrModal)
   const setDevToolsOpen = useBrowserStore((s) => s.setDevToolsOpen)
   const { settings } = useSettings()
+  const t = useT()
 
   const activeTab = useBrowserStore((s) => (activeSpaceId ? s.tabsBySpace[activeSpaceId]?.find((t) => t.id === s.activeTabId) ?? null : null))
 
@@ -206,6 +217,17 @@ export const BrowserContextMenu: React.FC = () => {
     if (!menu?.isOpen) return
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Arrow keys move through the menu
+      const step = e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+      if (step || e.key === 'Home' || e.key === 'End') {
+        const items = Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitem"]:not(:disabled)') ?? [])
+        if (items.length === 0) return
+        e.preventDefault()
+        const at = items.indexOf(document.activeElement as HTMLElement)
+        const next = e.key === 'Home' ? 0 : e.key === 'End' ? items.length - 1 : at === -1 ? (step > 0 ? 0 : items.length - 1) : (at + step + items.length) % items.length
+        items[next].focus()
+        return
+      }
       if (e.key === 'Escape') {
         e.preventDefault()
         if (activeSubmenu) {
@@ -323,12 +345,8 @@ export const BrowserContextMenu: React.FC = () => {
 
   const handleScreenshot = async () => {
     closeMenu()
-    const success = await api.webview.captureScreenshot(menu.webContentsId)
-    if (success) {
-      toast.success('Screenshot copied to clipboard!')
-    } else {
-      toast.error('Failed to capture screenshot')
-    }
+    // After the menu is gone, so it is not in the picture
+    setTimeout(() => window.dispatchEvent(new CustomEvent('tct:web-capture')), 120)
   }
 
   const handleCopyPageUrl = () => {
@@ -358,7 +376,7 @@ export const BrowserContextMenu: React.FC = () => {
 
   const handleBookmark = () => {
     closeMenu()
-    toast.success('Bookmark saved!')
+    window.dispatchEvent(new CustomEvent('tct:toggle-bookmark'))
   }
 
   const handleViewSource = async () => {
@@ -503,6 +521,29 @@ export const BrowserContextMenu: React.FC = () => {
     })
   }
 
+  const handleHighlight = async (color: HighlightColor) => {
+    closeMenu()
+    const saved = await api.essentials.highlights.add(menu.webContentsId, color).catch(() => null)
+    if (!saved) {
+      toast.info('This text can not be highlighted')
+      return
+    }
+    window.dispatchEvent(new CustomEvent('tct:clip-to-notes', { detail: { text: saved.text, url: saved.url, title: saved.title } }))
+    toast.success('Highlighted and added to Space Notes', {
+      action: { label: 'All highlights', onClick: () => window.dispatchEvent(new CustomEvent('tct:open-highlights')) }
+    })
+  }
+
+  const handleTranslateSelection = () => {
+    closeMenu()
+    if (menu.selectionText) void openInNewTab(translateTextUrl(menu.selectionText.trim()), 'Translation')
+  }
+
+  const emitAfterClose = (name: string) => () => {
+    closeMenu()
+    setTimeout(() => window.dispatchEvent(new CustomEvent(name)), 60)
+  }
+
   // Editable input actions
   const handleUndo = () => {
     closeMenu()
@@ -558,6 +599,8 @@ export const BrowserContextMenu: React.FC = () => {
 
       <div
         ref={menuRef}
+        role="menu"
+        aria-label="Page menu"
         style={{ top: posY, left: posX }}
         className="fixed z-[100] w-[240px] rounded-xl border border-border bg-popover/95 text-popover-foreground shadow-2xl backdrop-blur-xl p-1 select-none animate-in fade-in-50 zoom-in-95 duration-100 text-xs font-medium"
         onContextMenu={(e) => e.preventDefault()}
@@ -570,6 +613,16 @@ export const BrowserContextMenu: React.FC = () => {
             label="Open link in new tab"
             onClick={handleOpenLinkInNewTab}
           />
+          {!isPrivateWindow && (
+            <MenuItem
+              icon={<AppWindow className="w-4 h-4" />}
+              label="Open link in new window"
+              onClick={() => {
+                closeMenu()
+                void api.essentials.windows.open(menu.linkURL)
+              }}
+            />
+          )}
           <MenuItem
             icon={<EyeOff className="w-4 h-4 text-violet-500" />}
             label={isPrivateWindow ? 'Open link in new tab' : 'Open link in private window'}
@@ -645,6 +698,27 @@ export const BrowserContextMenu: React.FC = () => {
             label="Send to Space Notes"
             onClick={handleClipToNotes}
           />
+          {!isPrivateWindow && !activeTab?.isPrivate && (
+            <div className="flex items-center justify-between px-2.5 py-1.5" role="group" aria-label={t('Highlight')}>
+              <span className="flex items-center gap-2.5">
+                <Highlighter className="w-4 h-4 text-yellow-500" /> {t('Highlight')}
+              </span>
+              <span className="flex gap-1">
+                {(Object.keys(HIGHLIGHT_SWATCH) as HighlightColor[]).map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="menuitem"
+                    aria-label={`${t('Highlight')}: ${c}`}
+                    onClick={() => void handleHighlight(c)}
+                    className="w-4 h-4 rounded-full border border-border hover:scale-125 focus:scale-125 transition-transform outline-none focus:ring-2 focus:ring-primary"
+                    style={{ backgroundColor: HIGHLIGHT_SWATCH[c] }}
+                  />
+                ))}
+              </span>
+            </div>
+          )}
+          <MenuItem icon={<Languages className="w-4 h-4" />} label="Translate selection" onClick={handleTranslateSelection} />
           <Divider />
           <MenuItem
             icon={<Printer className="w-4 h-4" />}
@@ -777,7 +851,7 @@ export const BrowserContextMenu: React.FC = () => {
           <Divider />
           <MenuItem
             icon={<Camera className="w-4 h-4 text-amber-500" />}
-            label="Screenshot"
+            label="Web capture"
             shortcut={`${modKey}+Shift+S`}
             onClick={handleScreenshot}
             onMouseEnter={() => {
@@ -864,6 +938,10 @@ export const BrowserContextMenu: React.FC = () => {
                   label="Open in External Browser"
                   onClick={handleOpenExternal}
                 />
+                <MenuItem icon={<Bot className="w-4 h-4 text-primary" />} label="Ask this page" onClick={emitAfterClose('tct:ask-page')} />
+                <MenuItem icon={<Languages className="w-4 h-4" />} label="Translate page" onClick={emitAfterClose('tct:translate-page')} />
+                <MenuItem icon={<EyeOff className="w-4 h-4" />} label="Hide an element" onClick={emitAfterClose('tct:hide-element')} />
+                <MenuItem icon={<Paintbrush className="w-4 h-4" />} label="Boost this site" onClick={emitAfterClose('tct:open-boosts')} />
                 <MenuItem
                   icon={<BookmarkPlus className="w-4 h-4" />}
                   label="Bookmark this page"
@@ -913,9 +991,11 @@ interface MenuItemProps {
 }
 
 const MenuItem: React.FC<MenuItemProps> = ({ icon, label, shortcut, disabled, onClick, onMouseEnter }) => {
+  const t = useT()
   return (
     <button
       type="button"
+      role="menuitem"
       disabled={disabled}
       onClick={onClick}
       onMouseEnter={onMouseEnter}
@@ -927,7 +1007,7 @@ const MenuItem: React.FC<MenuItemProps> = ({ icon, label, shortcut, disabled, on
     >
       <div className="flex items-center gap-2.5 min-w-0 pr-2">
         {icon && <span className="shrink-0">{icon}</span>}
-        <span className="truncate">{label}</span>
+        <span className="truncate">{t(label)}</span>
       </div>
       {shortcut && (
         <span className="text-[10.5px] font-mono text-muted-foreground tracking-tighter shrink-0 pl-2">

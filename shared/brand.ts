@@ -19,8 +19,7 @@ export const BRAND = {
   version: '0.1.2',
   description: 'TCT Orbit (v0.1.2) — A fast, clean, and modern web browser built for smooth navigation and distraction-free workflows.',
   homepage: 'https://tctorbit.com',
-  updateUrl: 'https://updates.tctorbit.com',
-  repository: 'https://github.com/tctorbit/tct-orbit',
+  repository: 'https://github.com/BUNCHHENG-CSE/tct-orbit-browser',
   author: 'TCT <support@tctorbit.com>',
   defaultChannel: 'stable' as ReleaseChannel
 } as const
@@ -85,3 +84,6 @@ export interface AppInfo {
   version: string
   channel: ReleaseChannel
 }
+
+/** Where users report problems (Help menu) */
+export const ISSUES_URL = 'https://github.com/BUNCHHENG-CSE/tct-orbit-browser/issues'

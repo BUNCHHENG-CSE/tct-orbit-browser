@@ -226,6 +226,22 @@ export interface Settings {
   newTabsOnTop?: boolean;
   /** Favorites bar under the toolbar: always, never, or only on new tabs (default: always) */
   favoritesBar?: FavoritesBarMode;
+  /** Check spelling while typing on web pages (default on) */
+  spellcheck?: boolean;
+  /** Dictionaries in use, e.g. ["en-US"] (empty = system languages) */
+  spellcheckLanguages?: string[];
+  /** Warn before opening known phishing / malware sites (default on) */
+  safeBrowsing?: boolean;
+  /** Download updates automatically (default on) */
+  autoUpdate?: boolean;
+  /** Custom keyboard shortcuts: action id -> combos */
+  shortcuts?: Record<string, string[]>;
+  /** Interface language ("system" = follow the OS) */
+  language?: string;
+  /** Language pages are translated to ("" = interface language) */
+  translateTo?: string;
+  /** Local model used by "Ask this page" */
+  aiModel?: string;
   updatedAt: string | Date;
 }
 
@@ -296,6 +312,14 @@ export interface UpdateSettingsData {
   tabLayout?: TabLayout;
   newTabsOnTop?: boolean;
   favoritesBar?: FavoritesBarMode;
+  spellcheck?: boolean;
+  spellcheckLanguages?: string[];
+  safeBrowsing?: boolean;
+  autoUpdate?: boolean;
+  shortcuts?: Record<string, string[]>;
+  language?: string;
+  translateTo?: string;
+  aiModel?: string;
 }
 
 export type ReleaseChannel = 'stable' | 'nova' | 'deep' | 'canary';
@@ -431,7 +455,7 @@ export interface DownloadRecord {
   canResume?: boolean;
 }
 
-export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy' | 'history';
+export type BackupCategory = 'settings' | 'spaces' | 'tabs' | 'privacy' | 'history' | 'bookmarks' | 'notes';
 
 export interface ExportBackupOptions {
   categories?: BackupCategory[];
@@ -449,6 +473,8 @@ export interface ExportBackupResult {
     tabs: number;
     pinnedTabs: number;
     history?: number;
+    bookmarks?: number;
+    notes?: number;
     hasSettings: boolean;
     hasPrivacy: boolean;
   };
@@ -464,6 +490,8 @@ export interface BackupInspectionResult {
   tabsCount: number;
   pinnedCount: number;
   historyCount?: number;
+  bookmarksCount?: number;
+  notesCount?: number;
   hasSettings: boolean;
   hasPrivacy: boolean;
   categories: string[];
@@ -486,6 +514,8 @@ export interface ImportBackupResult {
     spaces: number;
     tabs: number;
     history?: number;
+    bookmarks?: number;
+    notes?: number;
     settingsUpdated: boolean;
     privacyUpdated: boolean;
   };
@@ -597,6 +627,8 @@ export interface SystemMetricsResult {
 }
 
 export interface ElectronAPI {
+  /** Updates, screen sharing, sign-in prompts, safe browsing, autofill, routing, boosts, capture, AI, windows */
+  essentials: import('./essentials').EssentialsApi;
   /** Snoozed tabs, page watchers, focus rules per space, search over pages you've read */
   smart: import('./smart').SmartApi;
   app: {
@@ -685,6 +717,8 @@ export interface ElectronAPI {
   settings: {
     get: () => Promise<Settings>;
     update: (data: UpdateSettingsData) => Promise<Settings>;
+    /** Another window changed a setting */
+    onChanged: (callback: (settings: Settings) => void) => () => void;
   };
   window: {
     minimize: () => Promise<void>;

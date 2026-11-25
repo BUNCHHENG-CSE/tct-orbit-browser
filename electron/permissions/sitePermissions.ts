@@ -1,6 +1,7 @@
 import { app, BrowserWindow, type WebContents } from 'electron'
 import fs from 'fs'
 import path from 'path'
+import { promptWindowFor } from '../essentials/windowOf'
 
 /**
  * Per-site permission decisions + interactive prompts.
@@ -199,7 +200,7 @@ class SitePermissionsService {
     const existing = this.inflight.get(key)
     if (existing) return existing
 
-    const promise = this.prompt({ id: `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, origin, permissions: perms, isPrivate })
+    const promise = this.prompt(contents, { id: `perm-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, origin, permissions: perms, isPrivate })
     this.inflight.set(key, promise)
     try {
       return await promise
@@ -208,14 +209,14 @@ class SitePermissionsService {
     }
   }
 
-  private prompt(req: PermissionPromptRequest): Promise<boolean> {
-    const win = this.getWindow()
+  private prompt(contents: WebContents, req: PermissionPromptRequest): Promise<boolean> {
+    const win = promptWindowFor(contents) ?? this.getWindow()
     if (!win || win.isDestroyed()) return Promise.resolve(false)
     return new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         // No answer: deny (the page can ask again later)
         this.pending.delete(req.id)
-        win.webContents.send('permissions:dismiss', req.id)
+        if (!win.isDestroyed()) win.webContents.send('permissions:dismiss', req.id)
         resolve(false)
       }, PROMPT_TIMEOUT_MS)
       this.pending.set(req.id, { resolve, timer, req })

@@ -46,6 +46,18 @@ import { useFavoritesButton } from '@/lib/favorites'
 import { TabStrip } from '@/components/TabStrip/TabStrip'
 import { FavoritesBar } from '@/components/Favorites/FavoritesBar'
 import { isStartPageUrl } from '@/lib/startPage'
+import { matchShortcut } from '@shared/shortcuts'
+import { currentKeymap, shortcutRecording } from '@/lib/shortcuts'
+import { EXTRA_SPACE_ID, isExtraWindow, isMainWindow } from '@/lib/extraWindow'
+import { spaceForLink, switchToSpace } from '@/lib/routes'
+import { EssentialsRuntime } from '@/components/Essentials/EssentialsRuntime'
+import { ScreenSharePicker } from '@/components/Essentials/ScreenSharePicker'
+import { HttpAuthDialog } from '@/components/Essentials/HttpAuthDialog'
+import { CaptureDialog } from '@/components/Essentials/CaptureDialog'
+import { BoostsDialog } from '@/components/Essentials/BoostsDialog'
+import { HighlightsDialog } from '@/components/Essentials/HighlightsDialog'
+import { AskPagePanel } from '@/components/Essentials/AskPagePanel'
+import { AddressesDialog } from '@/components/Essentials/AddressesDialog'
 
 /** Active tab of a space (falls back to its first tab, like useTabs) */
 function activeTabOf(s: ReturnType<typeof useBrowserStore.getState>, spaceId: string | null) {
@@ -74,7 +86,8 @@ export const App: React.FC = () => {
     document.title = 'TCT Orbit — Private'
   }, [])
   useEffect(() => {
-    if (!isPrivateWindow || activeSpaceId !== PRIVATE_WINDOW_SPACE_ID || tabsLoading) return
+    const ownSpace = isPrivateWindow ? PRIVATE_WINDOW_SPACE_ID : isExtraWindow ? EXTRA_SPACE_ID : null
+    if (!ownSpace || activeSpaceId !== ownSpace || tabsLoading) return
     if (tabCount > 0) privateHadTabs.current = true
     else if (privateHadTabs.current) void api.window.close()
   }, [tabCount, activeSpaceId, tabsLoading])
@@ -123,6 +136,15 @@ export const App: React.FC = () => {
         const targetSpace = store.activeSpaceId || store.spaces[0]?.id
         if (!targetSpace) return
 
+        // Link routing: this site always opens in another Space
+        const routed = isPrivate ? targetSpace : spaceForLink(url, targetSpace)
+        if (routed !== targetSpace) {
+          const tab = await api.tabs.create({ spaceId: routed, url, title: 'Loading...' })
+          if (isActive) switchToSpace(routed)
+          useBrowserStore.getState().insertTabNextTo(routed, tab, null, isActive)
+          return
+        }
+
         const currentActive = store.activeTabId ? store.tabsBySpace[targetSpace]?.find((t) => t.id === store.activeTabId) : null
         const insertOrder = currentActive ? currentActive.order + 1 : undefined
 
@@ -161,8 +183,9 @@ export const App: React.FC = () => {
 
       try {
         const store = useBrowserStore.getState()
-        const targetSpace = store.activeSpaceId || store.spaces[0]?.id
-        if (!targetSpace) return
+        const currentSpace = store.activeSpaceId || store.spaces[0]?.id
+        if (!currentSpace) return
+        const targetSpace = spaceForLink(url, currentSpace)
 
         const newTab = await api.tabs.create({
           spaceId: targetSpace,
@@ -170,6 +193,7 @@ export const App: React.FC = () => {
           title: 'Loading...'
         })
 
+        switchToSpace(targetSpace)
         placeNewTab(targetSpace, newTab)
       } catch (err) {
         console.error('[App] Failed to open external URL:', err)
@@ -185,15 +209,17 @@ export const App: React.FC = () => {
   const spacesLoaded = spaces.length > 0
   useEffect(() => {
     // Launch links belong to the main window, never the private one
-    if (isPrivateWindow || !spacesLoaded || !api.app?.takePendingUrls) return
+    if (!isMainWindow || !spacesLoaded || !api.app?.takePendingUrls) return
     api.app
       .takePendingUrls()
       .then(async (urls) => {
         const store = useBrowserStore.getState()
-        const targetSpace = store.activeSpaceId || store.spaces[0]?.id
-        if (!targetSpace) return
+        const currentSpace = store.activeSpaceId || store.spaces[0]?.id
+        if (!currentSpace) return
         for (const url of urls) {
+          const targetSpace = spaceForLink(url, currentSpace)
           const tab = await api.tabs.create({ spaceId: targetSpace, url, title: 'Loading...' })
+          switchToSpace(targetSpace)
           placeNewTab(targetSpace, tab)
         }
       })
@@ -280,6 +306,23 @@ export const App: React.FC = () => {
         case 'new-tab':
           void openNewTab()
           break
+        case 'new-window':
+          void api.essentials.windows.open()
+          break
+        case 'ask-page':
+          window.dispatchEvent(new CustomEvent('tct:ask-page'))
+          break
+        case 'open-favorites':
+          if (useFavoritesButton.getState().show) window.dispatchEvent(new CustomEvent('tct:open-favorites'))
+          else useBrowserStore.getState().setBookmarksDialogOpen(true)
+          break
+        case 'toggle-favorites-bar': {
+          const cur = useBrowserStore.getState().settings?.favoritesBar ?? 'always'
+          void api.settings?.update?.({ favoritesBar: cur === 'never' ? 'always' : 'never' }).then((next: any) => {
+            if (next) useBrowserStore.getState().setSettings(next)
+          })
+          break
+        }
         case 'new-private-tab':
           window.dispatchEvent(new CustomEvent('tct:new-private-tab'))
           break
@@ -406,14 +449,9 @@ export const App: React.FC = () => {
           }
           break
         }
-        case 'take-screenshot': {
-          const activeWebview = document.querySelector('div[style*="display: flex"] webview') as any
-          const wcId = activeWebview?.getWebContentsId ? activeWebview.getWebContentsId() : undefined
-          if (wcId && api.webview?.captureScreenshot) {
-            api.webview.captureScreenshot(wcId)
-          }
+        case 'take-screenshot':
+          window.dispatchEvent(new CustomEvent('tct:web-capture'))
           break
-        }
         case 'toggle-split-view':
           window.dispatchEvent(new CustomEvent('tct:toggle-split-view'))
           break
@@ -485,277 +523,14 @@ export const App: React.FC = () => {
   // Keyboard shortcuts listener when focus is on browser chrome
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const isCmdOrCtrl = e.metaKey || e.ctrlKey
-      const key = (e.key || '').toLowerCase()
-      const code = e.code || ''
-      const shift = e.shiftKey
-      const alt = e.altKey
-
-      // Zen Mode: F11 or Ctrl+Shift+F
-      if ((!isCmdOrCtrl && !shift && !alt && (key === 'f11' || code === 'F11')) || (isCmdOrCtrl && shift && !alt && (key === 'f' || code === 'KeyF'))) {
-        e.preventDefault()
-        executeShortcutAction('toggle-zen-mode')
-        return
-      }
-
-      // Tab Search across all spaces: Ctrl+Shift+A
-      if (isCmdOrCtrl && shift && !alt && (key === 'a' || code === 'KeyA')) {
-        e.preventDefault()
-        executeShortcutAction('tab-search')
-        return
-      }
-
-      // Shortcut cheat sheet: Ctrl+/
-      if (isCmdOrCtrl && !shift && !alt && (key === '/' || code === 'Slash')) {
-        e.preventDefault()
-        executeShortcutAction('shortcut-help')
-        return
-      }
-
-      // New Private Tab: Alt+Shift+N
-      if (alt && shift && !isCmdOrCtrl && (key === 'n' || code === 'KeyN')) {
-        e.preventDefault()
-        executeShortcutAction('new-private-tab')
-        return
-      }
-
-      // Orbit Task Manager: Shift+Escape
-      if (shift && !isCmdOrCtrl && !alt && (key === 'escape' || code === 'Escape')) {
-        e.preventDefault()
-        executeShortcutAction('open-task-manager')
-        return
-      }
-
-      // 1. DevTools: F12 or Ctrl+Shift+I
-      if (key === 'f12' || (isCmdOrCtrl && shift && !alt && key === 'i')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-devtools')
-        return
-      }
-
-      // Split View: Ctrl+\
-      if (isCmdOrCtrl && !shift && !alt && (key === '\\' || code === 'Backslash')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-split-view')
-        return
-      }
-
-      // Reader Mode: F9 or Ctrl+Alt+R
-      if ((!isCmdOrCtrl && !shift && !alt && (key === 'f9' || code === 'F9')) || (isCmdOrCtrl && alt && !shift && (key === 'r' || code === 'KeyR'))) {
-        e.preventDefault()
-        executeShortcutAction('toggle-reader-mode')
-        return
-      }
-
-      // Picture-in-Picture: Ctrl+Shift+P or Ctrl+Alt+P
-      if ((isCmdOrCtrl && shift && !alt && key === 'p') || (isCmdOrCtrl && alt && !shift && (key === 'p' || code === 'KeyP'))) {
-        e.preventDefault()
-        executeShortcutAction('toggle-pip')
-        return
-      }
-
-      // Print Page: Ctrl+P
-      if (isCmdOrCtrl && !shift && !alt && (key === 'p' || code === 'KeyP')) {
-        e.preventDefault()
-        executeShortcutAction('print-page')
-        return
-      }
-
-      // Space Notes: Ctrl+Shift+N
-      if (isCmdOrCtrl && shift && !alt && (key === 'n' || code === 'KeyN')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-notes')
-        return
-      }
-
-      // 2. Screenshot: Ctrl+Shift+S
-      if (isCmdOrCtrl && shift && !alt && key === 's') {
-        e.preventDefault()
-        executeShortcutAction('take-screenshot')
-        return
-      }
-
-      // 3. Reopen closed tab: Ctrl+Shift+T
-      if (isCmdOrCtrl && shift && !alt && key === 't') {
-        e.preventDefault()
-        executeShortcutAction('reopen-tab')
-        return
-      }
-
-      // 4. Hard reload (ignore cache): Ctrl+Shift+R or Ctrl+F5
-      if ((isCmdOrCtrl && shift && key === 'r') || (isCmdOrCtrl && (key === 'f5' || code === 'F5'))) {
-        e.preventDefault()
-        executeShortcutAction('hard-reload')
-        return
-      }
-
-      // 5. Normal reload: Ctrl+R or F5
-      if ((isCmdOrCtrl && !shift && !alt && key === 'r') || (!isCmdOrCtrl && !shift && !alt && (key === 'f5' || code === 'F5'))) {
-        e.preventDefault()
-        executeShortcutAction('reload')
-        return
-      }
-
-      // 6. Next tab: Ctrl+Tab or Ctrl+PageDown
-      if (isCmdOrCtrl && !shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pagedown' || code === 'PageDown')) {
-        e.preventDefault()
-        executeShortcutAction('next-tab')
-        return
-      }
-
-      // 7. Previous tab: Ctrl+Shift+Tab or Ctrl+PageUp
-      if (isCmdOrCtrl && shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pageup' || code === 'PageUp')) {
-        e.preventDefault()
-        executeShortcutAction('prev-tab')
-        return
-      }
-
-      // 8. New tab: Ctrl+T or Ctrl+N
-      if (isCmdOrCtrl && !shift && !alt && (key === 't' || key === 'n')) {
-        e.preventDefault()
-        executeShortcutAction('new-tab')
-        return
-      }
-
-      // 9. Close tab: Ctrl+W or Ctrl+F4
-      if ((isCmdOrCtrl && !shift && !alt && key === 'w') || (isCmdOrCtrl && (key === 'f4' || code === 'F4'))) {
-        e.preventDefault()
-        executeShortcutAction('close-tab')
-        return
-      }
-
-      // 10. Focus Address Bar / Omnibox: Ctrl+L, Alt+D, or F6
-      if (
-        (isCmdOrCtrl && !shift && !alt && key === 'l') ||
-        (alt && !isCmdOrCtrl && !shift && key === 'd') ||
-        (!isCmdOrCtrl && !shift && !alt && (key === 'f6' || code === 'F6'))
-      ) {
-        e.preventDefault()
-        executeShortcutAction('focus-address-bar')
-        return
-      }
-
-      // 11. Open Command Bar: Ctrl+K
-      if (isCmdOrCtrl && !shift && !alt && key === 'k') {
-        e.preventDefault()
-        executeShortcutAction('open-command-bar')
-        return
-      }
-
-      // Open Browsing History: Ctrl+H
-      if (isCmdOrCtrl && !shift && !alt && (key === 'h' || code === 'KeyH')) {
-        e.preventDefault()
-        executeShortcutAction('open-history')
-        return
-      }
-
-      // Open Downloads: Ctrl+J
-      if (isCmdOrCtrl && !shift && !alt && (key === 'j' || code === 'KeyJ')) {
-        e.preventDefault()
-        executeShortcutAction('open-downloads')
-        return
-      }
-
-      // Find in Page: Ctrl+F
-      if (isCmdOrCtrl && !shift && !alt && (key === 'f' || code === 'KeyF')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-find')
-        return
-      }
-
-      // Favorites panel: Ctrl+Shift+O (full manager if the toolbar button is unpinned)
-      if (isCmdOrCtrl && shift && !alt && (key === 'o' || code === 'KeyO')) {
-        e.preventDefault()
-        if (useFavoritesButton.getState().show) window.dispatchEvent(new CustomEvent('tct:open-favorites'))
-        else useBrowserStore.getState().setBookmarksDialogOpen(true)
-        return
-      }
-
-      // Show / hide favorites bar: Ctrl+Shift+B
-      if (isCmdOrCtrl && shift && !alt && (key === 'b' || code === 'KeyB')) {
-        e.preventDefault()
-        const cur = useBrowserStore.getState().settings?.favoritesBar ?? 'always'
-        void api.settings?.update?.({ favoritesBar: cur === 'never' ? 'always' : 'never' }).then((next: any) => {
-          if (next) useBrowserStore.getState().setSettings(next)
-        })
-        return
-      }
-
-      // Bookmark Tab: Ctrl+D
-      if (isCmdOrCtrl && !shift && !alt && (key === 'd' || code === 'KeyD')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-bookmark')
-        return
-      }
-
-      // 12. Toggle Sidebar: Ctrl+S or Ctrl+B
-      if (isCmdOrCtrl && !shift && !alt && (key === 's' || key === 'b')) {
-        e.preventDefault()
-        executeShortcutAction('toggle-sidebar')
-        return
-      }
-
-      // 13. Open Settings: Ctrl+,
-      if (isCmdOrCtrl && !shift && !alt && (key === ',' || code === 'Comma')) {
-        e.preventDefault()
-        executeShortcutAction('open-settings')
-        return
-      }
-
-      // 14. Switch to tab 1..8: Ctrl+1..8
-      if (isCmdOrCtrl && !shift && !alt && /^[1-8]$/.test(e.key)) {
-        e.preventDefault()
-        executeShortcutAction(`switch-tab-${e.key}`)
-        return
-      }
-
-      // 15. Switch to last tab: Ctrl+9
-      if (isCmdOrCtrl && !shift && !alt && e.key === '9') {
-        e.preventDefault()
-        executeShortcutAction('switch-tab-last')
-        return
-      }
-
-      // 16. Back: Alt+Left or Ctrl+[
-      if (
-        (alt && !isCmdOrCtrl && !shift && (key === 'arrowleft' || code === 'ArrowLeft')) ||
-        (isCmdOrCtrl && !shift && !alt && (key === '[' || code === 'BracketLeft'))
-      ) {
-        e.preventDefault()
-        executeShortcutAction('back')
-        return
-      }
-
-      // 17. Forward: Alt+Right or Ctrl+]
-      if (
-        (alt && !isCmdOrCtrl && !shift && (key === 'arrowright' || code === 'ArrowRight')) ||
-        (isCmdOrCtrl && !shift && !alt && (key === ']' || code === 'BracketRight'))
-      ) {
-        e.preventDefault()
-        executeShortcutAction('forward')
-        return
-      }
-
-      // 18. Zoom In: Ctrl+=, Ctrl++, or Ctrl+NumpadAdd
-      if (isCmdOrCtrl && !alt && (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd')) {
-        e.preventDefault()
-        executeShortcutAction('zoom-in')
-        return
-      }
-
-      // 19. Zoom Out: Ctrl+- or Ctrl+NumpadSubtract
-      if (isCmdOrCtrl && !alt && (key === '-' || code === 'Minus' || code === 'NumpadSubtract')) {
-        e.preventDefault()
-        executeShortcutAction('zoom-out')
-        return
-      }
-
-      // 20. Zoom Reset: Ctrl+0 or Ctrl+Numpad0
-      if (isCmdOrCtrl && !alt && (key === '0' || code === 'Digit0' || code === 'Numpad0')) {
-        e.preventDefault()
-        executeShortcutAction('zoom-reset')
-        return
-      }
+      if (shortcutRecording.active) return
+      const action = matchShortcut(
+        { key: e.key, code: e.code, control: e.ctrlKey, meta: e.metaKey, shift: e.shiftKey, alt: e.altKey },
+        currentKeymap()
+      )
+      if (!action) return
+      e.preventDefault()
+      executeShortcutAction(action)
     }
 
     window.addEventListener('keydown', handleKeyDown, true)
@@ -827,6 +602,7 @@ export const App: React.FC = () => {
           <WebViewContainer spaceId={activeSpaceId} />
           <DockedDevToolsPane />
           <NotesDrawer />
+          <AskPagePanel />
         </div>
 
         {/* Zen Mode Ambient Soundscapes & Exit Controls */}
@@ -852,6 +628,15 @@ export const App: React.FC = () => {
         {/* Password manager: save prompt + manager */}
         <PasswordSavePrompt />
         <PasswordsDialog />
+
+        {/* Routes, updates, window moves; screen sharing, sign-in, capture, boosts, highlights */}
+        <EssentialsRuntime />
+        <ScreenSharePicker />
+        <HttpAuthDialog />
+        <CaptureDialog />
+        <BoostsDialog />
+        <HighlightsDialog />
+        <AddressesDialog />
 
         {/* TCT Orbit spotlight CommandBar overlay */}
         <CommandBar />

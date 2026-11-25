@@ -1,4 +1,8 @@
-import { nativeTheme, session, type IpcMain } from 'electron'
+import { BrowserWindow, nativeTheme, session, type IpcMain } from 'electron'
+import { getPersistentTabSessions } from '../sessions'
+import { PRIVATE_PARTITION } from '../privacy/types'
+import { applySpellcheck } from '../essentials/spellcheck'
+import { safeBrowsing } from '../essentials/safeBrowsing'
 import type { UpdateSettingsData } from '../../src/types/api'
 import { localStorageService } from '../storage/localStorage'
 import { themeManager } from '../theme/themeManager'
@@ -43,7 +47,7 @@ export function register(ipcMain: IpcMain): void {
   })
 
   // Update settings
-  secureHandle(ipcMain, 'settings:update', Schemas.settingsUpdate, async (_, input: UpdateSettingsData) => {
+  secureHandle(ipcMain, 'settings:update', Schemas.settingsUpdate, async (event, input: UpdateSettingsData) => {
     // Known settings only. A new download folder comes from the system folder picker
     // (downloads:select-directory); here it can only be kept or reset.
     const data = Schemas.settingsUpdate.parse(input) as UpdateSettingsData
@@ -57,6 +61,15 @@ export function register(ipcMain: IpcMain): void {
     } else if (data.theme) {
       applyNativeTheme(data.theme)
     }
-    return localStorageService.updateSettings(data)
+    const updated = localStorageService.updateSettings(data)
+    if (data.spellcheck !== undefined || data.spellcheckLanguages !== undefined) {
+      for (const ses of [...getPersistentTabSessions(), session.fromPartition(PRIVATE_PARTITION)]) applySpellcheck(ses, updated)
+    }
+    if (data.safeBrowsing) void safeBrowsing.refresh()
+    // Other windows show the same settings
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed() && win.webContents !== event.sender) win.webContents.send('settings:changed', updated)
+    }
+    return updated
   })
 }

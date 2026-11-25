@@ -2,6 +2,7 @@ import { app, session, BrowserWindow, webContents as allWebContents, type Sessio
 import fs from 'fs'
 import path from 'path'
 import { ElectronBlocker, Request } from '@ghostery/adblocker-electron'
+import { safeBrowsing } from '../essentials/safeBrowsing'
 import {
   type PrivacyShieldPrefs,
   type MasterShieldStatus,
@@ -351,17 +352,10 @@ export class PrivacyEngine {
       lockDownSessionPermissions(ses)
     }
 
-    try {
-      session.fromPartition(PRIVATE_PARTITION).setSpellCheckerEnabled(false)
-    } catch {}
-
     // Space profiles (separate cookies/logins) are created lazily: protect them the same way
     onTabSessionCreated((ses) => {
       this.setupNetworkFilters(ses)
       lockDownSessionPermissions(ses)
-      try {
-        ses.setSpellCheckerEnabled(false)
-      } catch {}
       void ses.setProxy(this.getProxyConfig()).catch((err) => {
         console.error('[PrivacyEngine] Failed to apply proxy to profile session:', err)
       })
@@ -376,7 +370,8 @@ export class PrivacyEngine {
     let clearing = false
     let cleared = false
     app.on('before-quit', (event) => {
-      if (!this.prefs.clearCacheOnExit || cleared) return
+      // (the user may still decide to stay: see confirmQuit in main.ts)
+      if (!this.prefs.clearCacheOnExit || cleared || event.defaultPrevented) return
       event.preventDefault()
       if (clearing) return
       clearing = true
@@ -480,7 +475,8 @@ export class PrivacyEngine {
   }
 
   /** Route every browsing session through the configured proxy (no bypass except loopback) */
-  private getProxyConfig(): Electron.ProxyConfig {
+  /** Also used by the updater: with Tor on, nothing may bypass the proxy */
+  public getProxyConfig(): Electron.ProxyConfig {
     if (this.prefs.proxyMode === 'system') return { mode: 'system' }
     if (this.isProxyActive) {
       return { mode: 'fixed_servers', proxyRules: this.getProxyRules(), proxyBypassRules: '<-loopback>' }
@@ -632,6 +628,15 @@ export class PrivacyEngine {
       if (isMainFrame && this.focusBlockedDomains && this.focusBlockedDomains.some((d) => hostMatchesSuffix(hostname, d))) {
         this.onFocusBlocked?.({ url: details.url, host: hostname, webContentsId: details.webContentsId })
         return callback({ cancel: true })
+      }
+
+      // Known phishing / malware sites (checked on this computer, even where the shield is off)
+      if ((isMainFrame || details.resourceType === 'subFrame') && !isUiSession) {
+        const kind = safeBrowsing.check(hostname)
+        if (kind) {
+          if (isMainFrame) safeBrowsing.report({ url: details.url, host: hostname, kind, webContentsId: details.webContentsId })
+          return callback({ cancel: true })
+        }
       }
 
       // Site shield disabled by the user for this page

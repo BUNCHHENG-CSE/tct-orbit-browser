@@ -1,7 +1,7 @@
 import React, { useEffect } from 'react'
 import { toast } from 'sonner'
 import { api } from '@/lib/ipc'
-import { isPrivateWindow } from '@/lib/privateWindow'
+import { isMainWindow } from '@/lib/extraWindow'
 import { reopenSnoozed } from '@/lib/snooze'
 import { runInTab } from '@/lib/webviewRegistry'
 import { scrollToRatioScript } from '@/lib/pageScripts'
@@ -36,7 +36,7 @@ export const SmartRuntime: React.FC = () => {
 
   // Focus rules + snoozes that came due while the browser was closed
   useEffect(() => {
-    if (isPrivateWindow || !api.smart) return
+    if (!isMainWindow || !api.smart) return
     void useSmartStore.getState().loadFocusRules()
     const off = api.smart.onSnoozeDue((items) => void reopenSnoozed(items))
     return off
@@ -44,7 +44,7 @@ export const SmartRuntime: React.FC = () => {
 
   // Opening a space wakes the tabs snoozed "until I open this space" (and anything due)
   useEffect(() => {
-    if (isPrivateWindow || !api.smart || !activeSpaceId) return
+    if (!isMainWindow || !api.smart || !activeSpaceId) return
     let cancelled = false
     // Wait until the space's tabs are in the store so reopened tabs land in the right place
     const t = setTimeout(() => {
@@ -63,7 +63,7 @@ export const SmartRuntime: React.FC = () => {
 
   // Page watchers: toast when a watched page changes
   useEffect(() => {
-    if (isPrivateWindow || !api.smart) return
+    if (!isMainWindow || !api.smart) return
     const offUpdated = api.smart.onWatchUpdated((watch, changed) => {
       window.dispatchEvent(new CustomEvent('tct:watch-updated', { detail: watch }))
       if (!changed) return

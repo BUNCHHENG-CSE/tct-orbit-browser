@@ -3,6 +3,7 @@ import { placeNewTab } from '@/lib/tabPlacement'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { api } from '@/lib/ipc'
 import { groupForNewTab } from '@/lib/tabGroups'
+import { closeTabs, mayCloseTab } from '@/lib/tabLifecycle'
 import type { CreateTabData, UpdateTabData, Tab } from '@/types/api'
 
 const EMPTY_TABS: Tab[] = []
@@ -88,6 +89,7 @@ export function useTabActions(spaceId: string | null) {
   const removeTab = useCallback(
     async (id: string): Promise<boolean> => {
       try {
+        if (!(await mayCloseTab(id))) return false
         useBrowserStore.getState().removeTabFromStore(id)
         await api.tabs.remove(id)
         return true
@@ -151,11 +153,7 @@ export function useTabActions(spaceId: string | null) {
 
   const closeOtherTabs = useCallback(
     async (keepTabId: string) => {
-      const { removeTabFromStore } = useBrowserStore.getState()
-      for (const t of tabsOf(spaceId).filter((t) => t.id !== keepTabId && !t.isPinned)) {
-        removeTabFromStore(t.id)
-        api.tabs.remove(t.id).catch(() => {})
-      }
+      await closeTabs(tabsOf(spaceId).filter((t) => t.id !== keepTabId && !t.isPinned).map((t) => t.id))
     },
     [spaceId]
   )
@@ -165,11 +163,7 @@ export function useTabActions(spaceId: string | null) {
       const tabs = tabsOf(spaceId)
       const index = tabs.findIndex((t) => t.id === targetTabId)
       if (index === -1) return
-      const { removeTabFromStore } = useBrowserStore.getState()
-      for (const t of tabs.slice(index + 1).filter((t) => !t.isPinned)) {
-        removeTabFromStore(t.id)
-        api.tabs.remove(t.id).catch(() => {})
-      }
+      await closeTabs(tabs.slice(index + 1).filter((t) => !t.isPinned).map((t) => t.id))
     },
     [spaceId]
   )

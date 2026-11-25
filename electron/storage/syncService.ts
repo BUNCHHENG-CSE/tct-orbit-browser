@@ -13,7 +13,7 @@ import type { BackupCategory } from '../../src/types/api'
  */
 
 export const ENCRYPTED_FORMAT = 'tct-orbit-encrypted'
-const SYNC_CATEGORIES: BackupCategory[] = ['settings', 'spaces', 'tabs', 'privacy', 'history']
+const SYNC_CATEGORIES: BackupCategory[] = ['settings', 'spaces', 'tabs', 'privacy', 'history', 'bookmarks', 'notes']
 // scrypt cost (OWASP minimum, 128 MB): the file lives in cloud storage, so it must resist offline
 // guessing. The cost is stored in the file; older files (N = 2^15) still open.
 const SCRYPT_PARAMS = { N: 1 << 17, r: 8, p: 1, maxmem: 256 * 1024 * 1024 }

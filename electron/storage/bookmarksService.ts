@@ -64,6 +64,23 @@ class BookmarksService {
     }
   }
 
+  /** Bookmarks from a backup. Merge keeps existing ones; replace removes bookmarks the backup doesn't have. */
+  public restore(items: BookmarkItem[], mode: 'merge' | 'replace'): number {
+    const known = new Set(mode === 'replace' ? [] : this.bookmarks.map((b) => b.url))
+    const ids = new Set(mode === 'replace' ? [] : this.bookmarks.map((b) => b.id))
+    const added: BookmarkItem[] = []
+    for (const b of items) {
+      if (known.has(b.url)) continue
+      known.add(b.url)
+      const id = ids.has(b.id) ? `bm-${Date.now()}-${Math.random().toString(36).slice(2, 9)}` : b.id
+      ids.add(id)
+      added.push({ ...b, id })
+    }
+    this.bookmarks = mode === 'replace' ? added : [...this.bookmarks, ...added]
+    if (added.length > 0) this.scheduleSave()
+    return added.length
+  }
+
   public list(): BookmarkItem[] {
     return [...this.bookmarks]
   }

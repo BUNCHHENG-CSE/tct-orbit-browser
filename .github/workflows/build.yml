@@ -63,6 +63,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
       - name: Clean Output Directory
         run: npm run clean
 
@@ -113,7 +119,9 @@ jobs:
               try {
                 const res = await api('/repos/' + repo + '/actions/artifacts?per_page=100');
                 if (res && res.artifacts && Array.isArray(res.artifacts)) {
-                  for (const artifact of res.artifacts) {
+                  // Never this run's own artifacts: the other platforms may have uploaded theirs already
+                  const old = res.artifacts.filter((a) => String(a.workflow_run && a.workflow_run.id) !== process.env.GITHUB_RUN_ID);
+                  for (const artifact of old) {
                     console.log('Pruning artifact to free quota:', artifact.name, artifact.id);
                     await api('/repos/' + repo + '/actions/artifacts/' + artifact.id, 'DELETE');
                   }
@@ -145,6 +153,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/*.yml
+            dist/*.blockmap
             dist/*.exe
             dist/*.dmg
             dist/*.zip

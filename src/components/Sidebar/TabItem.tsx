@@ -1,5 +1,5 @@
 import React, { useContext, useState } from 'react'
-import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2, FolderPlus, Folder, FolderMinus, Home } from 'lucide-react'
+import { X, Globe, Pin, PinOff, Copy, Plus, RotateCw, Code2, Volume2, VolumeX, Moon, ShieldCheck, EyeOff, Columns2, FolderPlus, Folder, FolderMinus, Home, AppWindow } from 'lucide-react'
 import { getUnreadCount, stripUnreadPrefix } from '@/lib/liveTabs'
 import { isStartPageUrl, isPrivateStartUrl } from '@/lib/startPage'
 import { groupById, groupPathLabel, resolveGroupColor } from '@/lib/tabGroups'
@@ -22,6 +22,10 @@ import { modKey } from '@/lib/platform'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSmartStore } from '@/store/useSmartStore'
 import { SnoozeMenu } from '@/components/Smart/SnoozeMenu'
+import { useT } from '@/lib/i18n'
+import { isExtraWindow, canMoveToNewWindow } from '@/lib/extraWindow'
+import { moveTabToOtherWindow } from '@/lib/tabLifecycle'
+import { droppedOutside } from './TabReorder'
 import type { Tab } from '@/types/api'
 
 interface TabItemProps {
@@ -54,6 +58,9 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
   onCloseToRight
 }) => {
   const [faviconError, setFaviconError] = useState(false)
+  const t = useT()
+  const isolated = useBrowserStore((s) => !!s.spaces.find((sp) => sp.id === tab.spaceId)?.isolated)
+  const movable = canMoveToNewWindow(tab, isolated)
   const thumbnail = useThumbnailStore((s) => s.thumbs[tab.id]?.dataUrl)
   // Reading progress of the page (thin bar under the title); only while partly read
   const progress = useSmartStore((s) => s.progress[tab.id])
@@ -79,9 +86,36 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
       e.dataTransfer.effectAllowed = 'move'
       window.dispatchEvent(new CustomEvent('tct:tab-drag-start', { detail: { tabId: tab.id } }))
     },
-    onDragEnd: () => {
+    onDragEnd: (e: React.DragEvent) => {
       window.dispatchEvent(new CustomEvent('tct:tab-drag-end'))
+      if (movable && !isExtraWindow && droppedOutside(e)) void moveTabToOtherWindow(tab.id)
     }
+  }
+
+  /** Tabs are reachable and usable with the keyboard */
+  const a11yProps = {
+    role: 'tab' as const,
+    tabIndex: 0,
+    'aria-selected': isActive,
+    'aria-label': displayTitle || 'New Tab',
+    onKeyDown: (e: React.KeyboardEvent) => {
+      if (e.target !== e.currentTarget) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        onSelect()
+      } else if (e.key === 'Delete') {
+        e.preventDefault()
+        onClose()
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const all = Array.from(document.querySelectorAll<HTMLElement>('[data-orbit-tab]'))
+        const next = all[all.indexOf(e.currentTarget as HTMLElement) + (e.key === 'ArrowDown' ? 1 : -1)]
+        if (next) {
+          e.preventDefault()
+          next.focus()
+        }
+      }
+    },
+    'data-orbit-tab': true
   }
 
   const openInSplit = () => {
@@ -122,6 +156,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
   const content = collapsed ? (
     <div
       {...dragProps}
+      {...a11yProps}
       onClick={onSelect}
       onAuxClick={handleAuxClick}
       className={`group relative w-9 h-9 rounded-xl flex items-center justify-center cursor-pointer transition-colors duration-150 select-none ${
@@ -174,6 +209,7 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
   ) : (
     <div
       {...dragProps}
+      {...a11yProps}
       onClick={onSelect}
       onAuxClick={handleAuxClick}
       className={`group relative flex items-center gap-2 pl-3.5 pr-2 py-1.5 h-9 rounded-xl text-xs font-medium cursor-pointer transition-colors duration-150 select-none w-full max-w-full min-w-0 ${
@@ -356,31 +392,31 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
         {onNewTabToRight && (
           <ContextMenuItem onClick={onNewTabToRight} className="text-xs rounded-lg cursor-pointer">
             <Plus className="w-3.5 h-3.5 mr-2 text-primary" />
-            <span>New tab to right</span>
+            <span>{t('New tab to right')}</span>
           </ContextMenuItem>
         )}
         {onReload && (
           <ContextMenuItem onClick={onReload} className="text-xs rounded-lg cursor-pointer">
             <RotateCw className="w-3.5 h-3.5 mr-2" />
-            <span>Reload</span>
+            <span>{t('Reload')}</span>
           </ContextMenuItem>
         )}
         {!isActive && (
           <ContextMenuItem onClick={openInSplit} className="text-xs rounded-lg cursor-pointer">
             <Columns2 className="w-3.5 h-3.5 mr-2 text-primary" />
-            <span>Open in Split View</span>
+            <span>{t('Open in Split View')}</span>
           </ContextMenuItem>
         )}
         {groupCtx && (
           <ContextMenuSub>
             <ContextMenuSubTrigger className="text-xs rounded-lg cursor-pointer">
               <FolderPlus className="w-3.5 h-3.5 mr-2" />
-              <span>Add to group</span>
+              <span>{t('Add to group')}</span>
             </ContextMenuSubTrigger>
             <ContextMenuSubContent className="w-56 max-h-80 overflow-y-auto bg-popover text-popover-foreground border border-border shadow-2xl rounded-xl p-1">
               <ContextMenuItem onClick={() => void addToNewGroup()} className="text-xs rounded-lg cursor-pointer">
                 <FolderPlus className="w-3.5 h-3.5 mr-2 text-primary" />
-                <span>New group</span>
+                <span>{t('New group')}</span>
               </ContextMenuItem>
               {groupCtx.groups.length > 0 && <ContextMenuSeparator className="my-1 bg-border" />}
               {(() => {
@@ -409,13 +445,13 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="text-xs rounded-lg cursor-pointer"
           >
             <FolderMinus className="w-3.5 h-3.5 mr-2" />
-            <span>Remove from group</span>
+            <span>{t('Remove from group')}</span>
           </ContextMenuItem>
         )}
         {onDuplicate && (
           <ContextMenuItem onClick={onDuplicate} className="text-xs rounded-lg cursor-pointer">
             <Copy className="w-3.5 h-3.5 mr-2" />
-            <span>Duplicate Tab</span>
+            <span>{t('Duplicate Tab')}</span>
           </ContextMenuItem>
         )}
         <ContextMenuItem
@@ -427,12 +463,12 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
           {tab.isMuted ? (
             <>
               <Volume2 className="w-3.5 h-3.5 mr-2 text-primary" />
-              <span>Unmute Tab</span>
+              <span>{t('Unmute Tab')}</span>
             </>
           ) : (
             <>
               <VolumeX className="w-3.5 h-3.5 mr-2 text-muted-foreground" />
-              <span>Mute Tab</span>
+              <span>{t('Mute Tab')}</span>
             </>
           )}
         </ContextMenuItem>
@@ -444,26 +480,32 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
             className="text-xs rounded-lg cursor-pointer"
           >
             <Moon className="w-3.5 h-3.5 mr-2 text-indigo-400" />
-            <span>Sleep Tab (Save RAM)</span>
+            <span>{t('Sleep Tab (Save RAM)')}</span>
           </ContextMenuItem>
         )}
-        <SnoozeMenu tab={tab} onClose={onClose} />
+        {movable && (
+          <ContextMenuItem onClick={() => void moveTabToOtherWindow(tab.id)} className="text-xs rounded-lg cursor-pointer">
+            <AppWindow className="w-3.5 h-3.5 mr-2" />
+            <span>{t(isExtraWindow ? 'Move to main window' : 'Move to new window')}</span>
+          </ContextMenuItem>
+        )}
+        {!isExtraWindow && <SnoozeMenu tab={tab} onClose={onClose} />}
         <ContextMenuItem onClick={onTogglePin} className="text-xs rounded-lg cursor-pointer">
           {tab.isPinned ? (
             <>
               <PinOff className="w-3.5 h-3.5 mr-2" />
-              <span>Unpin Tab</span>
+              <span>{t('Unpin Tab')}</span>
             </>
           ) : (
             <>
               <Pin className="w-3.5 h-3.5 mr-2" />
-              <span>Pin Tab</span>
+              <span>{t('Pin Tab')}</span>
             </>
           )}
         </ContextMenuItem>
         <ContextMenuItem onClick={handleCopyUrl} className="text-xs rounded-lg cursor-pointer">
           <Copy className="w-3.5 h-3.5 mr-2" />
-          <span>Copy URL</span>
+          <span>{t('Copy URL')}</span>
         </ContextMenuItem>
         <ContextMenuItem
           onClick={(e) => {
@@ -477,21 +519,21 @@ export const TabItem: React.FC<TabItemProps> = React.memo(({
           className="text-xs rounded-lg cursor-pointer"
         >
           <ShieldCheck className="w-3.5 h-3.5 mr-2 text-emerald-500" />
-          <span>Copy Clean Link</span>
+          <span>{t('Copy Clean Link')}</span>
         </ContextMenuItem>
         <ContextMenuSeparator className="my-1 bg-border" />
         <ContextMenuItem onClick={onClose} className="text-xs rounded-lg cursor-pointer text-destructive hover:bg-destructive/10">
           <X className="w-3.5 h-3.5 mr-2" />
-          <span>Close Tab</span>
+          <span>{t('Close Tab')}</span>
         </ContextMenuItem>
         {onCloseOthers && (
           <ContextMenuItem onClick={onCloseOthers} className="text-xs rounded-lg cursor-pointer">
-            <span>Close Other Tabs</span>
+            <span>{t('Close Other Tabs')}</span>
           </ContextMenuItem>
         )}
         {onCloseToRight && (
           <ContextMenuItem onClick={onCloseToRight} className="text-xs rounded-lg cursor-pointer">
-            <span>Close Tabs to Right</span>
+            <span>{t('Close Tabs to Right')}</span>
           </ContextMenuItem>
         )}
         {import.meta.env.DEV && (

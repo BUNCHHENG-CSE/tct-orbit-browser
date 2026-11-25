@@ -32,6 +32,8 @@ export const BackupSettings: React.FC = () => {
   const [exportOpenTabs, setExportOpenTabs] = useState(true)
   const [exportPrivacy, setExportPrivacy] = useState(true)
   const [exportHistory, setExportHistory] = useState(true)
+  const [exportBookmarks, setExportBookmarks] = useState(true)
+  const [exportNotes, setExportNotes] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
 
   // --- Import State ---
@@ -57,6 +59,8 @@ export const BackupSettings: React.FC = () => {
       if (exportPinned || exportOpenTabs) categories.push('tabs')
       if (exportPrivacy) categories.push('privacy')
       if (exportHistory) categories.push('history')
+      if (exportBookmarks) categories.push('bookmarks')
+      if (exportNotes) categories.push('notes')
 
       if (categories.length === 0) {
         toast.error('Please select at least one data category to export.')
@@ -78,7 +82,7 @@ export const BackupSettings: React.FC = () => {
       if (res.success && res.filePath) {
         const counts = res.itemCounts
         toast.success('Backup file exported successfully!', {
-          description: `Saved to ${res.filePath.split(/[\\/]/).pop()} (${counts?.spaces || 0} spaces, ${counts?.tabs || 0} tabs)`
+          description: `Saved to ${res.filePath.split(/[\\/]/).pop()} (${counts?.spaces || 0} spaces, ${counts?.tabs || 0} tabs, ${counts?.bookmarks || 0} bookmarks)`
         })
       } else {
         toast.error(res.error || 'Failed to export backup.')
@@ -271,11 +275,27 @@ export const BackupSettings: React.FC = () => {
             <Switch checked={exportSpaces} onCheckedChange={setExportSpaces} />
           </div>
 
-          {/* Pinned Tabs / Bookmarks */}
           <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border">
             <div className="flex items-center gap-2">
               <Bookmark className="w-3.5 h-3.5 text-muted-foreground" />
-              <div className="text-xs font-medium text-foreground">Pinned Bookmarks</div>
+              <div className="text-xs font-medium text-foreground">Bookmarks & Reading List</div>
+            </div>
+            <Switch checked={exportBookmarks} onCheckedChange={setExportBookmarks} />
+          </div>
+
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border">
+            <div className="flex items-center gap-2">
+              <FileText className="w-3.5 h-3.5 text-muted-foreground" />
+              <div className="text-xs font-medium text-foreground">Space Notes</div>
+            </div>
+            <Switch checked={exportNotes} onCheckedChange={setExportNotes} />
+          </div>
+
+          {/* Pinned Tabs */}
+          <div className="flex items-center justify-between p-2.5 rounded-xl bg-muted/30 border border-border">
+            <div className="flex items-center gap-2">
+              <Bookmark className="w-3.5 h-3.5 text-muted-foreground" />
+              <div className="text-xs font-medium text-foreground">Pinned Tabs</div>
             </div>
             <Switch checked={exportPinned} onCheckedChange={setExportPinned} />
           </div>
@@ -443,6 +463,16 @@ export const BackupSettings: React.FC = () => {
               {inspectedFile.hasPrivacy && (
                 <span className="text-[11px] px-2.5 py-1 rounded-lg bg-card border border-border font-medium text-foreground">
                   🛡️ Privacy Rules Included
+                </span>
+              )}
+              {Boolean(inspectedFile.bookmarksCount) && (
+                <span>
+                  🔖 <strong>{inspectedFile.bookmarksCount}</strong> Bookmarks
+                </span>
+              )}
+              {Boolean(inspectedFile.notesCount) && (
+                <span>
+                  📝 <strong>{inspectedFile.notesCount}</strong> Notes
                 </span>
               )}
               {Boolean(inspectedFile.historyCount && inspectedFile.historyCount > 0) && (

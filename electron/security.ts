@@ -220,7 +220,15 @@ export const Schemas = {
     newTabPage: z.enum(['command-bar', 'start-page']).optional(),
     tabLayout: z.enum(['sidebar', 'topbar']).optional(),
     newTabsOnTop: z.boolean().optional(),
-    favoritesBar: z.enum(['always', 'never', 'new-tab']).optional()
+    favoritesBar: z.enum(['always', 'never', 'new-tab']).optional(),
+    spellcheck: z.boolean().optional(),
+    spellcheckLanguages: z.array(z.string().regex(/^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})*$/)).max(10).optional(),
+    safeBrowsing: z.boolean().optional(),
+    autoUpdate: z.boolean().optional(),
+    shortcuts: z.record(z.string().max(60), z.array(z.string().max(40)).max(6)).optional(),
+    language: z.string().max(20).optional(),
+    translateTo: z.string().max(20).optional(),
+    aiModel: z.string().max(200).optional()
   }),
 
   // Downloads
@@ -235,7 +243,7 @@ export const Schemas = {
 
   // Backup & Restore
   backupExport: z.object({
-    categories: z.array(z.enum(['settings', 'spaces', 'tabs', 'privacy'])).optional(),
+    categories: z.array(z.enum(['settings', 'spaces', 'tabs', 'privacy', 'history', 'bookmarks', 'notes'])).optional(),
     includeOpenTabs: z.boolean().optional(),
     includePinnedTabs: z.boolean().optional()
   }).optional(),
@@ -382,7 +390,11 @@ export const Schemas = {
       'setAudioMuted',
       'isAudioMuted',
       'findInPage',
-      'stopFindInPage'
+      'stopFindInPage',
+      'pasteAndMatchStyle',
+      'replaceMisspelling',
+      'copyImageAt',
+      'downloadURL'
     ]),
     args: z.array(z.any()).optional().default([])
   }),
@@ -521,7 +533,6 @@ export function lockDownSessionPermissions(ses: Session): void {
     'media',
     'camera',
     'microphone',
-    'display-capture',
     'geolocation',
     'notifications',
     'clipboard-read',
@@ -596,6 +607,11 @@ export function lockDownSessionPermissions(ses: Session): void {
       return
     }
 
+    // Screen sharing: Orbit's own picker asks every time (electron/essentials/screenShare.ts)
+    if (permission === 'display-capture') {
+      return callback(ses !== session.defaultSession && webContents?.getType() === 'webview')
+    }
+
     if (SENSITIVE_PERMISSIONS.has(permission)) {
       console.warn(`[Security] Blocked permission request "${permission}" for URL: ${details.requestingUrl || url}`)
       return callback(false)
@@ -611,6 +627,7 @@ export function lockDownSessionPermissions(ses: Session): void {
     if (toPromptable(permission).length > 0 && ses !== session.defaultSession) {
       return sitePermissions.check(webContents, requestingOrigin, permission, isPrivateSession)
     }
+    if ((permission as string) === 'display-capture') return ses !== session.defaultSession
     return !SENSITIVE_PERMISSIONS.has(permission)
   })
 }
@@ -621,9 +638,6 @@ export function lockDownSessionPermissions(ses: Session): void {
  */
 export function setupIsolatedTabSession(partition = 'persist:browser-tabs'): Session {
   const tabSession = session.fromPartition(partition)
-  try {
-    tabSession.setSpellCheckerEnabled(false)
-  } catch {}
   lockDownSessionPermissions(tabSession)
   return tabSession
 }

@@ -35,6 +35,7 @@ import {
   Lock,
   Zap,
   Keyboard,
+  Languages,
   Info,
   Check,
   Moon,
@@ -60,7 +61,9 @@ import { SiteSettingsPanel } from './SiteSettingsPanel'
 import { DefaultBrowserCard } from './DefaultBrowserCard'
 import { SearchSuggestionsToggle } from './SearchSuggestionsToggle'
 import { BrowserImportPanel, EncryptedSyncPanel } from './DataSyncPanels'
-import { ALL_SHORTCUTS } from '@/lib/shortcuts'
+import { LanguageSettings, LinkRoutingSettings, SafeBrowsingCard, ShortcutSettings, UpdateCard } from './EssentialsSettings'
+import { useT } from '@/lib/i18n'
+import { isMainWindow } from '@/lib/extraWindow'
 import { openLegal } from '@/components/Legal/LegalDialog'
 import { LEGAL_LAST_UPDATED } from '@/lib/legal'
 
@@ -73,6 +76,7 @@ interface SettingsDialogProps {
 
 type SettingsTab =
   | 'appearance'
+  | 'languages'
   | 'startup'
   | 'search'
   | 'tabs'
@@ -115,7 +119,6 @@ const WEB_COLOR_SCHEME_OPTIONS: {
   }
 ]
 
-const KEYBOARD_SHORTCUTS = ALL_SHORTCUTS
 
 // Helper for local browser preferences
 const getLocalPref = <T,>(key: string, defaultValue: T): T => {
@@ -256,7 +259,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
 
   // Interaction feedback states
   const [isClearingCache, setIsClearingCache] = useState(false)
-  const [isCheckingUpdates, setIsCheckingUpdates] = useState(false)
 
   const handleSelectTheme = async (mode: ThemeMode) => {
     await setThemeModeStore(mode)
@@ -311,17 +313,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     } else {
       toast.error('Failed to clear browsing data')
     }
-  }
-
-  const handleCheckUpdates = async () => {
-    setIsCheckingUpdates(true)
-    setTimeout(() => {
-      setIsCheckingUpdates(false)
-      // No update server is wired up yet: say so instead of claiming the app is current
-      toast.info(`You're running TCT Orbit v${appInfo?.version || '0.1.2'}`, {
-        description: 'Automatic update checks are not available yet. Get new versions from tctorbit.com.'
-      })
-    }, 900)
   }
 
   const handleResetSettings = async () => {
@@ -392,8 +383,10 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
     toast.success(`Saved ${validUrls.length} current tab(s) as startup pages`)
   }
 
+  const t = useT()
   const navItems = [
     { id: 'appearance', label: 'Appearance', icon: Palette },
+    { id: 'languages', label: 'Languages', icon: Languages },
     { id: 'startup', label: 'Start & New Tab', icon: Home },
     { id: 'search', label: 'Search Engine', icon: Search },
     { id: 'tabs', label: 'Tabs & Spaces', icon: Layers },
@@ -420,7 +413,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
               />
               <div>
                 <DialogTitle className="text-base font-bold text-foreground leading-tight">
-                  Browser Settings
+                  {t('Browser Settings')}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
                   Customize theme, search engine, spaces dock, and security
@@ -441,6 +434,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 <button
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
+                  aria-current={isSelected ? 'page' : undefined}
                   className={`w-full flex items-center gap-2 sm:gap-2.5 px-2.5 sm:px-3 py-2 rounded-xl text-xs font-medium transition-all text-left cursor-pointer ${
                     isSelected
                       ? 'bg-primary/15 text-primary font-semibold shadow-xs'
@@ -448,7 +442,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   }`}
                 >
                   <IconComp className={`w-3.5 h-3.5 shrink-0 ${isSelected ? 'text-primary' : 'opacity-60'}`} />
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate">{t(item.label)}</span>
                 </button>
               )
             })}
@@ -1063,6 +1057,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {activeTab === 'tabs' && (
               <div className="space-y-6">
                 <TabLayoutSettings />
+                {isMainWindow && <LinkRoutingSettings />}
 
                 <div>
                   <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
@@ -1610,6 +1605,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 </div>
 
                 {/* Advanced anonymity: proxy/Tor, cookie banners, pings, referrer, locale, presets */}
+                <SafeBrowsingCard />
                 <PrivacyAdvancedSettings
                   prefs={privacyPrefs}
                   togglePref={togglePrivacyPref}
@@ -1755,33 +1751,9 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             )}
 
             {/* 6. KEYBOARD SHORTCUTS TAB */}
-            {activeTab === 'shortcuts' && (
-              <div className="space-y-3">
-                <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                  Keyboard Shortcuts Reference
-                </h4>
-                <div className="space-y-2">
-                  {KEYBOARD_SHORTCUTS.map((sc, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-2 rounded-xl bg-muted/40 border border-border text-xs"
-                    >
-                      <span className="text-foreground">{sc.description}</span>
-                      <div className="flex items-center gap-1">
-                        {sc.keys.map((k, j) => (
-                          <kbd
-                            key={j}
-                            className="px-2 py-0.5 rounded-md text-[11.5px] font-mono font-semibold bg-muted text-foreground border border-border shadow-xs"
-                          >
-                            {k}
-                          </kbd>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            {activeTab === 'shortcuts' && <ShortcutSettings />}
+
+            {activeTab === 'languages' && <LanguageSettings />}
 
             {/* SITE SETTINGS TAB */}
             {activeTab === 'sites' && <SiteSettingsPanel />}
@@ -1798,6 +1770,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
             {/* 9. ABOUT TAB */}
             {activeTab === 'about' && (
               <div className="space-y-5">
+                <UpdateCard />
                 <div className="p-4 rounded-xl bg-muted/30 border border-border space-y-2.5">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -1861,16 +1834,6 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                 </div>
 
                 <div className="flex items-center justify-between pt-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleCheckUpdates}
-                    disabled={isCheckingUpdates}
-                    className="text-xs flex items-center gap-1.5 h-8"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isCheckingUpdates ? 'animate-spin' : ''}`} />
-                    <span>{isCheckingUpdates ? 'Checking...' : 'Check for Updates'}</span>
-                  </Button>
 
                   <Button
                     variant="ghost"

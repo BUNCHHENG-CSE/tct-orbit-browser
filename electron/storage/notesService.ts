@@ -68,6 +68,16 @@ class NotesService {
     return true
   }
 
+  /** Note from a backup. Merge never overwrites: different text is added below the current note. */
+  public restoreNote(spaceId: string, content: string, mode: 'merge' | 'replace'): boolean {
+    const current = this.getNote(spaceId)
+    if (mode === 'merge' && current.trim()) {
+      if (current.includes(content.trim())) return false
+      return this.saveNote(spaceId, `${current.trimEnd()}\n\n${content}`)
+    }
+    return this.saveNote(spaceId, content)
+  }
+
   public getAllNotes(): Record<string, SpaceNote> {
     return { ...this.notes }
   }

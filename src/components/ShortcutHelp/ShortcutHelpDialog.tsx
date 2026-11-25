@@ -1,12 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { Keyboard, Search } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
-import { SHORTCUT_GROUPS } from '@/lib/shortcuts'
+import { useShortcutGroups } from '@/lib/shortcuts'
+import { useT } from '@/lib/i18n'
 
 /** Ctrl+/ (or "?" outside text fields): searchable keyboard shortcut cheat sheet */
 export const ShortcutHelpDialog: React.FC = () => {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const all = useShortcutGroups()
+  const t = useT()
 
   useEffect(() => {
     const onOpen = () => {
@@ -19,12 +22,12 @@ export const ShortcutHelpDialog: React.FC = () => {
 
   const groups = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return SHORTCUT_GROUPS
-    return SHORTCUT_GROUPS.map((g) => ({
+    if (!q) return all
+    return all.map((g) => ({
       ...g,
-      items: g.items.filter((i) => i.description.toLowerCase().includes(q) || i.keys.join(' ').toLowerCase().includes(q))
+      items: g.items.filter((i) => i.description.toLowerCase().includes(q) || t(i.description).toLowerCase().includes(q) || i.keys.join(' ').toLowerCase().includes(q))
     })).filter((g) => g.items.length > 0)
-  }, [query])
+  }, [query, all, t])
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
@@ -49,11 +52,11 @@ export const ShortcutHelpDialog: React.FC = () => {
           {groups.length === 0 && <p className="text-xs text-muted-foreground">No shortcut matches "{query}".</p>}
           {groups.map((g) => (
             <section key={g.title}>
-              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{g.title}</h4>
+              <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">{t(g.title)}</h4>
               <ul className="space-y-1">
                 {g.items.map((item) => (
                   <li key={item.description} className="flex items-center justify-between gap-3 py-1 text-xs">
-                    <span className="text-foreground">{item.description}</span>
+                    <span className="text-foreground">{t(item.description)}</span>
                     <span className="flex items-center gap-1 shrink-0">
                       {item.keys.map((k, i) => (
                         <kbd

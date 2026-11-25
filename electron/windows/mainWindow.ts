@@ -8,14 +8,21 @@ import { setupMainWindowSecurity } from '../security'
 import { devServerUrl } from '../appUi'
 import { getInitialWindowState, trackWindowState } from './windowState'
 import { PRIVATE_WINDOW_QUERY } from '../../shared/privateWindow'
+import { EXTRA_WINDOW_QUERY } from '../../shared/extraWindow'
 
 export interface CreateWindowOptions {
   /** Private window: only private tabs, own size, no saved window position */
   private?: boolean
+  /** Extra window: id of its virtual space (shared/extraWindow.ts) */
+  extraSpaceId?: string
+  /** Space whose notes and color an extra window uses */
+  baseSpaceId?: string
 }
 
 export function createMainWindow(options: CreateWindowOptions = {}): BrowserWindow {
   const isPrivate = !!options.private
+  // Private and extra windows: not the main window, so no saved size and position
+  const isSecondary = isPrivate || !!options.extraSpaceId
   const isMac = process.platform === 'darwin'
   const paths = getAppPaths()
   const startupTheme = themeManager.getStartupTheme()
@@ -28,9 +35,9 @@ export function createMainWindow(options: CreateWindowOptions = {}): BrowserWind
 
   // First launch: maximized. Later launches: last size/position/maximized state.
   const initialState = getInitialWindowState()
-  const startMaximized = !isPrivate && (initialState.maximize || initialState.fullScreen)
+  const startMaximized = !isSecondary && (initialState.maximize || initialState.fullScreen)
   // Private windows open a bit smaller, centered (like Edge InPrivate)
-  const bounds = isPrivate
+  const bounds = isSecondary
     ? { width: Math.max(900, Math.round((initialState.bounds.width || 1280) * 0.85)), height: Math.max(640, Math.round((initialState.bounds.height || 800) * 0.85)) }
     : initialState.bounds
 
@@ -38,7 +45,7 @@ export function createMainWindow(options: CreateWindowOptions = {}): BrowserWind
     title: isPrivate ? `${paths.channelMeta.displayName} — Private` : paths.channelMeta.displayName,
     icon: appIcon,
     ...bounds,
-    ...(isPrivate ? { center: true } : {}),
+    ...(isSecondary ? { center: true } : {}),
     minWidth: 480,
     minHeight: 400,
     show: false,
@@ -92,7 +99,7 @@ export function createMainWindow(options: CreateWindowOptions = {}): BrowserWind
 
   mainWindow.once('ready-to-show', showWindow)
   // Only the main window remembers its size and position
-  if (!isPrivate) trackWindowState(mainWindow)
+  if (!isSecondary) trackWindowState(mainWindow)
 
   // Ensure window always displays even if ready-to-show event is delayed by HMR/compilation
   setTimeout(() => {
@@ -115,13 +122,20 @@ export function createMainWindow(options: CreateWindowOptions = {}): BrowserWind
   }
 
   // Load renderer via dev server URL (with HMR) or production HTML
+  const query: Record<string, string> = {}
+  if (isPrivate) query.window = PRIVATE_WINDOW_QUERY
+  else if (options.extraSpaceId) {
+    query.window = EXTRA_WINDOW_QUERY
+    query.space = options.extraSpaceId
+    if (options.baseSpaceId) query.base = options.baseSpaceId
+  }
   const devUrl = devServerUrl()
   if (devUrl) {
     const url = new URL(devUrl)
-    if (isPrivate) url.searchParams.set('window', PRIVATE_WINDOW_QUERY)
+    for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
     mainWindow.loadURL(url.toString())
   } else {
-    mainWindow.loadFile(join(__dirname, '../renderer/index.html'), isPrivate ? { query: { window: PRIVATE_WINDOW_QUERY } } : undefined)
+    mainWindow.loadFile(join(__dirname, '../renderer/index.html'), { query })
   }
 
   return mainWindow

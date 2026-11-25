@@ -3,6 +3,9 @@ import fs from 'fs'
 import path from 'path'
 import { localStorageService } from './localStorage'
 import { historyService } from './historyService'
+import { bookmarksService } from './bookmarksService'
+import { notesService } from './notesService'
+import { buildGroupBackup, restoreGroups, sanitizeBookmarks, sanitizeGroups, sanitizeNotes, type BookmarkBackup, type GroupBackup, type NoteBackup } from './backupContent'
 import { privacyEngine } from '../privacy/privacyEngine'
 import { getAppPaths } from './paths'
 import { Schemas } from '../security'
@@ -37,7 +40,10 @@ export interface BackupV1File {
   data: {
     settings?: Partial<Settings>
     spaces?: Partial<Space>[]
-    tabs?: (Partial<Tab> & { spaceName?: string })[]
+    tabs?: (Partial<Tab> & { spaceName?: string; groupKey?: string })[]
+    groups?: GroupBackup[]
+    bookmarks?: BookmarkBackup[]
+    notes?: NoteBackup[]
     privacy?: Record<string, any>
     history?: HistoryEntry[]
   }
@@ -98,12 +104,16 @@ function sanitizeBackupData(raw: BackupV1File['data']): BackupV1File['data'] {
               favicon: importableFavicon(t.favicon) ?? null,
               isPinned: !!t.isPinned,
               order: typeof t.order === 'number' ? t.order : undefined,
-              spaceName: text(t.spaceName, 80)
+              spaceName: text(t.spaceName, 80),
+              groupKey: text(t.groupKey, 100)
             }
           ]
         : []
     )
   }
+  out.groups = sanitizeGroups(raw.groups)
+  out.bookmarks = sanitizeBookmarks(raw.bookmarks)
+  out.notes = sanitizeNotes(raw.notes)
   // Privacy preferences are sanitized by PrivacyEngine.updatePrefs
   if (raw.privacy && typeof raw.privacy === 'object') {
     out.privacy = {
@@ -175,7 +185,7 @@ export class BackupService {
     itemCounts: NonNullable<ExportBackupResult['itemCounts']>
   } {
     {
-      const categories = options.categories || ['settings', 'spaces', 'tabs', 'privacy']
+      const categories = options.categories || ['settings', 'spaces', 'tabs', 'privacy', 'bookmarks', 'notes']
       const includeOpenTabs = options.includeOpenTabs !== false
       const includePinnedTabs = options.includePinnedTabs !== false
 
@@ -202,7 +212,19 @@ export class BackupService {
           askWhereToSave: s.askWhereToSave,
           openFolderOnDownload: s.openFolderOnDownload,
           defaultZoom: s.defaultZoom,
-          autoArchiveDuration: s.autoArchiveDuration
+          autoArchiveDuration: s.autoArchiveDuration,
+          memorySaverEnabled: s.memorySaverEnabled,
+          sleepTimeoutMinutes: s.sleepTimeoutMinutes,
+          newTabPage: s.newTabPage,
+          tabLayout: s.tabLayout,
+          newTabsOnTop: s.newTabsOnTop,
+          favoritesBar: s.favoritesBar,
+          spellcheck: s.spellcheck,
+          spellcheckLanguages: s.spellcheckLanguages,
+          safeBrowsing: s.safeBrowsing,
+          shortcuts: s.shortcuts,
+          language: s.language,
+          translateTo: s.translateTo
         }
         categoriesIncluded.push('settings')
       }
@@ -231,6 +253,8 @@ export class BackupService {
       let exportedPinnedCount = 0
 
       if (categories.includes('tabs') && Array.isArray(fullState.tabs)) {
+        const groupBackup = buildGroupBackup(fullState.groups ?? [], spaceMap)
+        exportData.groups = groupBackup.groups
         const filteredTabs = fullState.tabs.filter((t) => {
           if (t.isPinned && includePinnedTabs) return true
           if (!t.isPinned && includeOpenTabs) return true
@@ -247,7 +271,8 @@ export class BackupService {
             favicon: tab.favicon,
             isPinned: Boolean(tab.isPinned),
             order: tab.order,
-            spaceName: spaceMap.get(tab.spaceId) || 'Personal'
+            spaceName: spaceMap.get(tab.spaceId) || 'Personal',
+            groupKey: tab.groupId ? groupBackup.keyById.get(tab.groupId) : undefined
           }
         })
         categoriesIncluded.push('tabs')
@@ -281,6 +306,18 @@ export class BackupService {
         categoriesIncluded.push('history')
       }
 
+      // 6. Bookmarks, reading list and Space Notes
+      if (categories.includes('bookmarks')) {
+        exportData.bookmarks = bookmarksService.list().map((b) => ({ ...b, spaceName: b.spaceId ? spaceMap.get(b.spaceId) : undefined }))
+        categoriesIncluded.push('bookmarks')
+      }
+      if (categories.includes('notes')) {
+        exportData.notes = Object.values(notesService.getAllNotes())
+          .filter((n) => n.content.trim() && spaceMap.has(n.spaceId))
+          .map((n) => ({ spaceName: spaceMap.get(n.spaceId)!, content: n.content, updatedAt: n.updatedAt }))
+        categoriesIncluded.push('notes')
+      }
+
       // Construct file payload
       const backupFile: BackupV1File = {
         $schema: 'https://tctorbit.com/schemas/backup-v1.json',
@@ -308,6 +345,8 @@ export class BackupService {
           tabs: exportedTabsCount,
           pinnedTabs: exportedPinnedCount,
           history: exportedHistoryCount,
+          bookmarks: exportData.bookmarks?.length || 0,
+          notes: exportData.notes?.length || 0,
           hasSettings: Boolean(exportData.settings),
           hasPrivacy: Boolean(exportData.privacy)
         }
@@ -363,7 +402,11 @@ export class BackupService {
       const categories: string[] = []
       if (hasSettings) categories.push('Settings')
       if (spaces.length > 0) categories.push('Spaces')
-      if (tabs.length > 0) categories.push('Tabs & Bookmarks')
+      const bookmarksCount = sanitizeBookmarks(data.bookmarks).length
+      const notesCount = sanitizeNotes(data.notes).length
+      if (tabs.length > 0) categories.push('Tabs')
+      if (bookmarksCount > 0) categories.push('Bookmarks')
+      if (notesCount > 0) categories.push('Space Notes')
       if (hasPrivacy) categories.push('Privacy Shield')
       if (historyList.length > 0) categories.push('Browsing History')
 
@@ -377,6 +420,8 @@ export class BackupService {
         tabsCount: tabs.length,
         pinnedCount,
         historyCount: historyList.length,
+        bookmarksCount,
+        notesCount,
         hasSettings,
         hasPrivacy,
         categories,
@@ -445,6 +490,8 @@ export class BackupService {
       let importedTabsCount = 0
       let settingsUpdated = false
       let privacyUpdated = false
+      /** Space name (lower case) -> id after the import */
+      let restoredSpaceIds = new Map<string, string>()
 
       if (mode === 'replace') {
         // --- REPLACE MODE ---
@@ -484,6 +531,8 @@ export class BackupService {
         }
 
         const fallbackSpaceId = newSpaces[0].id
+        restoredSpaceIds = new Map(newSpaces.map((s) => [s.name.toLowerCase(), s.id]))
+        const groups = restoreGroups(data.groups ?? [], restoredSpaceIds, [])
 
         // Replace Tabs
         if (Array.isArray(data.tabs) && data.tabs.length > 0) {
@@ -501,7 +550,8 @@ export class BackupService {
               isPinned: Boolean(t.isPinned),
               order: typeof t.order === 'number' ? t.order : idx,
               lastVisited: new Date().toISOString(),
-              createdAt: new Date().toISOString()
+              createdAt: new Date().toISOString(),
+              groupId: groups.idFor(t.groupKey, targetSpaceId)
             })
             importedTabsCount++
           })
@@ -524,7 +574,8 @@ export class BackupService {
           settings: newSettings,
           spaces: newSpaces,
           tabs: newTabs,
-          // Tab ids are regenerated, so old groups no longer apply; saved split layouts are URL-based and stay
+          groups: groups.groups,
+          // Saved split layouts are URL-based and stay
           savedSplits: previousFullState.savedSplits,
           encryptedVault: previousFullState.encryptedVault
         })
@@ -572,6 +623,8 @@ export class BackupService {
         }
 
         const fallbackSpaceId = existingSpaces[0]?.id || 'default-personal-space'
+        restoredSpaceIds = spaceNameToIdMap
+        const groups = restoreGroups(data.groups ?? [], spaceNameToIdMap, mergedState.groups ?? [])
 
         // Merge Tabs: Skip exact duplicate URLs in the same space, or promote to pinned
         if (Array.isArray(data.tabs)) {
@@ -600,7 +653,8 @@ export class BackupService {
                 isPinned: Boolean(t.isPinned),
                 order: existingTabs.filter((et) => et.spaceId === targetSpaceId).length,
                 lastVisited: new Date().toISOString(),
-                createdAt: new Date().toISOString()
+                createdAt: new Date().toISOString(),
+                groupId: groups.idFor(t.groupKey, targetSpaceId)
               })
               importedTabsCount++
             }
@@ -623,6 +677,8 @@ export class BackupService {
           ...mergedState,
           spaces: existingSpaces,
           tabs: existingTabs,
+          // Groups that ended up empty (all their tabs were already open) are dropped
+          groups: groups.withTabs(existingTabs),
           settings: mergedSettings
         })
 
@@ -650,6 +706,20 @@ export class BackupService {
         importedHistoryCount = historyService.restoreEntries(data.history, mode)
       }
 
+      // Bookmarks and notes (a backup without them never clears the current ones)
+      let importedBookmarks = 0
+      if (data.bookmarks && data.bookmarks.length > 0) {
+        importedBookmarks = bookmarksService.restore(
+          data.bookmarks.map(({ spaceName, ...b }) => ({ ...b, spaceId: spaceName ? restoredSpaceIds.get(spaceName.toLowerCase()) : undefined })),
+          mode
+        )
+      }
+      let importedNotes = 0
+      for (const note of data.notes ?? []) {
+        const spaceId = restoredSpaceIds.get(note.spaceName.toLowerCase())
+        if (spaceId && notesService.restoreNote(spaceId, note.content, mode)) importedNotes++
+      }
+
       // Cleanup rollback snapshot on complete success
       if (fs.existsSync(rollbackSnapshotPath)) {
         try {
@@ -664,6 +734,8 @@ export class BackupService {
           spaces: importedSpacesCount,
           tabs: importedTabsCount,
           history: importedHistoryCount,
+          bookmarks: importedBookmarks,
+          notes: importedNotes,
           settingsUpdated,
           privacyUpdated
         }

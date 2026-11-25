@@ -138,7 +138,8 @@ const hardenedApi: ElectronAPI = {
 
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
-    update: (data: UpdateSettingsData) => ipcRenderer.invoke('settings:update', data)
+    update: (data: UpdateSettingsData) => ipcRenderer.invoke('settings:update', data),
+    onChanged: (callback) => listen('settings:changed', callback)
   },
 
   theme: {
@@ -421,6 +422,83 @@ const hardenedApi: ElectronAPI = {
     onWatchOpen: (callback) => listen('smart:watch-open', callback),
     focusRulesGet: () => ipcRenderer.invoke('smart:focus-rules-get'),
     focusRulesSet: (rules) => ipcRenderer.invoke('smart:focus-rules-set', rules)
+  },
+
+  essentials: {
+    updates: {
+      state: () => ipcRenderer.invoke('updates:state'),
+      check: () => ipcRenderer.invoke('updates:check'),
+      install: () => ipcRenderer.invoke('updates:install'),
+      onState: (callback) => listen('updates:state', callback)
+    },
+    pages: {
+      confirmClose: (webContentsId: number) => ipcRenderer.invoke('pages:confirm-close', webContentsId)
+    },
+    screenShare: {
+      respond: (id: string, sourceId: string | null, audio: boolean) => ipcRenderer.invoke('screen-share:respond', id, sourceId, audio),
+      onRequest: (callback) => listen('screen-share:request', callback),
+      onDismiss: (callback) => listen('screen-share:dismiss', callback)
+    },
+    auth: {
+      respond: (id: string, username: string | null, password: string) => ipcRenderer.invoke('auth:respond', id, username, password),
+      onRequest: (callback) => listen('auth:request', callback),
+      onDismiss: (callback) => listen('auth:dismiss', callback)
+    },
+    safeBrowsing: {
+      status: () => ipcRenderer.invoke('safe-browsing:status'),
+      refresh: () => ipcRenderer.invoke('safe-browsing:refresh'),
+      allow: (host: string) => ipcRenderer.invoke('safe-browsing:allow', host),
+      onBlocked: (callback) => listen('safe-browsing:blocked', callback)
+    },
+    addresses: {
+      list: () => ipcRenderer.invoke('addresses:list'),
+      save: (data) => ipcRenderer.invoke('addresses:save', data),
+      remove: (id: string) => ipcRenderer.invoke('addresses:remove', id),
+      encrypted: () => ipcRenderer.invoke('addresses:encrypted')
+    },
+    passwordFiles: {
+      importCsv: () => ipcRenderer.invoke('passwords:import-csv'),
+      exportCsv: () => ipcRenderer.invoke('passwords:export-csv'),
+      deleteImported: (filePath: string) => ipcRenderer.invoke('passwords:delete-imported', filePath)
+    },
+    routes: {
+      list: () => ipcRenderer.invoke('routes:list'),
+      save: (pattern: string, spaceId: string) => ipcRenderer.invoke('routes:save', pattern, spaceId),
+      remove: (id: string) => ipcRenderer.invoke('routes:remove', id),
+      onChanged: (callback) => listen('routes:changed', callback)
+    },
+    boosts: {
+      list: () => ipcRenderer.invoke('boosts:list'),
+      save: (data) => ipcRenderer.invoke('boosts:save', data),
+      remove: (id: string) => ipcRenderer.invoke('boosts:remove', id)
+    },
+    highlights: {
+      list: (url?: string) => ipcRenderer.invoke('highlights:list', url),
+      add: (webContentsId: number, color) => ipcRenderer.invoke('highlights:add', webContentsId, color),
+      remove: (id: string) => ipcRenderer.invoke('highlights:remove', id),
+      scrollTo: (webContentsId: number, id: string) => ipcRenderer.invoke('highlights:scroll', webContentsId, id)
+    },
+    capture: {
+      fullPage: (webContentsId: number) => ipcRenderer.invoke('capture:full-page', webContentsId),
+      visible: (webContentsId: number) => ipcRenderer.invoke('capture:visible', webContentsId),
+      save: (dataUrl: string, name: string) => ipcRenderer.invoke('capture:save', dataUrl, name),
+      copy: (dataUrl: string) => ipcRenderer.invoke('capture:copy', dataUrl)
+    },
+    ai: {
+      status: () => ipcRenderer.invoke('ai:status'),
+      ask: (data) => ipcRenderer.invoke('ai:ask', data),
+      cancel: (id: string) => ipcRenderer.invoke('ai:cancel', id),
+      onChunk: (callback) => listen('ai:chunk', callback)
+    },
+    windows: {
+      open: (url?: string) => ipcRenderer.invoke('windows:open', url),
+      moveTab: (tabId: string) => ipcRenderer.invoke('windows:move-tab', tabId),
+      moveTabToMain: (tabId: string) => ipcRenderer.invoke('windows:move-tab-main', tabId),
+      onTabsChanged: (callback) => listen('windows:tabs-changed', callback)
+    },
+    shortcuts: {
+      setRecording: (recording: boolean) => ipcRenderer.invoke('shortcuts:recording', recording)
+    }
   },
 
   browserImport: {

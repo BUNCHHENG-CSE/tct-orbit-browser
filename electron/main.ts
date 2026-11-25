@@ -1,6 +1,6 @@
 import dotenv from 'dotenv'
 import os from 'os'
-import { app, BrowserWindow, ipcMain, session, nativeTheme, powerSaveBlocker } from 'electron'
+import { app, BrowserWindow, ipcMain, session, nativeTheme, powerSaveBlocker, webContents } from 'electron'
 import { createMainWindow } from './windows/mainWindow'
 import { setupWindowsTaskbar } from './windows/taskbar'
 import { registerAllIpc } from './ipc'
@@ -24,6 +24,18 @@ import { PRIVATE_WINDOW_SPACE_ID, PRIVATE_START } from '../shared/privateWindow'
 import { queueLaunchUrl, isOpenableUrl } from './launchUrls'
 import { extensionManager } from './extensions'
 import { passwordManager } from './passwords'
+import { buildKeymap, matchShortcut } from '../shared/shortcuts'
+import { isExtraSpaceId, newExtraSpaceId } from '../shared/extraWindow'
+import { tabsOf } from './essentials/windowOf'
+import { updateService } from './essentials/updater'
+import { screenShareService } from './essentials/screenShare'
+import { httpAuthService } from './essentials/httpAuth'
+import { attachLeaveWarning, confirmCloseWindow } from './essentials/unload'
+import { safeBrowsing } from './essentials/safeBrowsing'
+import { addressService } from './essentials/addresses'
+import { pageTools } from './essentials/pageTools'
+import { applySpellcheck } from './essentials/spellcheck'
+import { z } from 'zod'
 import {
   SHARED_TAB_PARTITION,
   resolveTabPartition,
@@ -201,6 +213,28 @@ process.on('unhandledRejection', (reason: any) => {
 })
 
 let mainWindow: BrowserWindow | null = null
+/** Create the main window (at start, and again if it was closed while other windows stayed open) */
+function openMainWindow(): BrowserWindow {
+  if (mainWindow && !mainWindow.isDestroyed()) return mainWindow
+  const win = createMainWindow()
+  mainWindow = win
+  win.once('closed', () => {
+    if (mainWindow === win) mainWindow = null
+  })
+  attachKeyboardShortcuts(win.webContents, false)
+  devtoolsManager.init(win)
+  // Surface UI errors in the terminal (otherwise a renderer crash is just a black window)
+  win.webContents.on('console-message', (details: any) => {
+    const level = details?.level
+    if (level === 'error' || level === 3) {
+      console.error('[UI]', details.message, details.sourceId ? `(${details.sourceId}:${details.lineNumber})` : '')
+    }
+  })
+  recoverUi(win)
+  guardWindowClose(win)
+  return win
+}
+
 /** Open private windows (Edge InPrivate style) */
 const privateWindows = new Set<BrowserWindow>()
 
@@ -221,6 +255,7 @@ function windowFor(contents: Electron.WebContents | null | undefined): BrowserWi
  * private window: asking again focuses it and opens a new tab (or the given link) in it.
  */
 function openPrivateWindow(url?: string): BrowserWindow {
+  // (see openMainWindow / openExtraWindow for the other window kinds)
   const safeUrl = url && /^https?:\/\//i.test(url) ? url : undefined
   const existing = [...privateWindows].find((w) => !w.isDestroyed())
   if (existing) {
@@ -243,6 +278,8 @@ function openPrivateWindow(url?: string): BrowserWindow {
   const win = createMainWindow({ private: true })
   privateWindows.add(win)
   attachKeyboardShortcuts(win.webContents, false)
+  recoverUi(win)
+  guardWindowClose(win)
   win.on('closed', () => {
     privateWindows.delete(win)
     // Closing the window closes its tabs; the last private tab gone wipes the private session
@@ -251,6 +288,82 @@ function openPrivateWindow(url?: string): BrowserWindow {
     if (hadPrivate && !localStorageService.hasPrivateTabs()) void privacyEngine.clearPrivateSession()
   })
   return win
+}
+
+// --- Extra windows (Ctrl+N): one virtual space each, shared normal session ---
+const extraWindows = new Map<string, BrowserWindow>()
+let isQuitting = false
+/** Unsaved pages were checked for the quit in progress */
+let quitConfirmed = false
+/** Windows whose "unsaved changes" question was already answered */
+const closeConfirmed = new WeakSet<BrowserWindow>()
+
+/** Ask about unsaved changes before a window (and all its tabs) closes */
+function guardWindowClose(win: BrowserWindow): void {
+  let asking = false
+  win.on('close', (event) => {
+    if (closeConfirmed.has(win)) return
+    const tabs = tabsOf(win, activeWebviewContents)
+    if (tabs.length === 0) return
+    event.preventDefault()
+    if (asking) return
+    asking = true
+    void confirmCloseWindow(win, tabs)
+      .catch(() => true)
+      .then((ok) => {
+        asking = false
+        if (!ok) return
+        closeConfirmed.add(win)
+        if (!win.isDestroyed()) win.close()
+      })
+  })
+}
+
+/** Ask about unsaved pages in every window. True = the browser may quit now. */
+async function confirmQuit(): Promise<boolean> {
+  if (quitConfirmed) return true
+  for (const win of BrowserWindow.getAllWindows()) {
+    if (win.isDestroyed() || closeConfirmed.has(win)) continue
+    const tabs = tabsOf(win, activeWebviewContents)
+    if (tabs.length > 0 && !(await confirmCloseWindow(win, tabs).catch(() => true))) return false
+  }
+  for (const win of BrowserWindow.getAllWindows()) closeConfirmed.add(win)
+  quitConfirmed = true
+  return true
+}
+
+function openExtraWindow(spaceId: string = newExtraSpaceId(), url?: string): BrowserWindow {
+  const existing = extraWindows.get(spaceId)
+  if (existing && !existing.isDestroyed()) {
+    existing.focus()
+    return existing
+  }
+  if (localStorageService.listTabs(spaceId).length === 0) {
+    localStorageService.createTab({ spaceId, url: url ?? 'orbit://start', title: url ? 'Loading...' : 'Start' })
+  }
+  const win = createMainWindow({ extraSpaceId: spaceId, baseSpaceId: localStorageService.listSpaces().find((s) => s.isActive)?.id })
+  extraWindows.set(spaceId, win)
+  attachKeyboardShortcuts(win.webContents, false)
+  recoverUi(win)
+  guardWindowClose(win)
+  win.on('closed', () => {
+    extraWindows.delete(spaceId)
+    // Closing a window closes its tabs; quitting keeps them for the next start
+    if (!isQuitting) localStorageService.removeWindowSpace(spaceId)
+  })
+  return win
+}
+
+/** The interface process crashed: load it again instead of leaving a black window */
+function recoverUi(win: BrowserWindow): void {
+  let recent: number[] = []
+  win.webContents.on('render-process-gone', (_e, details) => {
+    if (details.reason === 'clean-exit' || win.isDestroyed()) return
+    console.error('[UI] Renderer process gone:', details.reason, 'exitCode:', details.exitCode)
+    recent = [...recent.filter((t) => Date.now() - t < 60_000), Date.now()]
+    // Crashing again and again: stop, reloading won't help
+    if (recent.length <= 3) setTimeout(() => !win.isDestroyed() && win.webContents.reload(), 500)
+  })
 }
 const activeWebviewContents = new Set<Electron.WebContents>()
 let mediaPowerSaveBlockerId: number | null = null
@@ -305,288 +418,37 @@ const getWebviewThemeScript = (_isDark?: boolean) => `
   })();
 `
 
-// Shared global keyboard shortcut handler for both webview tabs and main window chrome
+// Keyboard shortcuts (shared/shortcuts.ts), for web pages and for the browser UI
+let keymapSource: unknown
+let keymap = buildKeymap()
+/** Windows where Settings > Shortcuts is recording a new combination */
+const recordingShortcuts = new Set<number>()
+
+function currentKeymap(): Map<string, string> {
+  const overrides = localStorageService.getSettings().shortcuts
+  if (overrides !== keymapSource) {
+    keymapSource = overrides
+    keymap = buildKeymap(overrides)
+  }
+  return keymap
+}
+
 function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: boolean) {
   contents.on('before-input-event', (event, input) => {
-    if (input.type !== 'keyDown') return
+    if (input.type !== 'keyDown' || recordingShortcuts.has(contents.id)) return
+    const action = matchShortcut(input, currentKeymap())
+    if (!action) return
+    event.preventDefault()
 
-    const isCmdOrCtrl = input.control || input.meta
-    const key = (input.key || '').toLowerCase()
-    const code = input.code || ''
-    const shift = !!input.shift
-    const alt = !!input.alt
-
-    const sendShortcut = (action: string) => {
-      const win = windowFor(contents)
-      if (win) win.webContents.send('keyboard-shortcut:trigger', action)
+    if (isWebview) {
+      // These act on the page that has focus, which may be the other half of a split view
+      const nav = contents.navigationHistory
+      if (action === 'reload') return contents.reload()
+      if (action === 'hard-reload') return contents.reloadIgnoringCache()
+      if (action === 'back') return nav.canGoBack() ? nav.goBack() : undefined
+      if (action === 'forward') return nav.canGoForward() ? nav.goForward() : undefined
     }
-
-    // 1. DevTools: F12 or Ctrl+Shift+I
-    if (key === 'f12' || code === 'F12' || (isCmdOrCtrl && shift && !alt && (key === 'i' || code === 'KeyI'))) {
-      event.preventDefault()
-      sendShortcut('toggle-devtools')
-      return
-    }
-
-    // Split View: Ctrl+\
-    if (isCmdOrCtrl && !shift && !alt && (key === '\\' || code === 'Backslash')) {
-      event.preventDefault()
-      sendShortcut('toggle-split-view')
-      return
-    }
-
-    // New Private Tab: Alt+Shift+N (Ctrl+Shift+N is Space Notes)
-    if (alt && shift && !isCmdOrCtrl && (key === 'n' || code === 'KeyN')) {
-      event.preventDefault()
-      sendShortcut('new-private-tab')
-      return
-    }
-
-    // Tab Search across all spaces: Ctrl+Shift+A
-    if (isCmdOrCtrl && shift && !alt && (key === 'a' || code === 'KeyA')) {
-      event.preventDefault()
-      sendShortcut('tab-search')
-      return
-    }
-
-    // Keyboard shortcut cheat sheet: Ctrl+/
-    if (isCmdOrCtrl && !shift && !alt && (key === '/' || code === 'Slash')) {
-      event.preventDefault()
-      sendShortcut('shortcut-help')
-      return
-    }
-
-    // Reader Mode: F9 or Ctrl+Alt+R
-    if ((!isCmdOrCtrl && !shift && !alt && (key === 'f9' || code === 'F9')) || (isCmdOrCtrl && alt && !shift && (key === 'r' || code === 'KeyR'))) {
-      event.preventDefault()
-      sendShortcut('toggle-reader-mode')
-      return
-    }
-
-    // Picture-in-Picture: Ctrl+Shift+P or Ctrl+Alt+P
-    if ((isCmdOrCtrl && shift && !alt && (key === 'p' || code === 'KeyP')) || (isCmdOrCtrl && alt && !shift && (key === 'p' || code === 'KeyP'))) {
-      event.preventDefault()
-      sendShortcut('toggle-pip')
-      return
-    }
-
-    // Print Page: Ctrl+P
-    if (isCmdOrCtrl && !shift && !alt && (key === 'p' || code === 'KeyP')) {
-      event.preventDefault()
-      sendShortcut('print-page')
-      return
-    }
-
-    // Space Notes: Ctrl+Shift+N
-    if (isCmdOrCtrl && shift && !alt && (key === 'n' || code === 'KeyN')) {
-      event.preventDefault()
-      sendShortcut('toggle-notes')
-      return
-    }
-
-    // 2. Screenshot: Ctrl+Shift+S
-    if (isCmdOrCtrl && shift && !alt && (key === 's' || code === 'KeyS')) {
-      event.preventDefault()
-      sendShortcut('take-screenshot')
-      return
-    }
-
-    // 3. Reopen closed tab: Ctrl+Shift+T
-    if (isCmdOrCtrl && shift && !alt && (key === 't' || code === 'KeyT')) {
-      event.preventDefault()
-      sendShortcut('reopen-tab')
-      return
-    }
-
-    // 4. Hard reload (ignore cache): Ctrl+Shift+R or Ctrl+F5
-    if ((isCmdOrCtrl && shift && (key === 'r' || code === 'KeyR')) || (isCmdOrCtrl && (key === 'f5' || code === 'F5'))) {
-      event.preventDefault()
-      if (isWebview) {
-        contents.reloadIgnoringCache()
-      } else {
-        sendShortcut('hard-reload')
-      }
-      return
-    }
-
-    // 5. Normal reload: Ctrl+R or F5
-    if ((isCmdOrCtrl && !shift && !alt && (key === 'r' || code === 'KeyR')) || (!isCmdOrCtrl && !shift && !alt && (key === 'f5' || code === 'F5'))) {
-      event.preventDefault()
-      if (isWebview) {
-        contents.reload()
-      } else {
-        sendShortcut('reload')
-      }
-      return
-    }
-
-    // 6. Next tab: Ctrl+Tab or Ctrl+PageDown
-    if (isCmdOrCtrl && !shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pagedown' || code === 'PageDown')) {
-      event.preventDefault()
-      sendShortcut('next-tab')
-      return
-    }
-
-    // 7. Previous tab: Ctrl+Shift+Tab or Ctrl+PageUp
-    if (isCmdOrCtrl && shift && !alt && (key === 'tab' || code === 'Tab' || key === 'pageup' || code === 'PageUp')) {
-      event.preventDefault()
-      sendShortcut('prev-tab')
-      return
-    }
-
-    // 8. New tab: Ctrl+T or Ctrl+N
-    if (isCmdOrCtrl && !shift && !alt && (key === 't' || code === 'KeyT' || key === 'n' || code === 'KeyN')) {
-      event.preventDefault()
-      sendShortcut('new-tab')
-      return
-    }
-
-    // 9. Close tab: Ctrl+W or Ctrl+F4
-    if ((isCmdOrCtrl && !shift && !alt && (key === 'w' || code === 'KeyW')) || (isCmdOrCtrl && (key === 'f4' || code === 'F4'))) {
-      event.preventDefault()
-      sendShortcut('close-tab')
-      return
-    }
-
-    // 10. Focus Address Bar / Omnibox: Ctrl+L, Alt+D, or F6
-    if (
-      (isCmdOrCtrl && !shift && !alt && (key === 'l' || code === 'KeyL')) ||
-      (alt && !isCmdOrCtrl && !shift && (key === 'd' || code === 'KeyD')) ||
-      (!isCmdOrCtrl && !shift && !alt && (key === 'f6' || code === 'F6'))
-    ) {
-      event.preventDefault()
-      sendShortcut('focus-address-bar')
-      return
-    }
-
-    // 11. Open Command Bar: Ctrl+K
-    if (isCmdOrCtrl && !shift && !alt && (key === 'k' || code === 'KeyK')) {
-      event.preventDefault()
-      sendShortcut('open-command-bar')
-      return
-    }
-
-    // Open History: Ctrl+H
-    if (isCmdOrCtrl && !shift && !alt && (key === 'h' || code === 'KeyH')) {
-      event.preventDefault()
-      sendShortcut('open-history')
-      return
-    }
-
-    // Open Downloads: Ctrl+J
-    if (isCmdOrCtrl && !shift && !alt && (key === 'j' || code === 'KeyJ')) {
-      event.preventDefault()
-      sendShortcut('open-downloads')
-      return
-    }
-
-    // Find in Page: Ctrl+F
-    if (isCmdOrCtrl && !shift && !alt && (key === 'f' || code === 'KeyF')) {
-      event.preventDefault()
-      sendShortcut('toggle-find')
-      return
-    }
-
-    // Bookmark Tab: Ctrl+D
-    if (isCmdOrCtrl && !shift && !alt && (key === 'd' || code === 'KeyD')) {
-      event.preventDefault()
-      sendShortcut('toggle-bookmark')
-      return
-    }
-
-    // 12. Toggle Sidebar: Ctrl+S or Ctrl+B
-    if (isCmdOrCtrl && !shift && !alt && (key === 's' || code === 'KeyS' || key === 'b' || code === 'KeyB')) {
-      event.preventDefault()
-      sendShortcut('toggle-sidebar')
-      return
-    }
-
-    // 13. Open Settings: Ctrl+,
-    if (isCmdOrCtrl && !shift && !alt && (key === ',' || code === 'Comma')) {
-      event.preventDefault()
-      sendShortcut('open-settings')
-      return
-    }
-
-    // 14. Switch to tab 1..8: Ctrl+1..8
-    if (isCmdOrCtrl && !shift && !alt && (/^[1-8]$/.test(input.key) || /^Digit[1-8]$/.test(code) || /^Numpad[1-8]$/.test(code))) {
-      event.preventDefault()
-      const digit = input.key && /^[1-8]$/.test(input.key) ? input.key : code.slice(-1)
-      sendShortcut(`switch-tab-${digit}`)
-      return
-    }
-
-    // 15. Switch to last tab: Ctrl+9
-    if (isCmdOrCtrl && !shift && !alt && (input.key === '9' || code === 'Digit9' || code === 'Numpad9')) {
-      event.preventDefault()
-      sendShortcut('switch-tab-last')
-      return
-    }
-
-    // 16. Back: Alt+Left or Ctrl+[
-    if (
-      (alt && !isCmdOrCtrl && !shift && (key === 'arrowleft' || code === 'ArrowLeft')) ||
-      (isCmdOrCtrl && !shift && !alt && (key === '[' || code === 'BracketLeft'))
-    ) {
-      event.preventDefault()
-      if (isWebview) {
-        const canBack = contents.navigationHistory ? contents.navigationHistory.canGoBack() : contents.canGoBack()
-        if (canBack) contents.goBack()
-      } else {
-        sendShortcut('back')
-      }
-      return
-    }
-
-    // 17. Forward: Alt+Right or Ctrl+]
-    if (
-      (alt && !isCmdOrCtrl && !shift && (key === 'arrowright' || code === 'ArrowRight')) ||
-      (isCmdOrCtrl && !shift && !alt && (key === ']' || code === 'BracketRight'))
-    ) {
-      event.preventDefault()
-      if (isWebview) {
-        const canFwd = contents.navigationHistory ? contents.navigationHistory.canGoForward() : contents.canGoForward()
-        if (canFwd) contents.goForward()
-      } else {
-        sendShortcut('forward')
-      }
-      return
-    }
-
-    // Zen Mode: F11 or Ctrl+Shift+F
-    if ((!isCmdOrCtrl && !shift && !alt && (key === 'f11' || code === 'F11')) || (isCmdOrCtrl && shift && !alt && (key === 'f' || code === 'KeyF'))) {
-      event.preventDefault()
-      sendShortcut('toggle-zen-mode')
-      return
-    }
-
-    // Orbit Task Manager: Shift+Escape
-    if (shift && !isCmdOrCtrl && !alt && (key === 'escape' || code === 'Escape')) {
-      event.preventDefault()
-      sendShortcut('open-task-manager')
-      return
-    }
-
-    // 18. Zoom In: Ctrl+=, Ctrl++, or Ctrl+NumpadAdd
-    if (isCmdOrCtrl && !alt && (key === '=' || key === '+' || code === 'Equal' || code === 'NumpadAdd')) {
-      event.preventDefault()
-      sendShortcut('zoom-in')
-      return
-    }
-
-    // 19. Zoom Out: Ctrl+- or Ctrl+NumpadSubtract
-    if (isCmdOrCtrl && !alt && (key === '-' || code === 'Minus' || code === 'NumpadSubtract')) {
-      event.preventDefault()
-      sendShortcut('zoom-out')
-      return
-    }
-
-    // 20. Zoom Reset: Ctrl+0 or Ctrl+Numpad0
-    if (isCmdOrCtrl && !alt && (key === '0' || code === 'Digit0' || code === 'Numpad0')) {
-      event.preventDefault()
-      sendShortcut('zoom-reset')
-      return
-    }
+    windowFor(contents)?.webContents.send('keyboard-shortcut:trigger', action)
   })
 }
 
@@ -623,6 +485,17 @@ if (!gotSingleInstanceLock) {
   app.quit()
 } else {
   app.on('second-instance', (_event, commandLine) => {
+    if (!mainWindow && app.isReady()) {
+      // Only a private or extra window is left: bring the main window back
+      const urlArg = commandLine.find(isOpenableUrl)
+      if (commandLine.includes('--incognito') || commandLine.includes('--inprivate')) {
+        openPrivateWindow(urlArg)
+        return
+      }
+      if (urlArg) queueLaunchUrl(urlArg)
+      openMainWindow()
+      return
+    }
     // Focus and show the main window if a second instance attempt is made
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore()
@@ -635,7 +508,7 @@ if (!gotSingleInstanceLock) {
       if (hasIncognito) {
         openPrivateWindow()
       } else if (hasNewWindow) {
-        mainWindow.webContents.send('tab:create', {})
+        openExtraWindow()
       }
 
       // Forward any URL passed via CLI argument (e.g. tct-orbit https://example.com)
@@ -657,6 +530,7 @@ if (!gotSingleInstanceLock) {
     } else {
       // Launched by clicking a link: open it once the UI is up
       queueLaunchUrl(url)
+      if (app.isReady()) openMainWindow()
     }
   })
 
@@ -673,7 +547,6 @@ if (!gotSingleInstanceLock) {
     session.defaultSession.setUserAgent(customUserAgent)
     try {
       session.defaultSession.setSpellCheckerEnabled(false)
-      tabSession.setSpellCheckerEnabled(false)
     } catch {}
 
     // NOTE: no periodic "memory trimmer". window.gc() does not exist without --expose-gc, and
@@ -690,6 +563,17 @@ if (!gotSingleInstanceLock) {
     syncService.init()
     sitePermissions.init(() => mainWindow)
     smartService.init(() => mainWindow)
+    pageTools.init()
+    addressService.init()
+    safeBrowsing.init()
+    httpAuthService.init()
+    updateService.init()
+    updateService.confirmQuit = confirmQuit
+    safeBrowsing.onBlocked = (info) => {
+      const wc = info.webContentsId ? webContents.fromId(info.webContentsId) : undefined
+      const win = windowFor(wc)
+      if (win && !win.isDestroyed()) win.webContents.send('safe-browsing:blocked', info)
+    }
 
     // Sync saved theme preference to Chromium nativeTheme so webviews immediately inherit correct prefers-color-scheme
     const startupState = themeManager.getState()
@@ -706,6 +590,44 @@ if (!gotSingleInstanceLock) {
       return !!win && privateWindows.has(win)
     })
 
+    // --- Extra windows ---
+    secureHandle(ipcMain, 'windows:open', z.string().max(8192).optional(), (_event, url?: string) => {
+      openExtraWindow(undefined, isOpenableUrl(url) ? url : undefined)
+      return true
+    })
+    const notifyTabs = (win: BrowserWindow | null | undefined, spaceId: string, activate?: string) => {
+      if (win && !win.isDestroyed()) win.webContents.send('windows:tabs-changed', { spaceId, activate })
+    }
+    secureHandle(ipcMain, 'windows:move-tab', z.string().min(1).max(100), (_event, tabId: string) => {
+      const tab = localStorageService.getTab(tabId)
+      // An isolated space's tab would lose its sign-ins; private tabs stay in their window
+      if (!tab || tab.isPrivate || localStorageService.isSpaceIsolated(tab.spaceId)) return false
+      const spaceId = newExtraSpaceId()
+      localStorageService.updateTab(tabId, { spaceId, isPinned: false, order: 0 })
+      openExtraWindow(spaceId)
+      return true
+    })
+    secureHandle(ipcMain, 'windows:move-tab-main', z.string().min(1).max(100), (_event, tabId: string) => {
+      const tab = localStorageService.getTab(tabId)
+      if (!tab || !isExtraSpaceId(tab.spaceId)) return false
+      const spaces = localStorageService.listSpaces()
+      const target = spaces.find((s) => s.isActive && !s.isolated) ?? spaces.find((s) => !s.isolated)
+      if (!target) return false
+      localStorageService.updateTab(tabId, { spaceId: target.id, order: localStorageService.listTabs(target.id).length })
+      if (!mainWindow) openMainWindow()
+      else notifyTabs(mainWindow, target.id, tabId)
+      mainWindow?.focus()
+      return true
+    })
+    secureHandle(ipcMain, 'shortcuts:recording', z.boolean(), (event, recording: boolean) => {
+      const id = event.sender.id
+      if (recording) {
+        recordingShortcuts.add(id)
+        event.sender.once('destroyed', () => recordingShortcuts.delete(id))
+      } else recordingShortcuts.delete(id)
+      return true
+    })
+
     // Space profiles: only spaces marked "isolated" get their own session
     setProfileValidator((spaceId) => localStorageService.isSpaceIsolated(spaceId))
     onTabSessionCreated((ses) => {
@@ -714,6 +636,17 @@ if (!gotSingleInstanceLock) {
 
     // Initialize Privacy Engine before window creation
     await privacyEngine.init()
+
+    // Screen sharing picker and spellcheck for every tab session (shared, private, space profiles)
+    const privateSession = session.fromPartition(PRIVATE_PARTITION)
+    for (const ses of [tabSession, privateSession]) {
+      screenShareService.attach(ses)
+      applySpellcheck(ses, localStorageService.getSettings())
+    }
+    onTabSessionCreated((ses) => {
+      screenShareService.attach(ses)
+      applySpellcheck(ses, localStorageService.getSettings())
+    })
 
     // Create every isolated space's profile now, so clear-data, proxy and panic wipe cover all of
     // them (not only the ones whose tabs were opened this run)
@@ -770,7 +703,8 @@ if (!gotSingleInstanceLock) {
         webPreferences.sandbox = true
         webPreferences.webSecurity = true
         webPreferences.allowRunningInsecureContent = false
-        webPreferences.spellcheck = false
+        // The session decides (Settings > Languages): see essentials/spellcheck.ts
+        webPreferences.spellcheck = true
         webPreferences.backgroundThrottling = true
       })
 
@@ -803,6 +737,11 @@ if (!gotSingleInstanceLock) {
 
         // Password manager: offer to save logins, fill saved ones (isolated world)
         passwordManager.attach(contents)
+        addressService.attach(contents)
+        // Boosts and highlights
+        pageTools.attach(contents)
+        // "Leave site?" when the page has unsaved changes
+        attachLeaveWarning(contents)
 
         // Close context menu and omnibox dropdown whenever webview gains focus or is clicked
         contents.on('focus', () => {
@@ -969,6 +908,7 @@ if (!gotSingleInstanceLock) {
         // Allowed OAuth popups are real BrowserWindows: give them the same popup/navigation guards
         contents.on('did-create-window', (popup) => {
           setupWebContentsSecurity(popup.webContents, windowFor(contents))
+          attachLeaveWarning(popup.webContents)
           // "Sign in with ..." popups get saved-password fill too
           passwordManager.attach(popup.webContents)
         })
@@ -1043,36 +983,18 @@ if (!gotSingleInstanceLock) {
       contents.on('did-finish-load', checkDevTools)
     })
 
-    // Create main window
-    mainWindow = createMainWindow()
-    mainWindow.once('closed', () => {
-      mainWindow = null
-    })
-    attachKeyboardShortcuts(mainWindow.webContents, false)
-    devtoolsManager.init(mainWindow)
+    openMainWindow()
+    // Windows that were open when the browser quit
+    for (const spaceId of localStorageService.extraWindowSpaces()) openExtraWindow(spaceId)
 
-    // Surface UI errors in the terminal (otherwise a renderer crash is just a black window)
-    mainWindow.webContents.on('console-message', (details: any) => {
-      const level = details?.level
-      if (level === 'error' || level === 3) {
-        console.error('[UI]', details.message, details.sourceId ? `(${details.sourceId}:${details.lineNumber})` : '')
-      }
-    })
-    mainWindow.webContents.on('render-process-gone', (_e, details) => {
-      console.error('[UI] Renderer process gone:', details.reason, 'exitCode:', details.exitCode)
-    })
     app.on('child-process-gone', (_e, details) => {
       console.error('[Main] Child process gone:', details.type, details.reason)
     })
 
     app.on('activate', () => {
-      if (BrowserWindow.getAllWindows().length === 0) {
-        mainWindow = createMainWindow()
-        mainWindow.once('closed', () => {
-          mainWindow = null
-        })
-        attachKeyboardShortcuts(mainWindow.webContents, false)
-      } else if (mainWindow) {
+      if (!mainWindow) {
+        openMainWindow()
+      } else {
         if (mainWindow.isMinimized()) mainWindow.restore()
         mainWindow.show()
         mainWindow.focus()
@@ -1081,7 +1003,22 @@ if (!gotSingleInstanceLock) {
   })
 
   let shutdownTasksDone = false
-  app.on('before-quit', () => {
+  let askingToQuit = false
+  app.on('before-quit', (event) => {
+    if (!quitConfirmed && activeWebviewContents.size > 0) {
+      event.preventDefault()
+      if (askingToQuit) return
+      askingToQuit = true
+      void confirmQuit().then((ok) => {
+        askingToQuit = false
+        if (ok) app.quit()
+      })
+      return
+    }
+    isQuitting = true
+    try {
+      pageTools.flush()
+    } catch {}
     try {
       localStorageService.flushSave()
     } catch {}

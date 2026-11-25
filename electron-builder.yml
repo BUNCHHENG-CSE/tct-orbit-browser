@@ -28,9 +28,12 @@ electronLanguages:
 
 afterPack: build/fuses.cjs
 
+# Updates come from GitHub Releases of this account (electron/essentials/updater.ts). Never point this
+# at a domain the project does not own: whoever registers it could ship code to every user.
 publish:
-  provider: generic
-  url: https://updates.tctorbit.com
+  provider: github
+  owner: BUNCHHENG-CSE
+  repo: tct-orbit-browser
 
 # System-wide URL scheme registration
 protocols:

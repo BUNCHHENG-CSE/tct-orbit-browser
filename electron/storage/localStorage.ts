@@ -3,6 +3,8 @@ import fs from 'fs'
 import path from 'path'
 import { getAppPaths } from './paths'
 import { safeStorageVault } from '../security'
+import { sanitizeOverrides } from '../../shared/shortcuts'
+import { isExtraSpaceId } from '../../shared/extraWindow'
 import type {
   Space,
   Tab,
@@ -228,6 +230,14 @@ class LocalStorageService {
       ...(updates.tabLayout !== undefined ? { tabLayout: updates.tabLayout } : {}),
       ...(updates.newTabsOnTop !== undefined ? { newTabsOnTop: updates.newTabsOnTop } : {}),
       ...(updates.favoritesBar !== undefined ? { favoritesBar: updates.favoritesBar } : {}),
+      ...(updates.spellcheck !== undefined ? { spellcheck: updates.spellcheck } : {}),
+      ...(updates.spellcheckLanguages !== undefined ? { spellcheckLanguages: updates.spellcheckLanguages } : {}),
+      ...(updates.safeBrowsing !== undefined ? { safeBrowsing: updates.safeBrowsing } : {}),
+      ...(updates.autoUpdate !== undefined ? { autoUpdate: updates.autoUpdate } : {}),
+      ...(updates.shortcuts !== undefined ? { shortcuts: sanitizeOverrides(updates.shortcuts) } : {}),
+      ...(updates.language !== undefined ? { language: updates.language } : {}),
+      ...(updates.translateTo !== undefined ? { translateTo: updates.translateTo } : {}),
+      ...(updates.aiModel !== undefined ? { aiModel: updates.aiModel } : {}),
       updatedAt: new Date().toISOString()
     }
     this.save()
@@ -250,6 +260,14 @@ class LocalStorageService {
 
     const activeSpace = this.data.spaces.find((s) => s.isActive) || this.data.spaces[0]
     const spaceId = activeSpace ? activeSpace.id : 'default-personal-space'
+    if (startupBehavior !== 'previous-session') {
+      // Windows are only reopened when the whole previous session is
+      this.data.tabs = this.data.tabs.filter((t) => !isExtraSpaceId(t.spaceId))
+    }
+    if (this.data.groups) {
+      const live = new Set(this.data.tabs.map((t) => t.spaceId))
+      this.data.groups = this.data.groups.filter((g) => !isExtraSpaceId(g.spaceId) || live.has(g.spaceId))
+    }
     const previousTabs = this.data.tabs.filter((t) => !t.isPrivate)
 
     if (startupBehavior === 'new-tab') {
@@ -334,7 +352,7 @@ class LocalStorageService {
           : 7 * 24 * 60 * 60 * 1000
 
       const cutoffTime = Date.now() - durationMs
-      const survivingTabs: Tab[] = []
+      const survivingTabs: Tab[] = this.data.tabs.filter((t) => isExtraSpaceId(t.spaceId))
 
       for (const space of this.data.spaces) {
         const spaceTabs = this.data.tabs.filter((t) => t.spaceId === space.id)
@@ -594,6 +612,19 @@ class LocalStorageService {
     return { ...this.data, tabs: this.data.tabs.filter((t) => !t.isPrivate) }
   }
 
+  /** Spaces of extra windows that were open when the browser quit */
+  public extraWindowSpaces(): string[] {
+    return [...new Set(this.data.tabs.map((t) => t.spaceId).filter(isExtraSpaceId))]
+  }
+
+  /** An extra window was closed: its tabs and groups go with it */
+  public removeWindowSpace(spaceId: string): void {
+    if (!isExtraSpaceId(spaceId)) return
+    this.data.tabs = this.data.tabs.filter((t) => t.spaceId !== spaceId)
+    if (this.data.groups) this.data.groups = this.data.groups.filter((g) => g.spaceId !== spaceId)
+    this.save()
+  }
+
   public removeTab(id: string): boolean {
     this.data.tabs = this.data.tabs.filter((t) => t.id !== id)
     this.save()
@@ -663,7 +694,7 @@ class LocalStorageService {
   }
 
   public createGroup(data: CreateTabGroupData): { group: TabGroup; tabs: Tab[] } {
-    if (!this.data.spaces.some((s) => s.id === data.spaceId)) throw new Error('Space not found')
+    if (!this.data.spaces.some((s) => s.id === data.spaceId) && !isExtraSpaceId(data.spaceId)) throw new Error('Space not found')
     const parentId = data.parentId && this.groupInSpace(data.parentId, data.spaceId) ? data.parentId : null
     if (this.groupDepth(parentId) + 1 > MAX_GROUP_DEPTH) {
       throw new Error(`Groups can be nested at most ${MAX_GROUP_DEPTH} levels deep`)

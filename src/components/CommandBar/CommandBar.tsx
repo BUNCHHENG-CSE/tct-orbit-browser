@@ -24,6 +24,7 @@ import {
   type SearchEngineId
 } from '@/lib/searchEngines'
 import { resolveIsDark } from '@/lib/theme'
+import { spaceForLink, switchToSpace } from '@/lib/routes'
 import { ChevronDown, Globe, Search, X, Check } from 'lucide-react'
 
 const ENGINE_META: Record<SearchEngineId, { name: string; dot: string }> = {
@@ -84,8 +85,10 @@ export const CommandBar: React.FC = () => {
     // In 'new-tab' mode (or if no active tab exists), CREATE A BRAND NEW TAB
     if (mode === 'new-tab' || !activeTab) {
       if (activeSpaceId) {
+        const targetSpace = spaceForLink(targetUrl, activeSpaceId)
+        if (targetSpace !== activeSpaceId) switchToSpace(targetSpace)
         const newTab = await createTab({
-          spaceId: activeSpaceId,
+          spaceId: targetSpace,
           url: targetUrl,
           title: tabTitle
         })

@@ -55,9 +55,18 @@ import {
   Settings as SettingsIcon,
   Pin,
   PinOff,
-  AlarmClock
+  AlarmClock,
+  Wand2,
+  Bot,
+  Languages,
+  Camera,
+  Paintbrush,
+  Highlighter,
+  MapPin
 } from 'lucide-react'
 import { api } from '@/lib/ipc'
+import { useT } from '@/lib/i18n'
+import { ISSUES_URL } from '@shared/brand'
 import { isPrivateWindow } from '@/lib/privateWindow'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { usePomodoroStore } from '@/store/usePomodoroStore'
@@ -99,6 +108,9 @@ async function openInNewTab(url: string) {
   store.insertTabNextTo(spaceId, tab, store.activeTabId, true)
 }
 
+/** Translated menu text */
+const Label: React.FC<{ text: string }> = ({ text }) => <span>{useT()(text)}</span>
+
 const subItemCls = 'flex items-center justify-between gap-3 px-2.5 py-1.5 rounded-xl cursor-pointer hover:bg-accent transition-colors'
 const kbdCls = 'text-[10px] font-mono text-muted-foreground bg-accent/60 px-1.5 py-0.5 rounded border border-border/40'
 const subContentCls =
@@ -114,7 +126,7 @@ const SubItem: React.FC<{ icon: React.ComponentType<{ className?: string }>; lab
   <DropdownMenuItem onClick={onSelect} className={subItemCls}>
     <div className="flex items-center gap-2.5">
       <Icon className="w-4 h-4 text-muted-foreground" />
-      <span>{label}</span>
+      <Label text={label} />
     </div>
     {kbd && <kbd className={kbdCls}>{kbd}</kbd>}
   </DropdownMenuItem>
@@ -143,7 +155,7 @@ const MenuRow: React.FC<{
     <DropdownMenuItem onClick={onSelect} className={`group ${rowCls}`}>
       <div className="flex items-center gap-2.5 min-w-0">
         <Icon className={`w-4 h-4 shrink-0 ${iconCls ?? 'text-foreground'}`} />
-        <span className="truncate whitespace-nowrap">{label}</span>
+        <span className="truncate whitespace-nowrap"><Label text={label} /></span>
       </div>
       <div className="flex items-center gap-1.5 shrink-0">
         {right}
@@ -198,7 +210,7 @@ const GroupTrigger = ({
 }) => (
   <DropdownMenuSubTrigger className={subTriggerCls}>
     <Icon className={`w-4 h-4 shrink-0 ${iconCls ?? 'text-foreground'}`} />
-    <span className="flex-1 truncate">{label}</span>
+    <span className="flex-1 truncate"><Label text={label} /></span>
     {status}
   </DropdownMenuSubTrigger>
 )
@@ -256,6 +268,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
         <button
           className="relative w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
           title="Tools & Features"
+          aria-label="Tools & Features"
         >
           <MoreHorizontal className="w-4 h-4" />
 
@@ -277,6 +290,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
       >
         {/* Everyday actions stay at the top level */}
         <MenuRow icon={Plus} iconCls="text-primary" label="New tab" kbd={`${modKey}+T`} onSelect={() => void openNewTab()} />
+        {!isPrivateWindow && <MenuRow icon={AppWindow} label="New window" kbd={`${modKey}+N`} onSelect={() => void api.essentials.windows.open()} />}
         {!isPrivateWindow && (
           <MenuRow icon={EyeOff} iconCls="text-violet-500" label="New private window" kbd="Alt+Shift+N" onSelect={() => emit('tct:new-private-tab')} />
         )}
@@ -447,11 +461,26 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
           </DropdownMenuSubContent>
         </DropdownMenuSub>
 
+        {/* Page tools */}
+        <DropdownMenuSub>
+          <GroupTrigger icon={Wand2} iconCls="text-primary" label="Page tools" />
+          <DropdownMenuSubContent className={groupContentCls} collisionPadding={8}>
+            <MenuRow icon={Bot} iconCls="text-primary" pinId="ask" label="Ask this page" kbd={`${modKey}+Shift+Y`} onSelect={() => emit('tct:ask-page')} />
+            <MenuRow icon={Languages} pinId="translate" label="Translate page" onSelect={() => emit('tct:translate-page')} />
+            <MenuRow icon={Camera} iconCls="text-amber-500" pinId="capture" label="Web capture" kbd={`${modKey}+Shift+S`} onSelect={() => setTimeout(() => emit('tct:web-capture'), 200)} />
+            <Separator />
+            <MenuRow icon={Paintbrush} label="Boost this site" onSelect={() => setTimeout(() => emit('tct:open-boosts'), 60)} />
+            <MenuRow icon={EyeOff} label="Hide an element" onSelect={() => setTimeout(() => emit('tct:hide-element'), 120)} />
+            {!isPrivateWindow && <MenuRow icon={Highlighter} iconCls="text-yellow-500" pinId="highlights" label="Highlights" onSelect={() => setTimeout(() => emit('tct:open-highlights'), 60)} />}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
         {/* More tools */}
         <DropdownMenuSub>
           <GroupTrigger icon={Wrench} label="More tools" />
           <DropdownMenuSubContent className={groupContentCls} collisionPadding={8}>
             <MenuRow icon={KeyRound} iconCls="text-primary" pinId="passwords" label="Passwords" onSelect={() => emit('tct:open-passwords')} />
+            <MenuRow icon={MapPin} label="Addresses" onSelect={() => emit('tct:open-addresses')} />
             <MenuRow icon={Search} pinId="find" label="Find in Page" kbd={`${modKey}+F`} onSelect={() => emit('tct:toggle-find')} />
             <MenuRow
               icon={AppWindow}
@@ -486,7 +515,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
           <DropdownMenuSubContent className={groupContentCls} collisionPadding={8}>
             <SubItem icon={Keyboard} label="Keyboard shortcuts" kbd={`${modKey}+/`} onSelect={() => emit('tct:open-shortcut-help')} />
             <SubItem icon={TourIcon} label="Welcome tour" onSelect={() => emit('tct:open-onboarding')} />
-            <SubItem icon={Bug} label="Report a problem" onSelect={() => void openInNewTab('https://github.com/tctorbit/tct-orbit/issues')} />
+            <SubItem icon={Bug} label="Report a problem" onSelect={() => void openInNewTab(ISSUES_URL)} />
             <DropdownMenuSeparator className="my-1 bg-border/40" />
             <SubItem icon={DocIcon} label="Privacy policy" onSelect={() => emit('tct:open-legal', { doc: 'privacy' })} />
             <SubItem icon={DocIcon} label="Terms of use" onSelect={() => emit('tct:open-legal', { doc: 'terms' })} />
