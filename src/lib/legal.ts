@@ -173,7 +173,7 @@ export const TERMS_OF_USE: LegalDocument = {
       heading: '1. License',
       blocks: [
         {
-          p: 'TCT Orbit’s source code is released under the MIT License. That license governs your rights to use, copy, modify and distribute the code; nothing in these terms limits it. TCT Orbit includes third-party open-source components (including Chromium, Electron and the Ghostery ad-blocking engine), each under its own license. The TCT Orbit name and logo are not licensed for use in modified versions in a way that suggests they are official.'
+          p: 'TCT Orbit’s source code is released under the GNU General Public License, version 3 only (GPL-3.0-only). The source is at github.com/BUNCHHENG-CSE/tct-orbit-browser. Code published earlier under the MIT License stays available under it. The license governs your rights to use, copy, modify and distribute the code; nothing in these terms limits it. TCT Orbit includes third-party open-source components (including Chromium, Electron and the Ghostery ad-blocking engine), each under its own license. The TCT Orbit name and logo are not licensed for use in modified versions in a way that suggests they are official.'
         }
       ]
     },

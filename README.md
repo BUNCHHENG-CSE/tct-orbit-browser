@@ -152,3 +152,13 @@ Configured in `electron-builder.yml` with updates from GitHub Releases:
 | `npm run typecheck` | `tsc --noEmit && ...` | Run TypeScript type checks across root, node, and web |
 | `npm run dist` | `electron-vite build && electron-builder` | Package production installer for your platform |
 | `npm test` | `vitest run` | Run unit tests |
+
+---
+
+## License
+
+Copyright (C) 2026 TCT
+
+TCT Orbit is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License, version 3 only, as published by the Free Software Foundation. It comes without any warranty. See [LICENSE](LICENSE).
+
+Code published before this change was released under the MIT License and stays available under it. Third-party components keep their own licenses. The TCT Orbit name and logo may not be used in a way that suggests a modified version is official.

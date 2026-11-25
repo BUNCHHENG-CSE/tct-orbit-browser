@@ -17,6 +17,9 @@ files:
   - "!**/tsconfig*.json"
 
 extraResources:
+  # The GPL must come with every copy of the program
+  - from: LICENSE
+    to: LICENSE.txt
   # Extensions that ship with the browser (see electron/builtinExtensions.ts)
   - from: resources/builtin-extensions
     to: builtin-extensions

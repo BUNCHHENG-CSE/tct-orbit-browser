@@ -224,8 +224,12 @@ jobs:
             echo "::warning::WEBSITE_URL or WEBSITE_WEBHOOK_SECRET is not set; the website was not updated"
             exit 0
           fi
-          curl --fail-with-body --silent --show-error --max-time 60 --retry 4 --retry-delay 10 \
-            -X POST "${WEBSITE_URL%/}/api/webhooks/github-release" \
-            -H "Content-Type: application/json" \
-            -H "x-orbit-webhook-secret: $WEBHOOK_SECRET" \
-            -d "{\"tag\":\"$GITHUB_REF_NAME\"}"
+          # A redirect is not followed (it would resend the secret) and counts as a failure
+          base="https://$(printf '%s' "$WEBSITE_URL" | tr -d '[:space:]' | sed -E 's#^https?://##; s#/+$##')"
+          status=$(curl --silent --show-error --max-time 60 --retry 4 --retry-delay 10             --output response.txt --write-out '%{http_code}'             -X POST "$base/api/webhooks/github-release"             -H "Content-Type: application/json"             -H "x-orbit-webhook-secret: $WEBHOOK_SECRET"             -d "{\"tag\":\"$GITHUB_REF_NAME\"}")
+          echo "HTTP $status"
+          cat response.txt
+          if [ "$status" != "200" ]; then
+            echo "::error::The website was not updated (HTTP $status)"
+            exit 1
+          fi
