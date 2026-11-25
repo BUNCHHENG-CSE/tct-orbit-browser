@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Folder, FolderOpen, Globe, Search, Star, StarHalf, Settings2, Eye, EyeOff, X, PinOff, Pencil, Trash2, ExternalLink } from 'lucide-react'
+import { ChevronRight, Folder, FolderOpen, FolderPlus, Globe, Search, Star, StarHalf, Settings2, Eye, EyeOff, X, PinOff, Pencil, Trash2, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from '@/components/ui/context-menu'
@@ -76,6 +76,7 @@ export const FavoritesPopover: React.FC = () => {
     if (!open) setQuery('')
   }, [open])
 
+  const ownFolders = useFavorites((s) => s.folders)
   const favorites = useMemo(
     () =>
       items
@@ -208,6 +209,9 @@ ${b.url}`}
           <ContextMenu>
             <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
             <ContextMenuContent className="w-52 rounded-xl p-1">
+              <ContextMenuItem className={menuItemCls} onClick={() => edit({ kind: 'empty-folder', parent: path })}>
+                <FolderPlus className="w-3.5 h-3.5" /> New folder inside
+              </ContextMenuItem>
               <ContextMenuItem className={menuItemCls} onClick={() => edit({ kind: 'folder', path })}>
                 <Pencil className="w-3.5 h-3.5" /> Rename
               </ContextMenuItem>
@@ -285,6 +289,14 @@ ${b.url}`}
           <div className="flex items-center">
             <button
               className={`${iconBtn} text-muted-foreground hover:text-foreground hover:bg-accent`}
+              title="New folder"
+              aria-label="New folder"
+              onClick={() => edit({ kind: 'empty-folder', parent: FAVORITES_BAR })}
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+            </button>
+            <button
+              className={`${iconBtn} text-muted-foreground hover:text-foreground hover:bg-accent`}
               title="Add this page to favorites bar"
               onClick={async () => {
                 if (await addActiveTabToFavorites()) toast.success('Added to favorites bar')
@@ -337,7 +349,7 @@ ${b.url}`}
             )
           ) : (
             roots.map((root) =>
-              folderRow(root, root === OTHER_FAVORITES ? 'Other favorites' : root, buildTree(favorites, root), 0)
+              folderRow(root, root === OTHER_FAVORITES ? 'Other favorites' : root, buildTree(favorites, root, ownFolders), 0)
             )
           )}
         </div>

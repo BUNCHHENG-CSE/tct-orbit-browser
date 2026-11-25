@@ -1811,7 +1811,7 @@ export const SettingsDialog: React.FC<SettingsDialogProps> = ({ open, onOpenChan
                   </div>
                   <div className="text-[11px] text-muted-foreground space-y-0.5 pt-1 border-t border-border">
                     <p>Platform: {getPlatformDescription()}</p>
-                    <p>Runtime: Chromium {navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1]?.split('.')[0] || '—'} • Electron</p>
+                    <p>Engine: Chromium {navigator.userAgent.match(/Chrome\/([\d.]+)/)?.[1]?.split('.')[0] || '—'}</p>
                     <p>Graphics: GPU Rasterization • Metal / Direct3D / Wayland-X11 Auto</p>
                     <p>Storage: on this computer (optional encrypted sync file in a folder you choose)</p>
                     <p>Privacy: no accounts, analytics or telemetry</p>

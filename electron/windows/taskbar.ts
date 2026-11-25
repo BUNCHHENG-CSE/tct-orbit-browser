@@ -9,7 +9,12 @@ import { getAppIconPath } from '../resources'
  * instead of the default generic "Electron" text and blue Electron atom icon
  * when right-clicked on the Windows taskbar in both development and production.
  */
-export function setupWindowsTaskbar(appId: string, displayName: string): void {
+export function setupWindowsTaskbar(releaseAppId: string, releaseName: string): void {
+  // A development run has its own identity and shortcut: it must never take over the installed
+  // browser's "TCT Orbit" entry in the Start menu
+  const appId = app.isPackaged ? releaseAppId : `${releaseAppId}.dev`
+  const displayName = app.isPackaged ? releaseName : `${releaseName} (development)`
+
   // Microsoft Store package: Windows creates the Start menu entry and taskbar identity itself
   if (process.platform !== 'win32' || process.windowsStore) return
 

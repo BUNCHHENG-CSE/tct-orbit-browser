@@ -27,7 +27,8 @@ class DownloadsService {
         const raw = fs.readFileSync(this.filePath, 'utf-8')
         const parsed = JSON.parse(raw)
         if (Array.isArray(parsed)) {
-          this.records = parsed
+          // Still "in progress" from the last run: the browser closed or crashed meanwhile
+          this.records = parsed.map((r) => (r?.state === 'progressing' ? { ...r, state: 'interrupted' } : r))
           console.log(`[DownloadsService] Loaded ${this.records.length} download records from:`, this.filePath)
         }
       }
@@ -71,6 +72,9 @@ class DownloadsService {
     if (this.forgotten.has(data.id)) return null
     const idx = this.records.findIndex((r) => r.id === data.id)
     let record: DownloadRecord
+
+    // A progress update of a download the user removed must not bring it back
+    if (idx === -1 && !data.filename) return null
 
     if (idx !== -1) {
       record = {
@@ -125,8 +129,9 @@ class DownloadsService {
     return false
   }
 
+  /** Finished downloads only: running ones stay in the list */
   public clear(): boolean {
-    this.records = []
+    this.records = this.records.filter((r) => r.state === 'progressing')
     this.scheduleSave()
     return true
   }

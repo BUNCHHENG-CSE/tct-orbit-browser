@@ -1825,7 +1825,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
         )}
 
         {/* Split view: sync scroll + compare the two pages */}
-        {isSplitActive && !isDraggingSplit && <CompareToolbar />}
+        {isSplitActive && <CompareToolbar hidden={isDraggingSplit} />}
 
         {/* Overlay while dragging splitter to keep mouse tracking over webviews */}
         {isDraggingSplit && (

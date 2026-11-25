@@ -5,6 +5,8 @@ import type { BookmarkItem, AddBookmarkData } from '../../src/types/api'
 
 class BookmarksService {
   private bookmarks: BookmarkItem[] = []
+  /** Folders that exist on their own ("Favorites bar / AI"), so they may be empty */
+  private folders = new Set<string>()
   private filePath: string = ''
   private saveTimeout: NodeJS.Timeout | null = null
   private listeners = new Set<() => void>()
@@ -23,6 +25,12 @@ class BookmarksService {
       const dir = path.dirname(this.filePath)
       if (!fs.existsSync(dir)) {
         fs.mkdirSync(dir, { recursive: true })
+      }
+
+      const folderFile = path.join(dir, 'bookmark-folders.json')
+      if (fs.existsSync(folderFile)) {
+        const list = JSON.parse(fs.readFileSync(folderFile, 'utf-8'))
+        if (Array.isArray(list)) this.folders = new Set(list.filter((f) => typeof f === 'string' && f.length <= 300))
       }
 
       if (fs.existsSync(this.filePath)) {
@@ -59,6 +67,9 @@ class BookmarksService {
       const tmp = `${this.filePath}.tmp`
       fs.writeFileSync(tmp, JSON.stringify(this.bookmarks, null, 2), 'utf-8')
       fs.renameSync(tmp, this.filePath)
+      const folderFile = path.join(path.dirname(this.filePath), 'bookmark-folders.json')
+      fs.writeFileSync(`${folderFile}.tmp`, JSON.stringify([...this.folders]), 'utf-8')
+      fs.renameSync(`${folderFile}.tmp`, folderFile)
     } catch (err) {
       console.error('[BookmarksService] Failed to persist bookmarks:', err)
     }
@@ -79,6 +90,25 @@ class BookmarksService {
     this.bookmarks = mode === 'replace' ? added : [...this.bookmarks, ...added]
     if (added.length > 0) this.scheduleSave()
     return added.length
+  }
+
+  public listFolders(): string[] {
+    return [...this.folders]
+  }
+
+  /** New, possibly empty, folder. False when it already exists. */
+  public createFolder(folder: string): boolean {
+    const name = folder.trim()
+    const taken = this.folders.has(name) || this.bookmarks.some((b) => b.folder === name || b.folder?.startsWith(`${name} / `))
+    if (!name || taken || this.folders.size >= 2000) return false
+    this.folders.add(name)
+    this.scheduleSave()
+    return true
+  }
+
+  /** A subfolder stays when its last favorite leaves it */
+  private keepFolder(folder: string | undefined): void {
+    if (folder && folder.includes(' / ')) this.folders.add(folder)
   }
 
   public list(): BookmarkItem[] {
@@ -120,6 +150,7 @@ class BookmarksService {
 
   public delete(id: string): boolean {
     const before = this.bookmarks.length
+    this.keepFolder(this.bookmarks.find((b) => b.id === id)?.folder)
     this.bookmarks = this.bookmarks.filter((b) => b.id !== id)
     if (this.bookmarks.length !== before) {
       this.scheduleSave()
@@ -130,6 +161,7 @@ class BookmarksService {
 
   public deleteByUrl(url: string): boolean {
     const before = this.bookmarks.length
+    for (const b of this.bookmarks) if (b.url === url) this.keepFolder(b.folder)
     this.bookmarks = this.bookmarks.filter((b) => b.url !== url)
     if (this.bookmarks.length !== before) {
       this.scheduleSave()
@@ -154,7 +186,10 @@ class BookmarksService {
     if (!item) return null
     if (data.title !== undefined) item.title = data.title.trim() || item.url
     if (data.url !== undefined && data.url.trim()) item.url = data.url.trim()
-    if (data.folder !== undefined && data.folder.trim()) item.folder = data.folder.trim()
+    if (data.folder !== undefined && data.folder.trim()) {
+      this.keepFolder(item.folder)
+      item.folder = data.folder.trim()
+    }
     this.scheduleSave()
     return item
   }
@@ -188,6 +223,12 @@ class BookmarksService {
         count++
       }
     }
+    for (const f of [...this.folders]) {
+      if (f !== from && !f.startsWith(`${from} / `)) continue
+      this.folders.delete(f)
+      this.folders.add(target + f.slice(from.length))
+      count++
+    }
     if (count) this.scheduleSave()
     return count
   }
@@ -197,7 +238,11 @@ class BookmarksService {
     const before = this.bookmarks.length
     this.bookmarks = this.bookmarks.filter((b) => b.folder !== folder && !b.folder?.startsWith(`${folder} / `))
     const removed = before - this.bookmarks.length
-    if (removed) this.scheduleSave()
+    let folders = 0
+    for (const f of [...this.folders]) {
+      if ((f === folder || f.startsWith(`${folder} / `)) && this.folders.delete(f)) folders++
+    }
+    if (removed || folders) this.scheduleSave()
     return removed
   }
 

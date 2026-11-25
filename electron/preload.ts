@@ -335,6 +335,8 @@ const hardenedApi: ElectronAPI = {
     update: (id: string, data: { title?: string; url?: string; folder?: string }) => ipcRenderer.invoke('bookmarks:update', id, data),
     reorder: (ids: string[]) => ipcRenderer.invoke('bookmarks:reorder', ids),
     renameFolder: (from: string, to: string) => ipcRenderer.invoke('bookmarks:rename-folder', from, to),
+    folders: () => ipcRenderer.invoke('bookmarks:folders'),
+    createFolder: (folder: string) => ipcRenderer.invoke('bookmarks:create-folder', folder),
     deleteFolder: (folder: string) => ipcRenderer.invoke('bookmarks:delete-folder', folder),
     onChanged: (callback: () => void) => {
       const handler = () => callback()

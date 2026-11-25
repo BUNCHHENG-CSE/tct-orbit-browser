@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { ArrowDownUp, GitCompare, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -16,15 +16,34 @@ interface CompareResult {
   stats: ReturnType<typeof diffStats>
 }
 
+/** Shown this long when the split opens; afterwards only while the pointer is at the bottom */
+const INTRO_MS = 30_000
+const LEAVE_MS = 1_200
+
 /**
  * Floating toolbar on the split divider: keep both panes scrolled together, and compare the
  * text of the two pages (two product pages, two versions of a doc, terms before/after…).
  */
-export const CompareToolbar: React.FC = () => {
+export const CompareToolbar: React.FC<{ hidden?: boolean }> = ({ hidden = false }) => {
   const syncScroll = useSmartStore((s) => s.syncScroll)
   const setSyncScroll = useSmartStore((s) => s.setSyncScroll)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<CompareResult | null>(null)
+  const [visible, setVisible] = useState(true)
+  const timer = useRef<number | undefined>(undefined)
+  const hideIn = (ms: number) => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setVisible(false), ms)
+  }
+  const show = () => {
+    window.clearTimeout(timer.current)
+    setVisible(true)
+  }
+  useEffect(() => {
+    hideIn(INTRO_MS)
+    return () => window.clearTimeout(timer.current)
+  }, [])
+  const shown = visible || busy
 
   const compare = async () => {
     const { activeTabId, splitTabId } = useBrowserStore.getState()
@@ -59,10 +78,24 @@ export const CompareToolbar: React.FC = () => {
 
   return (
     <>
+      {/* Hidden: a slim strip with a handle, so the pages underneath stay clickable */}
       <div
-        className="absolute bottom-4 z-30 -translate-x-1/2 flex items-center gap-0.5 p-0.5 rounded-full bg-popover/95 backdrop-blur border border-border shadow-xl select-none"
+        className={`absolute bottom-0 z-30 -translate-x-1/2 flex flex-col items-center justify-end select-none ${hidden ? 'invisible' : ''} ${shown ? 'pb-4 pt-2 px-3' : 'w-80 h-3'}`}
         style={{ left: 'calc(var(--split-ratio, 0.5) * 100%)' }}
+        onMouseEnter={show}
+        onMouseLeave={() => hideIn(LEAVE_MS)}
+        onFocus={show}
+        onBlur={() => hideIn(LEAVE_MS)}
       >
+        {!shown && (
+          <button
+            onClick={show}
+            aria-label="Show split view tools"
+            className={`w-12 h-1.5 mb-0.5 rounded-full shadow ${syncScroll ? 'bg-primary' : 'bg-muted-foreground/60'}`}
+          />
+        )}
+        {shown && (
+      <div className="flex items-center gap-0.5 p-0.5 rounded-full bg-popover/95 backdrop-blur border border-border shadow-xl animate-in fade-in slide-in-from-bottom-2 duration-200">
         <button
           onClick={() => {
             setSyncScroll(!syncScroll)
@@ -86,6 +119,8 @@ export const CompareToolbar: React.FC = () => {
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <GitCompare className="w-3.5 h-3.5" />}
           Compare text
         </button>
+      </div>
+        )}
       </div>
 
       <Dialog open={!!result} onOpenChange={(open) => !open && setResult(null)}>

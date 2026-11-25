@@ -62,6 +62,22 @@ let isDownloadManagerSetup = false
 /** Live download handles (for pause / resume / cancel), removed when done */
 const activeItems = new Map<string, DownloadItem>()
 
+/** After the connection drops: try again on its own, waiting longer each time */
+const MAX_AUTO_RESUMES = 6
+
+/** Progress of all running downloads on the taskbar / dock icon */
+function showTaskbarProgress(win: BrowserWindow | null): void {
+  if (!win || win.isDestroyed()) return
+  let total = 0
+  let received = 0
+  for (const item of activeItems.values()) {
+    total += item.getTotalBytes()
+    received += item.getReceivedBytes()
+  }
+  // Above 1 = "busy, size unknown"; below 0 = nothing running
+  win.setProgressBar(activeItems.size === 0 ? -1 : total > 0 ? Math.min(1, received / total) : 2)
+}
+
 export function setupDownloadManager(getMainWindow: () => BrowserWindow | null): void {
   if (isDownloadManagerSetup) return
   isDownloadManagerSetup = true
@@ -134,8 +150,25 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
 
       activeItems.set(downloadId, item)
 
+      let autoResumes = 0
+      let bestReceived = 0
+      let resumeTimer: NodeJS.Timeout | null = null
+
       // Track progress
       item.on('updated', (_updateEvent, state) => {
+        if (item.getReceivedBytes() > bestReceived) {
+          bestReceived = item.getReceivedBytes()
+          if (state === 'progressing') autoResumes = 0
+        }
+        // The network dropped (the user did not pause): continue where it stopped
+        if (state === 'interrupted' && !resumeTimer && autoResumes < MAX_AUTO_RESUMES) {
+          const wait = Math.min(30_000, 1000 * 2 ** autoResumes++)
+          resumeTimer = setTimeout(() => {
+            resumeTimer = null
+            if (activeItems.get(downloadId) === item && item.getState() === 'interrupted' && item.canResume()) item.resume()
+          }, wait)
+        }
+        showTaskbarProgress(getMainWindow())
         if (state === 'progressing' || state === 'interrupted') {
           const total = item.getTotalBytes()
           const received = item.getReceivedBytes()
@@ -160,7 +193,8 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
               savePath: item.getSavePath(),
               // Paused by the user, or interrupted by the network (resumable)
               isPaused: item.isPaused() || state === 'interrupted',
-              canResume: item.canResume()
+              canResume: item.canResume(),
+              bytesPerSecond: item.isPaused() || state === 'interrupted' ? 0 : item.getCurrentBytesPerSecond()
             })
           }
         }
@@ -169,6 +203,8 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
       // Track completion / interruption
       item.once('done', (_doneEvent, state) => {
         activeItems.delete(downloadId)
+        if (resumeTimer) clearTimeout(resumeTimer)
+        showTaskbarProgress(getMainWindow())
         const finalPath = item.getSavePath()
         const win = ownerWin && !ownerWin.isDestroyed() ? ownerWin : getMainWindow()
 
@@ -335,6 +371,8 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
 
   // 6. Delete file from list and optionally disk
   secureHandle(ipcMain, 'downloads:delete-file', Schemas.downloadsDeleteFile, async (_, data: { id: string; deleteDiskFile?: boolean }) => {
+    // Removing a running download stops it (the partial file goes too)
+    activeItems.get(data.id)?.cancel()
     return downloadsService.delete(data.id, data.deleteDiskFile)
   })
 
@@ -344,10 +382,9 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
   })
 
   // Pause / resume / cancel an in-progress download
-  const sendState = (id: string, item: DownloadItem) => {
-    const win = getMainWindow()
-    if (!win || win.isDestroyed()) return
-    win.webContents.send('downloads:progress', {
+  const sendState = (sender: WebContents, id: string, item: DownloadItem) => {
+    if (sender.isDestroyed()) return
+    sender.send('downloads:progress', {
       id,
       filename: item.getFilename(),
       receivedBytes: item.getReceivedBytes(),
@@ -360,26 +397,27 @@ export function register(ipcMain: IpcMain, getMainWindow: () => BrowserWindow | 
     })
   }
 
-  secureHandle(ipcMain, 'downloads:pause', Schemas.downloadsControl, async (_, id: string) => {
+  secureHandle(ipcMain, 'downloads:pause', Schemas.downloadsControl, async (event, id: string) => {
     const item = activeItems.get(id)
     if (!item) return false
     item.pause()
-    sendState(id, item)
+    sendState(event.sender, id, item)
     return true
   })
 
-  secureHandle(ipcMain, 'downloads:resume', Schemas.downloadsControl, async (_, id: string) => {
+  secureHandle(ipcMain, 'downloads:resume', Schemas.downloadsControl, async (event, id: string) => {
     const item = activeItems.get(id)
     if (!item || !item.canResume()) return false
     item.resume()
-    sendState(id, item)
+    sendState(event.sender, id, item)
     return true
   })
 
   secureHandle(ipcMain, 'downloads:cancel', Schemas.downloadsControl, async (_, id: string) => {
     const item = activeItems.get(id)
-    if (!item) return false
-    item.cancel()
+    if (item) item.cancel()
+    // Nothing is running behind this entry any more
+    else downloadsService.addOrUpdate({ id, state: 'cancelled', endTime: new Date().toISOString() })
     return true
   })
 

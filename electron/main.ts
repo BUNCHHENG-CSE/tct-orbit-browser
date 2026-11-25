@@ -140,6 +140,8 @@ if (isLowRamDevice) {
 }
 
 const enabledFeatures = [
+  // Not 'ParallelDownloading': 3x faster, but in Electron 45 a download that is interrupted and resumed
+  // ends up "completed" with zero-filled holes in the file (tested 2026-11-25)
   'OverlayScrollbar',
   'SmoothScrolling',
   'CanvasOopRasterization'

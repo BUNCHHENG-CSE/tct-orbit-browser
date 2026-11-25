@@ -25,7 +25,7 @@ export type FavNode =
 const sortKey = (b: BookmarkItem) => (b.order ?? 1e9) * 1e13 + (Date.parse(b.createdAt) || 0)
 
 /** Folder tree under `root` (links + subfolders), ordered like the user arranged them */
-export function buildTree(items: BookmarkItem[], root: string): FavNode[] {
+export function buildTree(items: BookmarkItem[], root: string, paths: string[] = useFavorites.getState().folders): FavNode[] {
   const nodes: FavNode[] = []
   const folders = new Map<string, BookmarkItem[]>()
   for (const b of items) {
@@ -37,9 +37,15 @@ export function buildTree(items: BookmarkItem[], root: string): FavNode[] {
       folders.set(path, [...(folders.get(path) || []), b])
     }
   }
+  // Folders without any favorite in them come last
+  for (const p of paths) {
+    if (!p.startsWith(root + FOLDER_SEP)) continue
+    const path = root + FOLDER_SEP + p.slice(root.length + FOLDER_SEP.length).split(FOLDER_SEP)[0]
+    if (!folders.has(path)) folders.set(path, [])
+  }
   for (const [path, inside] of folders) {
-    const children = buildTree(inside, path)
-    nodes.push({ kind: 'folder', name: folderName(path), path, children, key: Math.min(...inside.map(sortKey)) })
+    const children = buildTree(inside, path, paths)
+    nodes.push({ kind: 'folder', name: folderName(path), path, children, key: inside.length ? Math.min(...inside.map(sortKey)) : Number.MAX_VALUE })
   }
   return nodes.sort((a, b) => a.key - b.key)
 }
@@ -64,16 +70,19 @@ export function faviconFor(b: BookmarkItem): string | null {
 
 interface FavoritesState {
   items: BookmarkItem[]
+  folders: string[]
   loaded: boolean
   refresh: () => Promise<void>
 }
 
 export const useFavorites = create<FavoritesState>((set) => ({
   items: [],
+  folders: [],
   loaded: false,
   refresh: async () => {
     try {
-      set({ items: (await api.bookmarks?.list()) ?? [], loaded: true })
+      const [items, folders] = await Promise.all([api.bookmarks.list(), api.bookmarks.folders()])
+      set({ items: items ?? [], folders: folders ?? [], loaded: true })
     } catch {
       set({ loaded: true })
     }

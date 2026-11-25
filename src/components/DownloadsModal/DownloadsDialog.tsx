@@ -52,6 +52,16 @@ function formatBytes(bytes: number, decimals = 1): string {
   return parseFloat((bytes / Math.pow(k, idx)).toFixed(dm)) + ' ' + sizes[idx]
 }
 
+/** "3 min left", from the current speed */
+function timeLeft(item: DownloadRecord): string {
+  const speed = item.bytesPerSecond ?? 0
+  if (item.isPaused || speed <= 0 || item.totalBytes <= 0) return ''
+  const s = Math.ceil((item.totalBytes - item.receivedBytes) / speed)
+  if (s < 60) return `${Math.max(1, s)} s left`
+  if (s < 3600) return `${Math.ceil(s / 60)} min left`
+  return `${Math.floor(s / 3600)} h ${Math.ceil((s % 3600) / 60)} min left`
+}
+
 function getFileIcon(filename: string) {
   const ext = filename.split('.').pop()?.toLowerCase() || ''
   if (['zip', 'rar', '7z', 'tar', 'gz', 'bz2'].includes(ext)) {
@@ -155,7 +165,8 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                     state: data.state,
                     savePath: data.savePath || d.savePath,
                     isPaused: data.isPaused,
-                    canResume: data.canResume
+                    canResume: data.canResume,
+                    bytesPerSecond: data.bytesPerSecond
                   }
                 : d
             )
@@ -193,7 +204,7 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
               d.id === data.id
                 ? {
                     ...d,
-                    state: 'interrupted',
+                    state: data.reason === 'Cancelled' ? 'cancelled' : 'interrupted',
                     endTime: new Date().toISOString()
                   }
                 : d
@@ -278,7 +289,7 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
       if (api.downloads?.deleteFile) {
         await api.downloads.deleteFile(record.id)
         setDownloads((prev) => prev.filter((d) => d.id !== record.id))
-        toast.success('Removed from download history')
+        toast.success(record.state === 'progressing' ? 'Download cancelled' : 'Removed from download history')
       }
     } catch {
       toast.error('Failed to remove download item')
@@ -407,7 +418,7 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                 { id: 'all', label: 'All' },
                 { id: 'progressing', label: 'In Progress' },
                 { id: 'completed', label: 'Completed' },
-                { id: 'failed', label: 'Cancelled' }
+                { id: 'failed', label: 'Not finished' }
               ] as const
             ).map((tab) => (
               <button
@@ -518,6 +529,13 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                             ? `${formatBytes(item.receivedBytes)} / ${formatBytes(item.totalBytes)}`
                             : formatBytes(item.totalBytes || item.receivedBytes)}
                         </span>
+                        {isProgressing && !item.isPaused && (item.bytesPerSecond ?? 0) > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="text-primary tabular-nums">{formatBytes(item.bytesPerSecond!)}/s</span>
+                            {timeLeft(item) && <span className="tabular-nums">{timeLeft(item)}</span>}
+                          </>
+                        )}
                         <span>•</span>
                         <span>{formatDate(item.startTime)}</span>
                         {item.savePath && (
@@ -585,7 +603,11 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                             </button>
                           )}
                           <button
-                            onClick={() => void api.downloads.cancel(item.id)}
+                            onClick={() =>
+                              void api.downloads.cancel(item.id).then(() => {
+                                setDownloads((prev) => prev.map((d) => (d.id === item.id && d.state === 'progressing' ? { ...d, state: 'cancelled' } : d)))
+                              })
+                            }
                             className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors cursor-pointer"
                             title="Cancel download"
                           >
@@ -611,7 +633,7 @@ export const DownloadsDialog: React.FC<DownloadsDialogProps> = ({
                       <button
                         onClick={() => handleDeleteItem(item)}
                         className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 border border-transparent hover:border-destructive/20 transition-colors cursor-pointer"
-                        title="Remove from downloads"
+                        title={isProgressing ? 'Cancel and remove' : 'Remove from downloads'}
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>

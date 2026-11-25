@@ -19,6 +19,7 @@ export type EditTarget =
   | { kind: 'link'; item: BookmarkItem }
   | { kind: 'folder'; path: string }
   | { kind: 'new-folder'; parent: string }
+  | { kind: 'empty-folder'; parent: string }
 
 const field =
   'w-full h-9 rounded-lg bg-muted/40 border border-border text-[13px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/60 focus:bg-background focus:border-primary focus:ring-2 focus:ring-primary/20'
@@ -85,8 +86,9 @@ export const EditFavoriteDialog: React.FC<{ target: EditTarget | null; onClose: 
   }, [target])
 
   // Every folder (and parent path), Favorites bar first, then Other favorites, then imports
+  const ownFolders = useFavorites((s) => s.folders)
   const folders = useMemo(() => {
-    const set = new Set<string>([FAVORITES_BAR, OTHER_FAVORITES, ...extraFolders])
+    const set = new Set<string>([FAVORITES_BAR, OTHER_FAVORITES, ...ownFolders, ...extraFolders])
     for (const b of items) {
       if (!b.folder || b.isReadingList || b.folder === READING_LIST) continue
       const parts = b.folder.split(FOLDER_SEP)
@@ -94,7 +96,7 @@ export const EditFavoriteDialog: React.FC<{ target: EditTarget | null; onClose: 
     }
     const rank = (p: string) => (p.startsWith(FAVORITES_BAR) ? 0 : p.startsWith(OTHER_FAVORITES) ? 1 : 2)
     return [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
-  }, [items, extraFolders])
+  }, [items, ownFolders, extraFolders])
 
   const addNewFolder = () => {
     const clean = cleanFolderName(newFolder || '')
@@ -123,6 +125,11 @@ export const EditFavoriteDialog: React.FC<{ target: EditTarget | null; onClose: 
         if (!clean) return
         await api.bookmarks.renameFolder?.(target.path, parent ? parent + FOLDER_SEP + clean : clean)
         toast.success('Folder renamed')
+      } else if (target.kind === 'empty-folder') {
+        const clean = cleanFolderName(name)
+        if (!clean) return
+        if (!(await api.bookmarks.createFolder(target.parent + FOLDER_SEP + clean))) return toast.error(`There is already a folder "${clean}" here`)
+        toast.success(`Folder "${clean}" created`)
       } else {
         const clean = cleanFolderName(name)
         if (!clean) return
@@ -138,7 +145,7 @@ export const EditFavoriteDialog: React.FC<{ target: EditTarget | null; onClose: 
 
   const isLink = target?.kind === 'link'
   const heading = isLink ? 'Edit favorite' : target?.kind === 'folder' ? 'Rename folder' : 'New folder'
-  const sub = isLink ? hostOf(url || target.item.url) : target?.kind === 'folder' ? displayName(target.path) : 'The current page goes into it'
+  const sub = isLink ? hostOf(url || target.item.url) : target?.kind === 'folder' ? displayName(target.path) : target?.kind === 'empty-folder' ? `In ${displayName(target.parent)}` : 'The current page goes into it'
 
   return (
     <Dialog open={!!target} onOpenChange={(o) => !o && onClose()}>
@@ -167,7 +174,7 @@ export const EditFavoriteDialog: React.FC<{ target: EditTarget | null; onClose: 
           <div className="px-5 pb-4 space-y-4">
             <div>
               <label className={labelCls}>{isLink ? 'Name' : 'Folder name'}</label>
-              <input ref={nameRef} className={`${field} px-3`} value={name} onChange={(e) => setName(e.target.value)} />
+              <input ref={nameRef} className={`${field} px-3`} value={name} aria-label="Name" onChange={(e) => setName(e.target.value)} />
             </div>
 
             {isLink && (

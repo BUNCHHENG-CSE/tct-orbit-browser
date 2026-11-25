@@ -27,7 +27,7 @@ export const AboutDialog: React.FC = () => {
     ? [
         ['Version', `${info.version} (${appInfo.channel})`],
         ['Chromium', info.chrome],
-        ['Electron', info.electron],
+        ['App runtime', info.electron],
         ['V8', info.v8],
         ['Node.js', info.node],
         ['Platform', info.platform]

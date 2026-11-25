@@ -442,6 +442,7 @@ export interface DownloadProgress {
   savePath: string;
   isPaused?: boolean;
   canResume?: boolean;
+  bytesPerSecond?: number;
 }
 
 export interface DownloadCompleted {
@@ -461,6 +462,8 @@ export interface DownloadRecord {
   startTime: string;
   endTime?: string;
   url?: string;
+  /** Live only (not persisted) */
+  bytesPerSecond?: number;
   /** Live only (not persisted): paused by the user or interrupted by the network */
   isPaused?: boolean;
   canResume?: boolean;
@@ -833,6 +836,9 @@ export interface ElectronAPI {
     update?: (id: string, data: { title?: string; url?: string; folder?: string }) => Promise<BookmarkItem | null>;
     reorder?: (ids: string[]) => Promise<boolean>;
     renameFolder?: (from: string, to: string) => Promise<number>;
+    /** Folders that exist on their own (may be empty) */
+    folders: () => Promise<string[]>;
+    createFolder: (folder: string) => Promise<boolean>;
     deleteFolder?: (folder: string) => Promise<number>;
     /** Fires after any bookmark change (from any window or dialog) */
     onChanged?: (callback: () => void) => () => void;

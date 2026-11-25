@@ -38,6 +38,10 @@ export function register(ipcMain: IpcMain): void {
   secureHandle(ipcMain, 'bookmarks:rename-folder', Schemas.bookmarksRenameFolder, async (_, from: string, to: string) => {
     return bookmarksService.renameFolder(from, to)
   })
+  secureHandle(ipcMain, 'bookmarks:folders', null, async () => bookmarksService.listFolders())
+  secureHandle(ipcMain, 'bookmarks:create-folder', Schemas.bookmarksFolder, async (_, folder: string) => {
+    return bookmarksService.createFolder(folder)
+  })
   secureHandle(ipcMain, 'bookmarks:delete-folder', Schemas.bookmarksFolder, async (_, folder: string) => {
     return bookmarksService.deleteFolder(folder)
   })

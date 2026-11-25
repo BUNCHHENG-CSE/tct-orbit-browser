@@ -58,8 +58,9 @@ export const BookmarkPopover: React.FC<BookmarkPopoverProps> = ({ url, title = '
   const isFavorite = !!existing
 
   // Folder picker: Favorites bar, Other favorites and imported roots, each with subfolders (indented)
+  const ownFolders = useFavorites((s) => s.folders)
   const folders = useMemo(() => {
-    const set = new Set<string>([FAVORITES_BAR, OTHER_FAVORITES])
+    const set = new Set<string>([FAVORITES_BAR, OTHER_FAVORITES, ...ownFolders])
     for (const b of items) {
       if (!b.folder || b.isReadingList || b.folder === READING_LIST) continue
       const parts = b.folder.split(FOLDER_SEP)
@@ -67,7 +68,7 @@ export const BookmarkPopover: React.FC<BookmarkPopoverProps> = ({ url, title = '
     }
     const rank = (p: string) => (p.startsWith(FAVORITES_BAR) ? 0 : p.startsWith(OTHER_FAVORITES) ? 1 : 2)
     return [...set].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b))
-  }, [items])
+  }, [items, ownFolders])
 
   const openFor = (item: BookmarkItem, added: boolean) => {
     setItemId(item.id)

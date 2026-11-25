@@ -3,6 +3,7 @@ import {
   Globe,
   Folder,
   FolderOpen,
+  FolderPlus,
   ChevronsRight,
   ExternalLink,
   EyeOff,
@@ -130,6 +131,7 @@ const FolderMenuItems: React.FC<{ nodes: FavNode[]; onEdit: (t: EditTarget) => v
  */
 export const FavoritesBar: React.FC = () => {
   const items = useFavorites((s) => s.items)
+  const folders = useFavorites((s) => s.folders)
   const { settings, updateSettings } = useSettings()
   const mode: FavoritesBarMode = settings?.favoritesBar ?? 'always'
   const [editing, setEditing] = useState<EditTarget | null>(null)
@@ -137,7 +139,7 @@ export const FavoritesBar: React.FC = () => {
   useEffect(() => ensureFavoritesLoaded(), [])
 
   const barItems = useMemo(() => items.filter(isInBar), [items])
-  const nodes = useMemo(() => buildTree(barItems, FAVORITES_BAR), [barItems])
+  const nodes = useMemo(() => buildTree(barItems, FAVORITES_BAR, folders), [barItems, folders])
   const nodeId = (n: FavNode) => (n.kind === 'link' ? n.item.id : `folder:${n.path}`)
 
   /* ---- overflow: measure every node in a hidden row, show what fits, rest goes into » ---- */
@@ -299,6 +301,9 @@ export const FavoritesBar: React.FC = () => {
       >
         <Star className="w-3.5 h-3.5" /> Add this page to favorites bar
       </ContextMenuItem>
+      <ContextMenuItem className={menuItem} onClick={() => setEditing({ kind: 'empty-folder', parent: FAVORITES_BAR })}>
+        <FolderPlus className="w-3.5 h-3.5" /> New folder
+      </ContextMenuItem>
       <ContextMenuItem className={menuItem} onClick={() => setEditing({ kind: 'new-folder', parent: FAVORITES_BAR })}>
         <Plus className="w-3.5 h-3.5" /> Add this page to a new folder
       </ContextMenuItem>
@@ -335,8 +340,11 @@ export const FavoritesBar: React.FC = () => {
 
   const folderMenu = (n: Extract<FavNode, { kind: 'folder' }>) => (
     <ContextMenuContent className="w-56 rounded-xl p-1">
-      <ContextMenuItem className={menuItem} onClick={() => void openAll(n.children)}>
+      <ContextMenuItem className={menuItem} disabled={flattenLinks(n.children).length === 0} onClick={() => void openAll(n.children)}>
         <ExternalLink className="w-3.5 h-3.5" /> Open all ({flattenLinks(n.children).length})
+      </ContextMenuItem>
+      <ContextMenuItem className={menuItem} onClick={() => setEditing({ kind: 'empty-folder', parent: n.path })}>
+        <FolderPlus className="w-3.5 h-3.5" /> New folder inside
       </ContextMenuItem>
       <ContextMenuItem className={menuItem} onClick={() => setEditing({ kind: 'folder', path: n.path })}>
         <Pencil className="w-3.5 h-3.5" /> Rename
@@ -466,6 +474,15 @@ export const FavoritesBar: React.FC = () => {
             <div ref={rowRef} className="flex items-center gap-0.5 flex-1 min-w-0 overflow-hidden">
               {visible.map((n) => renderNode(n))}
             </div>
+
+            <button
+              onClick={() => setEditing({ kind: 'empty-folder', parent: FAVORITES_BAR })}
+              className="w-7 h-6 flex items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground shrink-0"
+              title="New folder"
+              aria-label="New folder"
+            >
+              <FolderPlus className="w-3.5 h-3.5" />
+            </button>
 
             {overflow.length > 0 && (
               <DropdownMenu>
