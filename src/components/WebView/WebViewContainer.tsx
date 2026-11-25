@@ -83,6 +83,7 @@ interface SingleWebViewProps {
   splitRole?: 'primary' | 'secondary' | null
   onUpdateTab: (id: string, data: { url?: string; title?: string; favicon?: string | null }) => void
   onOpenNewTab: (url: string) => void
+  onGuestClose: (tabId: string, wasBlank: boolean) => void
   registerWebviewRef: (tabId: string, el: any) => void
   unregisterWebviewRef: (tabId: string) => void
   onCloseSplit?: () => void
@@ -120,6 +121,7 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   splitRole,
   onUpdateTab,
   onOpenNewTab,
+  onGuestClose,
   registerWebviewRef,
   unregisterWebviewRef,
   onCloseSplit,
@@ -159,6 +161,8 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
   onUpdateTabRef.current = onUpdateTab
   const onOpenNewTabRef = useRef(onOpenNewTab)
   onOpenNewTabRef.current = onOpenNewTab
+  const onGuestCloseRef = useRef(onGuestClose)
+  onGuestCloseRef.current = onGuestClose
 
   // If the tab is sleeping, keep initialUrlRef updated so waking up loads the current URL
   useEffect(() => {
@@ -389,8 +393,11 @@ const SingleWebView: React.FC<SingleWebViewProps> = React.memo(({
 
     // window.close(): the page is gone, so is its tab
     const handleGuestClose = () => {
-      useBrowserStore.getState().removeTabFromStore(tab.id)
-      api.tabs.remove(tab.id).catch(() => {})
+      let url = ''
+      try {
+        url = el.getURL()
+      } catch {}
+      onGuestCloseRef.current(tab.id, !url || url === 'about:blank')
     }
 
     const syncTheme = () => {
@@ -1269,6 +1276,22 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
     }
   }
 
+  // A page closed itself. A tab that only started a download (nothing was ever shown) goes back to
+  // its Start page if it came from there, and the last tab always stays.
+  const handleGuestClose = useCallback((tabId: string, wasBlank: boolean) => {
+    const store = useBrowserStore.getState()
+    const siblings = Object.values(store.tabsBySpace).find((list) => list.some((t) => t.id === tabId))
+    const tab = siblings?.find((t) => t.id === tabId)
+    const start = fromStartRef.current.get(tabId)
+    if (wasBlank && tab && (start || siblings!.length === 1)) {
+      const url = start || (tab.isPrivate ? PRIVATE_START_URL : START_PAGE_URL)
+      void updateTab(tabId, { url, title: url === PRIVATE_START_URL ? PRIVATE_START_TITLE : START_PAGE_TITLE, favicon: null })
+      return
+    }
+    store.removeTabFromStore(tabId)
+    api.tabs.remove(tabId).catch(() => {})
+  }, [updateTab])
+
   const unregisterWebviewRef = useCallback((tabId: string) => {
     setWebviewMounts((n) => n + 1)
     webviewRegistry.delete(tabId, webviewsRef.current.get(tabId))
@@ -1785,6 +1808,7 @@ export const WebViewContainer: React.FC<WebViewContainerProps> = ({ spaceId }) =
                 splitRole={splitRole}
                 onUpdateTab={updateTab}
                 onOpenNewTab={handleNewTabFromUrl}
+                onGuestClose={handleGuestClose}
                 registerWebviewRef={registerWebviewRef}
                 unregisterWebviewRef={unregisterWebviewRef}
                 onCloseSplit={closeSplitView}

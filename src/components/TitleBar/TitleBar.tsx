@@ -23,6 +23,7 @@ import type { BookmarkItem } from '@/types/api'
 import { api } from '@/lib/ipc'
 import { isPrivateWindow } from '@/lib/privateWindow'
 import { placeNewTab } from '@/lib/tabPlacement'
+import { DownloadsButton } from './DownloadsButton'
 import { PrivatePill } from '@/components/PrivateWindow/PrivateWindowBadge'
 import { useBrowserStore } from '@/store/useBrowserStore'
 import { useSettings } from '@/hooks/useSettings'
@@ -776,6 +777,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         <PinnedExtensions />
         <PinnedHeaderTools />
 
+        <DownloadsButton />
         <MeetingChip />
         <FavoritesPopover />
         <ExtensionsPopover />

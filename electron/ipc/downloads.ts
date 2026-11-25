@@ -3,6 +3,7 @@ import path from 'path'
 import fs from 'fs'
 import { secureHandle, Schemas } from '../security'
 import { SHARED_TAB_PARTITION, onTabSessionCreated } from '../sessions'
+import { promptWindowFor } from '../essentials/windowOf'
 import { PRIVATE_PARTITION } from '../privacy/types'
 import { localStorageService } from '../storage/localStorage'
 import { downloadsService } from '../storage/downloadsService'
@@ -86,15 +87,8 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
   const attachListener = (ses: Electron.Session) => {
     ses.on('will-download', (event, item: DownloadItem, _webContents: WebContents) => {
       // The window the download started in (a tab's host window: main or private window)
-      const host = (_webContents as any)?.hostWebContents as WebContents | undefined
-      const ownerWin = (() => {
-        try {
-          const w = BrowserWindow.fromWebContents(host && !host.isDestroyed() ? host : _webContents)
-          return w && !w.isDestroyed() ? w : null
-        } catch {
-          return null
-        }
-      })()
+      // For a popup: the window that opened it
+      const ownerWin = promptWindowFor(_webContents)
       const win = ownerWin ?? getMainWindow()
       const settings = localStorageService.getSettings()
 
@@ -149,6 +143,13 @@ export function setupDownloadManager(getMainWindow: () => BrowserWindow | null):
       }
 
       activeItems.set(downloadId, item)
+
+      // A tab or popup that was opened only for this download has nothing to show: close it
+      const page = _webContents
+      if (page && !page.isDestroyed() && ['', 'about:blank'].includes(page.getURL()) && page.navigationHistory.length() <= 1) {
+        const isPopup = page.getType() === 'window' && ownerWin?.webContents !== page
+        if (page.getType() === 'webview' || isPopup) setTimeout(() => !page.isDestroyed() && page.close(), 300)
+      }
 
       let autoResumes = 0
       let bestReceived = 0

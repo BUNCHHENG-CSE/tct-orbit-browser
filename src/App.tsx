@@ -275,6 +275,9 @@ export const App: React.FC = () => {
     if (!api.downloads?.onCompleted) return
     const unsub = api.downloads.onCompleted((data) => {
       toast.success(`Download complete: ${data.filename}`, {
+        // Replaces the "Downloading ..." message
+        id: data.id,
+        icon: undefined,
         description: data.savePath ? `Saved to ${data.savePath}` : undefined,
         action: data.savePath
           ? {
