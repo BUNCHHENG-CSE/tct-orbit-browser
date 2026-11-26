@@ -154,7 +154,6 @@ export const TabList: React.FC<TabListProps> = ({
     }
   }
 
-  const isEmpty = tabs.length === 0 && groups.length === 0
 
   return (
     <TabGroupContext.Provider value={groupActions}>
@@ -221,31 +220,33 @@ export const TabList: React.FC<TabListProps> = ({
                 </button>
               </div>
             )}
-            {isEmpty ? (
-              collapsed ? (
-                <div className="flex flex-col items-center justify-center py-4">
-                  <TooltipProvider delayDuration={200}>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() => void openNewTab()}
-                          className="w-9 h-9 rounded-xl border border-dashed border-border hover:border-primary/50 text-muted-foreground hover:text-primary flex items-center justify-center transition-colors group"
-                          aria-label="Open new tab"
-                        >
-                          <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right" sideOffset={10}>
-                        <p>No tabs open • Click to open ({modKey}+T)</p>
-                      </TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                </div>
-              ) : (
-                <div className="text-center py-6 px-2 text-muted-foreground text-xs">No open tabs</div>
-              )
+            {unpinnedUngrouped.map(renderTab)}
+            {collapsed ? (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      onClick={() => void openNewTab()}
+                      className="w-9 h-9 rounded-xl text-muted-foreground hover:text-foreground hover:bg-tab-hover flex items-center justify-center transition-colors"
+                      aria-label="New tab"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent side="right" sideOffset={10}>
+                    <p>New Tab ({modKey}+T)</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
             ) : (
-              unpinnedUngrouped.map(renderTab)
+              <button
+                onClick={() => void openNewTab()}
+                className="w-full flex items-center gap-2 h-8 px-2.5 rounded-lg text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-tab-hover transition-colors"
+                title={`New Tab (${modKey}+T)`}
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>New Tab</span>
+              </button>
             )}
             {ungroupDragOver && !collapsed && (
               <div className="text-center text-[11px] text-primary py-1.5">Drop to remove from group</div>

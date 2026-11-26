@@ -9,7 +9,6 @@ import {
   ArrowLeft,
   ArrowRight,
   RotateCw,
-  Plus,
   Lock,
   EyeOff,
   Globe,
@@ -47,7 +46,7 @@ import { FavoritesPopover } from '@/components/Favorites/FavoritesPopover'
 import { PinnedHeaderTools } from './PinnedHeaderTools'
 import { ExtensionsPopover, PinnedExtensions } from './ExtensionsPopover'
 import { getDomainZoom, setDomainZoom } from '@/lib/domainZoom'
-import { openNewTab, isStartPageUrl } from '@/lib/startPage'
+import { isStartPageUrl } from '@/lib/startPage'
 import { MeetingChip } from '../Meeting/MeetingChip'
 import { Puzzle as PuzzleIcon } from 'lucide-react'
 import { useSearchSuggestions } from '@/hooks/useSearchSuggestions'
@@ -300,7 +299,6 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
   const handleForward = () => window.dispatchEvent(new CustomEvent('tct:webview-forward'))
   const isLoading = useBrowserStore((s) => !!activeTab && !!s.loadingTabs[activeTab.id])
   const handleReload = () => window.dispatchEvent(new CustomEvent(isLoading ? 'tct:webview-stop' : 'tct:webview-reload'))
-  const handleNewTab = () => void openNewTab()
   const topBarTabs = settings?.tabLayout === 'topbar'
 
 
@@ -768,18 +766,8 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
         )}
       </div>
 
-      {/* Right: Actions (Add New Tab, Tools Dropdown Menu) & Window Controls */}
+      {/* Right: Actions (Tools Dropdown Menu) & Window Controls */}
       <div className="flex items-center gap-1 app-no-drag shrink-0">
-        <button
-          onClick={handleNewTab}
-          className={`w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer ${
-            topBarTabs ? 'hidden' : ''
-          }`}
-          title={`New Tab (${modKey}+T)`}
-        >
-          <Plus className="w-3.5 h-3.5" />
-        </button>
-
         <PinnedExtensions />
         <PinnedHeaderTools />
 
