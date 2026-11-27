@@ -35,7 +35,7 @@ afterPack: build/fuses.cjs
 # at a domain the project does not own: whoever registers it could ship code to every user.
 publish:
   provider: github
-  owner: BUNCHHENG-CSE
+  owner: arzurlab
   repo: tct-orbit-browser
 
 # System-wide URL scheme registration
@@ -166,7 +166,7 @@ linux:
   executableName: tct-orbit
   # Links running windows to the menu entry (icon in the dock, also on Wayland)
   syncDesktopName: true
-  maintainer: TCT <BUNCHHENG-CSE@users.noreply.github.com>
+  maintainer: TCT <arzurlab@users.noreply.github.com>
   category: Network;WebBrowser;
   # Every size the Linux icon theme knows: a single 1024px icon is not found by menus
   icon: build/icons

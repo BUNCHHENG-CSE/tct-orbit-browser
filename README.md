@@ -30,7 +30,7 @@ A fast, clean, and modern web browser built for smooth navigation and distractio
 
 ## Install
 
-Download the file for your computer from the [latest release](https://github.com/BUNCHHENG-CSE/tct-orbit-browser/releases/latest). In the names below, `<version>` is the release number.
+Download the file for your computer from the [latest release](https://github.com/arzurlab/tct-orbit-browser/releases/latest). In the names below, `<version>` is the release number.
 
 | System | File | Notes |
 |---|---|---|

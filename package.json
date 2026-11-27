@@ -4,14 +4,14 @@
   "version": "0.1.11",
   "license": "GPL-3.0-only",
   "description": "TCT Orbit",
-  "homepage": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser",
+  "homepage": "https://github.com/arzurlab/tct-orbit-browser",
   "repository": {
     "type": "git",
-    "url": "https://github.com/BUNCHHENG-CSE/tct-orbit-browser.git"
+    "url": "https://github.com/arzurlab/tct-orbit-browser.git"
   },
   "main": "./out/main/index.js",
   "desktopName": "tct-orbit.desktop",
-  "author": "TCT <BUNCHHENG-CSE@users.noreply.github.com>",
+  "author": "TCT <arzurlab@users.noreply.github.com>",
   "engines": {
     "node": ">=20.0.0",
     "npm": ">=9.0.0"
