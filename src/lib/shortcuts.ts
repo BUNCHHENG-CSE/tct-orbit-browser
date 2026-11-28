@@ -43,5 +43,11 @@ export function currentKeymap(): Map<string, string> {
   return keymap
 }
 
+/** The current first combination of an action, e.g. "Ctrl+Shift+N" (for menus and tooltips) */
+export function shortcutLabel(id: string): string {
+  const combo = combosFor(id, useBrowserStore.getState().settings?.shortcuts)[0]
+  return combo ? displayCombo(combo, modKey).join('+') : ''
+}
+
 /** Settings is recording a new combination: keys must not trigger actions */
 export const shortcutRecording = { active: false }

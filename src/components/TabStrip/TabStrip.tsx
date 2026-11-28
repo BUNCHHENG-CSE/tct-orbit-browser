@@ -1,3 +1,4 @@
+import { shortcutLabel } from '@/lib/shortcuts'
 import React, { useEffect, useRef } from 'react'
 import {
   Plus,
@@ -427,7 +428,7 @@ export const TabStrip: React.FC = () => {
             </ContextMenuItem>
             <ContextMenuItem onClick={() => emit('tct:new-private-tab')} className={menuItem}>
               <EyeOff className="w-3.5 h-3.5 text-violet-500" /> {isPrivateWindow ? 'New tab' : 'New private window'}
-              <span className="ml-auto text-[10px] text-muted-foreground">Alt+Shift+N</span>
+              <span className="ml-auto text-[10px] text-muted-foreground">{shortcutLabel('new-private-tab')}</span>
             </ContextMenuItem>
           </ContextMenuContent>
         </ContextMenu>

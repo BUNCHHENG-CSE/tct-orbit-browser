@@ -1,3 +1,4 @@
+import { shortcutLabel } from '@/lib/shortcuts'
 import React, { useEffect, useState, useRef } from 'react'
 import {
   Minus,
@@ -453,7 +454,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
           <button
             onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
             className="w-7 h-7 flex items-center justify-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted active:scale-95 transition-colors outline-none focus:outline-none"
-            title={sidebarCollapsed ? `Expand Sidebar (${modKey}+S)` : `Collapse Sidebar (${modKey}+S)`}
+            title={`${sidebarCollapsed ? 'Expand' : 'Collapse'} Sidebar (${shortcutLabel('toggle-sidebar')})`}
           >
             {sidebarCollapsed ? <PanelLeft className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
           </button>
@@ -621,7 +622,7 @@ export const TitleBar: React.FC<TitleBarProps> = ({ spaceName = 'Personal', spac
                 e.stopPropagation()
                 window.dispatchEvent(new CustomEvent('tct:toggle-pip'))
               }}
-              title={`Picture-in-picture (${modKey}+Shift+P)`}
+              title={`Picture-in-picture (${shortcutLabel('toggle-pip')})`}
               className="p-1 mr-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors shrink-0"
             >
               <PictureInPicture2 className="w-3.5 h-3.5" />

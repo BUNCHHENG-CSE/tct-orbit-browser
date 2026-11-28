@@ -74,6 +74,7 @@ import { useMeetingStore } from '@/store/useMeetingStore'
 import { useSmartStore } from '@/store/useSmartStore'
 import { watchActivePage } from '@/lib/watchPage'
 import { modKey } from '@/lib/platform'
+import { shortcutLabel } from '@/lib/shortcuts'
 import { openNewTab } from '@/lib/startPage'
 import { useHeaderPins, type HeaderFeatureId } from '@/lib/headerPins'
 import { useExtensionsBar } from './ExtensionsPopover'
@@ -292,7 +293,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
         <MenuRow icon={Plus} iconCls="text-primary" label="New tab" kbd={`${modKey}+T`} onSelect={() => void openNewTab()} />
         {!isPrivateWindow && <MenuRow icon={AppWindow} label="New window" kbd={`${modKey}+N`} onSelect={() => void api.essentials.windows.open()} />}
         {!isPrivateWindow && (
-          <MenuRow icon={EyeOff} iconCls="text-violet-500" label="New private window" kbd="Alt+Shift+N" onSelect={() => emit('tct:new-private-tab')} />
+          <MenuRow icon={EyeOff} iconCls="text-violet-500" label="New private window" kbd={shortcutLabel('new-private-tab')} onSelect={() => emit('tct:new-private-tab')} />
         )}
         <Separator />
         <MenuRow
@@ -357,7 +358,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
             />
             <MenuRow icon={Activity} iconCls="text-emerald-500" pinId="task-manager" label="Task Manager" kbd="Shift+Esc" onSelect={() => setTaskManagerOpen(true)} />
             <MenuRow icon={Sparkles} iconCls="text-purple-400" pinId="zen" label="Zen Mode" kbd="F11" onSelect={() => setZenMode(!zenMode)} />
-            <MenuRow icon={FileText} pinId="notes" label="Space Notes" kbd={`${modKey}+Shift+N`} onSelect={() => emit('tct:toggle-notes')} />
+            <MenuRow icon={FileText} pinId="notes" label="Space Notes" kbd={shortcutLabel('toggle-notes')} onSelect={() => emit('tct:toggle-notes')} />
             {!isPrivateWindow && (
               <>
                 <Separator />
@@ -449,7 +450,7 @@ export const ToolsMenu: React.FC<ToolsMenuProps> = ({ hasActiveDownload = false 
               </DropdownMenuSub>
             )}
             <MenuRow icon={BookOpen} pinId="reader" label="Reader Mode" kbd="F9" onSelect={() => emit('tct:toggle-reader-mode')} />
-            <MenuRow icon={Tv2} pinId="pip" label="Picture-in-Picture" kbd={`${modKey}+Shift+P`} onSelect={() => emit('tct:toggle-pip')} />
+            <MenuRow icon={Tv2} pinId="pip" label="Picture-in-Picture" kbd={shortcutLabel('toggle-pip')} onSelect={() => emit('tct:toggle-pip')} />
             <Separator />
             <SubItem icon={ZoomIn} label="Zoom in" kbd={`${modKey}+=`} onSelect={() => runAction('zoom-in')} />
             <SubItem icon={ZoomOut} label="Zoom out" kbd={`${modKey}+-`} onSelect={() => runAction('zoom-out')} />

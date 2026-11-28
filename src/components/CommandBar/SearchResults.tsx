@@ -1,3 +1,4 @@
+import { shortcutLabel } from '@/lib/shortcuts'
 import React, { useState, useEffect } from 'react'
 import { Globe, Search, Layers, ExternalLink, ArrowRight, Plus, History, Printer, FileDown, Download, Star, Sparkles, Activity, Maximize2, ZoomIn, AppWindow, EyeOff, LayoutTemplate, ShieldCheck, Keyboard, RotateCcw, FileText, Columns2, Video, Home, FileSearch, Eye, AlarmClock, Wrench } from 'lucide-react'
 import { placeNewTab } from '@/lib/tabPlacement'
@@ -352,7 +353,7 @@ export const SearchResults: React.FC<SearchResultsProps> = ({
               <p className="text-[11px] text-muted-foreground">No history, wiped when closed</p>
             </div>
             <kbd className="text-[10px] font-mono text-muted-foreground px-1.5 py-0.5 rounded bg-muted border border-border">
-              Alt+Shift+N
+              {shortcutLabel('new-private-tab')}
             </kbd>
           </CommandItem>
 

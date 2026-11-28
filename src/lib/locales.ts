@@ -197,6 +197,7 @@ export const TRANSLATIONS: Record<string, Row> = {
   'Reset zoom': ['Restablecer zoom', 'Réinitialiser le zoom', 'Zoom zurücksetzen'],
   'Picture-in-picture video': ['Vídeo en imagen en imagen', "Vidéo en image dans l'image", 'Video als Bild im Bild'],
   Print: ['Imprimir', 'Imprimer', 'Drucken'],
+  'Save page as': ['Guardar página como', 'Enregistrer la page sous', 'Seite speichern unter'],
   'Bookmark page': ['Añadir a marcadores', 'Ajouter aux marque-pages', 'Lesezeichen setzen'],
   'Toggle sidebar': ['Alternar barra lateral', 'Afficher / masquer la barre latérale', 'Seitenleiste umschalten'],
   'Find next': ['Buscar siguiente', 'Rechercher le suivant', 'Weitersuchen'],

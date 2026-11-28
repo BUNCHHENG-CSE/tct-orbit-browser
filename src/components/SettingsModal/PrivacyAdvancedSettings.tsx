@@ -1,3 +1,4 @@
+import { shortcutLabel } from '@/lib/shortcuts'
 import React, { useEffect, useState } from 'react'
 import { Globe2, Loader2, ShieldAlert, ShieldCheck, Sparkles, EyeOff } from 'lucide-react'
 import { Switch } from '@/components/ui/switch'
@@ -206,7 +207,7 @@ export const PrivacyAdvancedSettings: React.FC<Props> = ({ prefs, togglePref, se
       <div className="p-2.5 rounded-lg bg-violet-500/5 border border-violet-500/20 flex items-start gap-2">
         <EyeOff className="w-4 h-4 text-violet-500 shrink-0 mt-0.5" />
         <p className="text-[11px] text-muted-foreground">
-          <span className="font-semibold text-foreground">Private tabs</span> (Alt+Shift+N, or right-click a link) use a
+          <span className="font-semibold text-foreground">Private tabs</span> ({shortcutLabel('new-private-tab')}, or right-click a link) use a
           separate in-memory session: no history, no saved cookies, and everything is wiped when the last private tab
           closes.
         </p>

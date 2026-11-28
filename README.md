@@ -161,11 +161,13 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 | `Cmd/Ctrl + W` | Close active tab |
 | `Cmd/Ctrl + Shift + T` | Reopen last closed tab |
 | `Cmd/Ctrl + L` | Focus address bar / Omnibox |
-| `Cmd/Ctrl + S` | Toggle sidebar rail |
+| `Cmd/Ctrl + Shift + ,` | Toggle sidebar |
+| `Cmd/Ctrl + S` | Save page as |
 | `Cmd/Ctrl + R` or `F5` | Reload active tab |
 | `Cmd/Ctrl + Shift + R` | Hard reload & clear cache |
 | `Cmd/Ctrl + N` | New window |
-| `Alt + Shift + N` | New private window |
+| `Cmd/Ctrl + Shift + N` | New private window |
+| `Cmd/Ctrl + Shift + M` | Space notes |
 | `Cmd/Ctrl + J` | Downloads |
 | `Cmd/Ctrl + Shift + S` | Web capture (copies the visible page, opens the editor) |
 | `Cmd/Ctrl + Shift + Y` | Ask this page |
@@ -174,6 +176,8 @@ Right-clicking inside any webpage or tab triggers a context-aware menu:
 | `Cmd/Ctrl + 1..8` | Switch directly to tab N |
 | `Cmd/Ctrl + 9` | Go to the last tab |
 | `Cmd/Ctrl + /` | All shortcuts (they can be changed in Settings) |
+
+As in Chrome, a web page gets keys first: if a site uses a shortcut itself (for example `Ctrl + K` in GitHub or Slack), the browser leaves it to the site. Tab and window keys (`Ctrl + T`, `Ctrl + W`, `Ctrl + N`, `Ctrl + Shift + N`, `Ctrl + Tab`, `Ctrl + 1..9`) always belong to the browser.
 
 ---
 

@@ -106,8 +106,45 @@ function removeYouTubeAds(): void {
   })
 }
 
+/**
+ * Keyboard shortcuts go to the page first (like Chrome). After the page handled a key press with a
+ * modifier, tell the browser whether the page used it (preventDefault), so the browser does not
+ * also act on it. The browser ignores this unless it saw the same key press itself.
+ */
+function reportKeys(): void {
+  window.addEventListener(
+    'keydown',
+    (e) => {
+      if (!e.isTrusted || !(e.ctrlKey || e.metaKey || e.altKey || /^F\d+$/.test(e.key) || e.key === 'Escape')) return
+      const signature = `${e.code}|${+e.ctrlKey}${+e.altKey}${+e.shiftKey}${+e.metaKey}`
+      // Runs after every listener of the page had its turn
+      setTimeout(() => ipcRenderer.send('page:key', signature, e.defaultPrevented), 0)
+    },
+    true
+  )
+}
+
+/** alert() and confirm() name the site that asks, like Chrome ("example.com says"). Top frame only: page scripts don't run in embedded frames. */
+function addDialogs(ask: (kind: string, message: string) => boolean): void {
+  const text = (message: unknown): string => (message === undefined ? '' : String(message))
+  const alert = function alert(message?: unknown): void {
+    ask('alert', text(message))
+  }
+  const confirm = function confirm(message?: unknown): boolean {
+    return ask('confirm', text(message))
+  }
+  for (const [name, value] of [['alert', alert], ['confirm', confirm]] as const) {
+    Object.defineProperty(window, name, { value, writable: true, enumerable: true, configurable: true })
+  }
+}
+
 try {
+  reportKeys()
   if (/^https?:$/.test(location.protocol)) {
+    contextBridge.executeInMainWorld({
+      func: addDialogs,
+      args: [(kind: string, message: string): boolean => ipcRenderer.sendSync('page:dialog', String(kind), String(message).slice(0, 5000)) === true]
+    })
     contextBridge.executeInMainWorld({ func: quietSilentPasskeys })
     contextBridge.executeInMainWorld({
       func: addPrompt,

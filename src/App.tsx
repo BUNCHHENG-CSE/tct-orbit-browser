@@ -48,6 +48,7 @@ import { FavoritesBar } from '@/components/Favorites/FavoritesBar'
 import { isStartPageUrl } from '@/lib/startPage'
 import { matchShortcut } from '@shared/shortcuts'
 import { currentKeymap, shortcutRecording } from '@/lib/shortcuts'
+import { webviewRegistry } from '@/lib/webviewRegistry'
 import { EXTRA_SPACE_ID, isExtraWindow, isMainWindow } from '@/lib/extraWindow'
 import { spaceForLink, switchToSpace } from '@/lib/routes'
 import { EssentialsRuntime } from '@/components/Essentials/EssentialsRuntime'
@@ -488,6 +489,16 @@ export const App: React.FC = () => {
         case 'toggle-notes':
           window.dispatchEvent(new CustomEvent('tct:toggle-notes'))
           break
+        case 'save-page': {
+          const tabId = useBrowserStore.getState().activeTabId
+          const el = webviewRegistry.get(tabId)
+          try {
+            if (el) void api.webview.saveAs(el.getWebContentsId())
+          } catch {
+            // The page is not loaded yet
+          }
+          break
+        }
         case 'print-page': {
           const store = useBrowserStore.getState()
           if (store.readerMode?.isOpen) {

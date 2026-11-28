@@ -1,3 +1,4 @@
+import { shortcutLabel } from '@/lib/shortcuts'
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import {
   FileText,
@@ -215,7 +216,7 @@ export const NotesDrawer: React.FC = () => {
     }
   }
 
-  // Keyboard shortcut listener for Ctrl+Shift+N
+  // Opened by its keyboard shortcut and the Tools menu
   useEffect(() => {
     const handleToggle = () => {
       setIsOpen(!useBrowserStore.getState().notesDrawerOpen)
@@ -383,7 +384,7 @@ export const NotesDrawer: React.FC = () => {
           <span>{charCount} chars</span>
         </div>
         <div>
-          <span>{modKey}+Shift+N</span>
+          <span>{shortcutLabel('toggle-notes')}</span>
         </div>
       </div>
     </aside>

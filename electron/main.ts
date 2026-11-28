@@ -24,7 +24,7 @@ import { PRIVATE_WINDOW_SPACE_ID, PRIVATE_START } from '../shared/privateWindow'
 import { queueLaunchUrl, isOpenableUrl } from './launchUrls'
 import { extensionManager } from './extensions'
 import { passwordManager } from './passwords'
-import { buildKeymap, matchShortcut } from '../shared/shortcuts'
+import { BROWSER_FIRST, buildKeymap, keySignature, matchShortcut } from '../shared/shortcuts'
 import { isExtraSpaceId, newExtraSpaceId } from '../shared/extraWindow'
 import { tabsOf } from './essentials/windowOf'
 import { updateService } from './essentials/updater'
@@ -451,22 +451,65 @@ function currentKeymap(): Map<string, string> {
   return keymap
 }
 
+/** A shortcut pressed in a page, waiting for the page to say whether it used the keys itself */
+interface PendingKey {
+  signature: string
+  run: () => void
+  timer: NodeJS.Timeout
+}
+const pendingKeys = new WeakMap<Electron.WebContents, PendingKey>()
+/** A page that never answers (busy, or no page script in that frame) is treated as not using the keys */
+const PAGE_KEY_WAIT_MS = 700
+
+// From pagePreload.ts, after the page handled the key press: only settles a press the browser saw itself
+ipcMain.on('page:key', (event, signature: unknown, used: unknown) => {
+  const pending = pendingKeys.get(event.sender)
+  if (!pending || pending.signature !== signature) return
+  clearTimeout(pending.timer)
+  pendingKeys.delete(event.sender)
+  if (used !== true) pending.run()
+})
+
 function attachKeyboardShortcuts(contents: Electron.WebContents, isWebview: boolean) {
   contents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || recordingShortcuts.has(contents.id)) return
     const action = matchShortcut(input, currentKeymap())
     if (!action) return
-    event.preventDefault()
 
-    if (isWebview) {
-      // These act on the page that has focus, which may be the other half of a split view
-      const nav = contents.navigationHistory
-      if (action === 'reload') return void reloadPage(contents)
-      if (action === 'hard-reload') return void reloadPage(contents, true)
-      if (action === 'back') return nav.canGoBack() ? nav.goBack() : undefined
-      if (action === 'forward') return nav.canGoForward() ? nav.goForward() : undefined
+    const run = (): void => {
+      if (contents.isDestroyed()) return
+      if (isWebview) {
+        // These act on the page that has focus, which may be the other half of a split view
+        const nav = contents.navigationHistory
+        if (action === 'reload') return void reloadPage(contents)
+        if (action === 'hard-reload') return void reloadPage(contents, true)
+        if (action === 'back') return nav.canGoBack() ? nav.goBack() : undefined
+        if (action === 'forward') return nav.canGoForward() ? nav.goForward() : undefined
+      }
+      windowFor(contents)?.webContents.send('keyboard-shortcut:trigger', action)
     }
-    windowFor(contents)?.webContents.send('keyboard-shortcut:trigger', action)
+
+    // The page script only runs in the top frame: keys typed inside an embedded frame can't be answered
+    const inTopFrame = !contents.focusedFrame || contents.focusedFrame.parent === null
+    const pageDecides =
+      isWebview && inTopFrame && !BROWSER_FIRST.has(action) && !contents.isCrashed() && /^https?:/i.test(contents.getURL())
+    if (!pageDecides) {
+      event.preventDefault()
+      run()
+      return
+    }
+    const previous = pendingKeys.get(contents)
+    if (previous) clearTimeout(previous.timer)
+    const pending: PendingKey = {
+      signature: keySignature(input.code, input.control, input.alt, input.shift, input.meta),
+      run,
+      timer: setTimeout(() => {
+        if (pendingKeys.get(contents) !== pending) return
+        pendingKeys.delete(contents)
+        run()
+      }, PAGE_KEY_WAIT_MS)
+    }
+    pendingKeys.set(contents, pending)
   })
 }
 

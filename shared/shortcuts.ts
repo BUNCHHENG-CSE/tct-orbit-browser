@@ -29,7 +29,7 @@ export type ShortcutOverrides = Record<string, string[]>
 export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'new-tab', group: 'Tabs & windows', label: 'New tab', defaults: ['Mod+T'] },
   { id: 'new-window', group: 'Tabs & windows', label: 'New window', defaults: ['Mod+N'] },
-  { id: 'new-private-tab', group: 'Tabs & windows', label: 'New private window', defaults: ['Alt+Shift+N'] },
+  { id: 'new-private-tab', group: 'Tabs & windows', label: 'New private window', defaults: ['Mod+Shift+N', 'Alt+Shift+N'] },
   { id: 'close-tab', group: 'Tabs & windows', label: 'Close tab', defaults: ['Mod+W', 'Mod+F4'] },
   { id: 'reopen-tab', group: 'Tabs & windows', label: 'Reopen closed tab', defaults: ['Mod+Shift+T'] },
   { id: 'tab-search', group: 'Tabs & windows', label: 'Search all open tabs', defaults: ['Mod+Shift+A'] },
@@ -52,17 +52,18 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'zoom-out', group: 'Page & media', label: 'Zoom out', defaults: ['Mod+-', 'Mod+Shift+-'] },
   { id: 'zoom-reset', group: 'Page & media', label: 'Reset zoom', defaults: ['Mod+0'] },
   { id: 'toggle-reader-mode', group: 'Page & media', label: 'Reader mode', defaults: ['F9', 'Mod+Alt+R'] },
-  { id: 'toggle-pip', group: 'Page & media', label: 'Picture-in-picture video', defaults: ['Mod+Shift+P', 'Mod+Alt+P'] },
+  { id: 'toggle-pip', group: 'Page & media', label: 'Picture-in-picture video', defaults: ['Mod+Alt+P'] },
   { id: 'print-page', group: 'Page & media', label: 'Print', defaults: ['Mod+P'] },
+  { id: 'save-page', group: 'Page & media', label: 'Save page as', defaults: ['Mod+S'] },
   { id: 'take-screenshot', group: 'Page & media', label: 'Web capture', defaults: ['Mod+Shift+S'] },
   { id: 'ask-page', group: 'Page & media', label: 'Ask this page', defaults: ['Mod+Shift+Y'] },
   { id: 'view-source', group: 'Page & media', label: 'View page source', defaults: ['Mod+U'] },
   { id: 'toggle-bookmark', group: 'Page & media', label: 'Bookmark page', defaults: ['Mod+D'] },
 
-  { id: 'toggle-sidebar', group: 'Browser', label: 'Toggle sidebar', defaults: ['Mod+S', 'Mod+B'] },
+  { id: 'toggle-sidebar', group: 'Browser', label: 'Toggle sidebar', defaults: ['Mod+Shift+,'] },
   { id: 'open-favorites', group: 'Browser', label: 'Favorites', defaults: ['Mod+Shift+O'] },
   { id: 'toggle-favorites-bar', group: 'Browser', label: 'Show / hide favorites bar', defaults: ['Mod+Shift+B'] },
-  { id: 'toggle-notes', group: 'Browser', label: 'Space notes', defaults: ['Mod+Shift+N'] },
+  { id: 'toggle-notes', group: 'Browser', label: 'Space notes', defaults: ['Mod+Shift+M'] },
   { id: 'open-history', group: 'Browser', label: 'History', defaults: ['Mod+H'] },
   { id: 'open-downloads', group: 'Browser', label: 'Downloads', defaults: ['Mod+J'] },
   { id: 'toggle-zen-mode', group: 'Browser', label: 'Zen mode', defaults: ['F11', 'Mod+Shift+F'] },
@@ -72,6 +73,28 @@ export const SHORTCUT_ACTIONS: ShortcutAction[] = [
   { id: 'open-settings', group: 'Browser', label: 'Settings', defaults: ['Mod+,'] },
   { id: 'shortcut-help', group: 'Browser', label: 'Keyboard shortcuts', defaults: ['Mod+/'] }
 ]
+
+/**
+ * Like Chrome: these always belong to the browser. Every other shortcut goes to the web page first,
+ * and the browser only acts when the page did not use the keys itself (Ctrl+K in GitHub or Slack,
+ * Ctrl+/ in Google Docs ...).
+ */
+export const BROWSER_FIRST = new Set([
+  'new-tab',
+  'new-window',
+  'new-private-tab',
+  'close-tab',
+  'reopen-tab',
+  'next-tab',
+  'prev-tab',
+  'switch-tab-last',
+  ...Array.from({ length: 8 }, (_, i) => `switch-tab-${i + 1}`)
+])
+
+/** Same text for a key press in the main process and in the page (see electron/pagePreload.ts) */
+export function keySignature(code: string, control: boolean, alt: boolean, shift: boolean, meta: boolean): string {
+  return `${code}|${+control}${+alt}${+shift}${+meta}`
+}
 
 const ACTION_IDS = new Set(SHORTCUT_ACTIONS.map((a) => a.id))
 

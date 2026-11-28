@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  BROWSER_FIRST,
   buildKeymap,
+  keySignature,
   comboFromInput,
   isAssignableCombo,
   matchShortcut,
@@ -45,9 +47,23 @@ describe('shortcuts', () => {
     [press('ArrowLeft', 'ArrowLeft', { alt: true }), 'back'],
     [press('\\', 'Backslash', { control: true }), 'toggle-split-view'],
     [press('N', 'KeyN', { alt: true, shift: true }), 'new-private-tab'],
+    [press('N', 'KeyN', { control: true, shift: true }), 'new-private-tab'],
+    [press('s', 'KeyS', { control: true }), 'save-page'],
+    [press('<', 'Comma', { control: true, shift: true }), 'toggle-sidebar'],
+    [press('M', 'KeyM', { control: true, shift: true }), 'toggle-notes'],
     [press('F5', 'F5', { control: true }), 'hard-reload'],
     [press('Escape', 'Escape', { shift: true }), 'open-task-manager']
   ])('%o -> %s', (input, action) => expect(matchShortcut(input, map)).toBe(action))
+
+  it('leaves text formatting to pages', () => {
+    for (const k of ['b', 'i']) expect(matchShortcut(press(k, 'Key' + k.toUpperCase(), { control: true }), map)).toBeNull()
+  })
+
+  it('keeps tab and window keys for the browser only', () => {
+    expect([...BROWSER_FIRST].every((id) => id.startsWith('switch-tab-') || SHORTCUT_ACTIONS.some((a) => a.id === id))).toBe(true)
+    expect(BROWSER_FIRST.has('open-command-bar')).toBe(false)
+    expect(keySignature('KeyK', true, false, false, false)).toBe('KeyK|1000')
+  })
 
   it('works on non-Latin layouts and leaves typing alone', () => {
     expect(matchShortcut(press('е', 'KeyT', { control: true }), map)).toBe('new-tab')
