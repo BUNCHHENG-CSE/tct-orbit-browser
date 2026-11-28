@@ -55,7 +55,7 @@ import {
   trackUserInput,
   hasRecentUserInput,
   openExternalFromPage,
-  SAFE_EXTERNAL_PROTOCOLS,
+  isExternalAppProtocol,
   DANGEROUS_PROTOCOLS
 } from './security'
 import { isAppUiUrl } from './appUi'
@@ -915,7 +915,7 @@ if (!gotSingleInstanceLock) {
             const protocol = parsed ? parsed.protocol : ''
 
             // External OS protocols -> delegate safely to shell.openExternal
-            if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) {
+            if (isExternalAppProtocol(protocol)) {
               openExternalFromPage(contents, rawUrl)
               return { action: 'deny' }
             }

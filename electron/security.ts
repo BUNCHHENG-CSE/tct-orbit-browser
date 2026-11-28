@@ -508,7 +508,10 @@ async function askUser(contents: WebContents, message: string, detail: string, c
   }
 }
 
-/** Link to another app (mailto:, zoommtg: ...): known schemes only, and only if the user wants it */
+/**
+ * Link to another app. Like Chrome: well-known apps open right after a click; any other app, or a
+ * link the page opens on its own, asks first. Dangerous schemes never open.
+ */
 async function allowExternalUrl(contents: WebContents | null, rawUrl: string): Promise<boolean> {
   let url: URL
   try {
@@ -516,11 +519,16 @@ async function allowExternalUrl(contents: WebContents | null, rawUrl: string): P
   } catch {
     return false
   }
-  if (!SAFE_EXTERNAL_PROTOCOLS.has(url.protocol) || rawUrl.length > 8192) return false
+  if (!isExternalAppProtocol(url.protocol) || rawUrl.length > 8192) return false
   if (!contents || contents.isDestroyed()) return false
-  if (hasRecentUserInput(contents)) return true
-  // The page did this on its own (no click): ask first
-  return askUser(contents, 'Open another app?', `${contents.getURL().slice(0, 200)}\nwants to open:\n${rawUrl.slice(0, 300)}`, 'Open')
+  if (SAFE_EXTERNAL_PROTOCOLS.has(url.protocol) && hasRecentUserInput(contents)) return true
+  let site = 'This page'
+  try {
+    site = new URL(contents.getURL()).host || site
+  } catch {}
+  const app = APP_NAMES[url.protocol] ?? `the app for "${url.protocol.slice(0, -1)}" links`
+  return askUser(contents, `Open ${app}?`, `${site} wants to open:
+${rawUrl.slice(0, 300)}`, 'Open')
 }
 
 export function openExternalFromPage(contents: WebContents, rawUrl: string): void {
@@ -663,16 +671,65 @@ export const DANGEROUS_PROTOCOLS = new Set([
   'cmd:',
   'powershell:',
   'ms-appinstaller:',
-  'vss:'
+  'vss:',
+  'shell:',
+  'hcp:',
+  'its:',
+  'mk:',
+  'res:'
 ])
 
+/** Schemes the browser opens itself, never handed to another app */
+const BROWSER_PROTOCOLS = new Set([
+  'http:', 'https:', 'about:', 'blob:', 'data:', 'chrome:', 'chrome-extension:', 'devtools:', 'view-source:',
+  'filesystem:', 'ws:', 'wss:', 'ftp:', 'orbit:'
+])
+
+/**
+ * A link that belongs to another installed app (tg:, whatsapp:, mailto: ...). Windows' own ms-*
+ * links are excluded: several of them have been used to attack computers.
+ */
+export function isExternalAppProtocol(protocol: string): boolean {
+  return (
+    /^[a-z][a-z0-9+.-]{0,30}:$/.test(protocol) &&
+    !BROWSER_PROTOCOLS.has(protocol) &&
+    !DANGEROUS_PROTOCOLS.has(protocol) &&
+    !protocol.startsWith('ms-')
+  )
+}
+
+/** Well-known app names for the question "Open Telegram?" */
+const APP_NAMES: Record<string, string> = {
+  'tg:': 'Telegram',
+  'whatsapp:': 'WhatsApp',
+  'viber:': 'Viber',
+  'msteams:': 'Microsoft Teams',
+  'spotify:': 'Spotify',
+  'skype:': 'Skype',
+  'zoommtg:': 'Zoom',
+  'zoomus:': 'Zoom',
+  'slack:': 'Slack',
+  'discord:': 'Discord',
+  'mailto:': 'your email app',
+  'tel:': 'your phone app',
+  'magnet:': 'your torrent app'
+}
+
+/** Opened right after the user clicks, without a question */
 export const SAFE_EXTERNAL_PROTOCOLS = new Set([
   'mailto:',
   'tel:',
   'magnet:',
   'slack:',
   'discord:',
-  'zoommtg:'
+  'zoommtg:',
+  'zoomus:',
+  'tg:',
+  'whatsapp:',
+  'viber:',
+  'msteams:',
+  'spotify:',
+  'skype:'
 ])
 
 /**
@@ -768,8 +825,8 @@ export function setupWebContentsSecurity(contents: WebContents, mainWindow?: Bro
       const parsed = new URL(rawUrl)
       const protocol = parsed.protocol
 
-      // Safe OS external protocols
-      if (SAFE_EXTERNAL_PROTOCOLS.has(protocol)) {
+      // Links to other apps
+      if (isExternalAppProtocol(protocol)) {
         openExternalFromPage(contents, rawUrl)
         return { action: 'deny' }
       }
